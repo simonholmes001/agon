@@ -1,0 +1,11 @@
+#!/bin/sh
+
+echo "🧪 Running frontend tests before commit..."
+cd frontend && npm run test
+
+if [ $? -ne 0 ]; then
+  echo "❌ Tests failed. Commit aborted."
+  exit 1
+fi
+
+echo "✅ All tests passed."
