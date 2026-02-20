@@ -15,6 +15,8 @@ applyTo: '**'
 
 **Stack:** Next.js frontend · ASP.NET Core (.NET) backend · Microsoft Agent Framework · PostgreSQL + pgvector + Redis + Blob storage · SignalR
 
+**Task backlog:** See `backlog.instructions.md` — it is auto-injected into every session. Update it as tasks are completed or added.
+
 ---
 
 ## Engineering Principles (Non-Negotiable)

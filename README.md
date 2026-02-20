@@ -6,8 +6,8 @@
 [![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-v4-06B6D4?style=flat-square&logo=tailwindcss&logoColor=fff)](https://tailwindcss.com)
 [![.NET](https://img.shields.io/badge/.NET-9-512BD4?style=flat-square&logo=dotnet&logoColor=fff)](https://dotnet.microsoft.com)
 [![Vitest](https://img.shields.io/badge/Tested_with-Vitest-6E9F18?style=flat-square&logo=vitest&logoColor=fff)](https://vitest.dev)
-[![Tests](https://img.shields.io/badge/Tests-63_passing-brightgreen?style=flat-square)]()
-[![Coverage](https://img.shields.io/badge/Coverage-79%25_lines-yellow?style=flat-square)]()
+[![Tests](https://img.shields.io/badge/Tests-127_passing-brightgreen?style=flat-square)]()
+[![Coverage](https://img.shields.io/badge/Coverage-87%25_lines-green?style=flat-square)]()
 [![TDD](https://img.shields.io/badge/Methodology-TDD-red?style=flat-square)]()
 [![Licence](https://img.shields.io/badge/Licence-Private-lightgrey?style=flat-square)]()
 
@@ -180,14 +180,7 @@ npm run test:watch
 npx vitest run --coverage
 ```
 
-**Current coverage (63 tests across 7 test files):**
-
-| Area | Statements | Branches | Functions | Lines |
-|---|---|---|---|---|
-| `lib/` | 100% | 100% | 100% | 100% |
-| `components/landing/` | 100% | 100% | 100% | 100% |
-| `components/session/` | 90% | 79% | 90% | 93% |
-| **Overall** | **78%** | **76%** | **70%** | **79%** |
+**Current coverage** — the Tests and Coverage badges at the top of this README are updated automatically by CI on every push.
 
 ---
 

@@ -11,6 +11,11 @@ export default defineConfig({
     setupFiles: ["./vitest.setup.ts"],
     css: false,
     include: ["**/*.test.{ts,tsx}"],
+    coverage: {
+      provider: "v8",
+      reporter: ["text", "json-summary", "lcov"],
+      reportsDirectory: "./coverage",
+    },
   },
   resolve: {
     alias: {
