@@ -3,23 +3,20 @@ import { render, screen } from "@/lib/test-utils";
 import HeroSection from "@/components/landing/hero-section";
 
 describe("HeroSection", () => {
-  it("renders the application name", () => {
+  it("renders 'Agon' as part of the main headline", () => {
     render(<HeroSection />);
-    expect(screen.getByText("Agon")).toBeInTheDocument();
+    const heading = screen.getByRole("heading", { level: 1 });
+    expect(heading).toHaveTextContent("Agon");
   });
 
-  it("renders the main headline", () => {
+  it("renders the tagline 'Stress-test your ideas before reality does' in the main headline", () => {
     render(<HeroSection />);
-    expect(screen.getByText(/stress-test your ideas/i)).toBeInTheDocument();
+    const heading = screen.getByRole("heading", { level: 1 });
+    expect(heading).toHaveTextContent(/stress-test your ideas/i);
+    expect(heading).toHaveTextContent(/before reality does/i);
   });
 
-  it("renders the subtitle with 'before reality does'", () => {
-    render(<HeroSection />);
-    const subtitle = screen.getAllByText(/before reality does/i);
-    expect(subtitle.length).toBeGreaterThanOrEqual(1);
-  });
-
-  it("renders the subtitle with product description", () => {
+  it("renders the product description paragraph", () => {
     render(<HeroSection />);
     expect(
       screen.getByText(/council of specialist ai agents/i),
@@ -48,8 +45,8 @@ describe("HeroSection", () => {
     expect(screen.getByText("Decision-Grade Output")).toBeInTheDocument();
   });
 
-  it("displays the 'Living Strategy Room' pill", () => {
+  it("does not render a 'Living Strategy Room' pill", () => {
     render(<HeroSection />);
-    expect(screen.getByText("Living Strategy Room")).toBeInTheDocument();
+    expect(screen.queryByText("Living Strategy Room")).not.toBeInTheDocument();
   });
 });

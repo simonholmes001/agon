@@ -66,43 +66,25 @@ export default function HeroSection() {
           visible: { transition: { staggerChildren: 0.1 } },
         }}
       >
-        <motion.div
-          variants={fadeUp}
-          custom={0}
-          className="mb-6 inline-flex items-center gap-2 rounded-full border border-border/50 bg-muted/50 px-4 py-1.5 text-sm text-muted-foreground backdrop-blur-sm"
-        >
-          <span className="relative flex h-2 w-2">
-            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
-            <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
-          </span>{" "}
-          Living Strategy Room
-        </motion.div>
-
         <motion.h1
           variants={fadeUp}
-          custom={1}
+          custom={0}
           className="text-4xl font-bold leading-tight tracking-tight sm:text-5xl md:text-6xl lg:text-7xl"
         >
           <span className="bg-gradient-to-r from-agent-socratic via-agent-product to-agent-synthesis bg-clip-text text-transparent">
             Agon
           </span>
+          <br />
+          Stress-test your ideas
+          <br />
+          <span className="bg-gradient-to-r from-agent-socratic via-agent-product to-agent-synthesis bg-clip-text text-transparent">
+            before reality does
+          </span>
         </motion.h1>
 
         <motion.p
           variants={fadeUp}
-          custom={2}
-          className="mt-4 text-2xl font-medium leading-snug tracking-tight sm:text-3xl md:text-4xl"
-        >
-          Stress-test your ideas
-          <br />
-          <span className="text-muted-foreground">
-            before reality does
-          </span>
-        </motion.p>
-
-        <motion.p
-          variants={fadeUp}
-          custom={3}
+          custom={1}
           className="mt-6 max-w-xl text-lg text-muted-foreground sm:text-xl"
         >
           A council of specialist AI agents debates, challenges, and refines
@@ -112,7 +94,7 @@ export default function HeroSection() {
 
         <motion.div
           variants={fadeUp}
-          custom={4}
+          custom={2}
           className="mt-10 flex flex-col gap-4 sm:flex-row"
         >
           <Button asChild size="lg" className="gap-2 text-base">
