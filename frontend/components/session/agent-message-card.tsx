@@ -1,6 +1,8 @@
 "use client";
 
 import { memo } from "react";
+import Markdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { AlertTriangle, MoreHorizontal } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -96,24 +98,7 @@ function AgentMessageCardInner({
 
       {/* Content */}
       <div className="prose prose-sm prose-neutral dark:prose-invert max-w-none text-sm leading-relaxed">
-        {content.split("\n").map((line, i) => {
-          if (!line.trim()) return <br key={i} />;
-          if (line.startsWith("**") && line.endsWith("**")) {
-            return (
-              <p key={i} className="font-semibold">
-                {line.slice(2, -2)}
-              </p>
-            );
-          }
-          if (line.startsWith("1. ") || line.startsWith("2. ") || line.startsWith("3. ")) {
-            return (
-              <p key={i} className="ml-1">
-                {line}
-              </p>
-            );
-          }
-          return <p key={i}>{line}</p>;
-        })}
+        <Markdown remarkPlugins={[remarkGfm]}>{content}</Markdown>
       </div>
 
       {/* Streaming indicator */}

@@ -8,3 +8,6 @@ class ResizeObserverStub {
 }
 
 globalThis.ResizeObserver = globalThis.ResizeObserver ?? ResizeObserverStub;
+
+// scrollIntoView is not implemented in jsdom
+Element.prototype.scrollIntoView = Element.prototype.scrollIntoView ?? (() => {});

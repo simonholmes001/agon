@@ -15,6 +15,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import ThemeToggle from "@/components/theme-toggle";
 import { PHASE_LABELS, getFrictionLabel } from "@/lib/constants";
 import type { SessionPhase } from "@/types";
 
@@ -83,6 +84,8 @@ export default function SessionHeader({
             {frictionLevel}
           </span>
         </div>
+
+        <ThemeToggle />
 
         <Button
           variant={truthMapOpen ? "secondary" : "ghost"}

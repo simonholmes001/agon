@@ -27,6 +27,8 @@ These principles apply to **all code** in the project — backend, frontend, tes
 
 3. **Test-Driven Development (TDD).** Write tests first, then implement. The cycle is Red → Green → Refactor — always. No production code without a failing test that motivated it. Tests are first-class citizens, not afterthoughts.
 
+4. **File naming conventions.** All YAML files must use the `.yaml` extension, never `.yml`.
+
 ---
 
 ## Architectural Hard Rules

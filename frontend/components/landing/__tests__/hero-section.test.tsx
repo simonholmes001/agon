@@ -3,9 +3,20 @@ import { render, screen } from "@/lib/test-utils";
 import HeroSection from "@/components/landing/hero-section";
 
 describe("HeroSection", () => {
+  it("renders the application name", () => {
+    render(<HeroSection />);
+    expect(screen.getByText("Agon")).toBeInTheDocument();
+  });
+
   it("renders the main headline", () => {
     render(<HeroSection />);
     expect(screen.getByText(/stress-test your ideas/i)).toBeInTheDocument();
+  });
+
+  it("renders the subtitle with 'before reality does'", () => {
+    render(<HeroSection />);
+    const subtitle = screen.getAllByText(/before reality does/i);
+    expect(subtitle.length).toBeGreaterThanOrEqual(1);
   });
 
   it("renders the subtitle with product description", () => {

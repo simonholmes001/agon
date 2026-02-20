@@ -74,7 +74,7 @@ export default function HeroSection() {
           <span className="relative flex h-2 w-2">
             <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
             <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
-          </span>
+          </span>{" "}
           Living Strategy Room
         </motion.div>
 
@@ -83,16 +83,26 @@ export default function HeroSection() {
           custom={1}
           className="text-4xl font-bold leading-tight tracking-tight sm:text-5xl md:text-6xl lg:text-7xl"
         >
-          Stress-test your ideas
-          <br />
           <span className="bg-gradient-to-r from-agent-socratic via-agent-product to-agent-synthesis bg-clip-text text-transparent">
-            before reality does
+            Agon
           </span>
         </motion.h1>
 
         <motion.p
           variants={fadeUp}
           custom={2}
+          className="mt-4 text-2xl font-medium leading-snug tracking-tight sm:text-3xl md:text-4xl"
+        >
+          Stress-test your ideas
+          <br />
+          <span className="text-muted-foreground">
+            before reality does
+          </span>
+        </motion.p>
+
+        <motion.p
+          variants={fadeUp}
+          custom={3}
           className="mt-6 max-w-xl text-lg text-muted-foreground sm:text-xl"
         >
           A council of specialist AI agents debates, challenges, and refines
@@ -102,7 +112,7 @@ export default function HeroSection() {
 
         <motion.div
           variants={fadeUp}
-          custom={3}
+          custom={4}
           className="mt-10 flex flex-col gap-4 sm:flex-row"
         >
           <Button asChild size="lg" className="gap-2 text-base">

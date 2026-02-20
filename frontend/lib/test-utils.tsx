@@ -1,9 +1,14 @@
 import React from "react";
 import { render, type RenderOptions } from "@testing-library/react";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import ThemeProvider from "@/components/theme-provider";
 
 function AllProviders({ children }: Readonly<{ children: React.ReactNode }>) {
-  return <TooltipProvider>{children}</TooltipProvider>;
+  return (
+    <ThemeProvider>
+      <TooltipProvider>{children}</TooltipProvider>
+    </ThemeProvider>
+  );
 }
 
 function renderWithProviders(

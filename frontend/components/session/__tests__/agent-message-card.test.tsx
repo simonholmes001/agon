@@ -88,4 +88,53 @@ describe("AgentMessageCard", () => {
       unmount();
     }
   });
+
+  it("renders Markdown bold text as HTML strong elements", () => {
+    const { container } = render(
+      <AgentMessageCard
+        {...defaultProps}
+        content="This has **bold text** in it."
+      />,
+    );
+    const strong = container.querySelector("strong");
+    expect(strong).toBeInTheDocument();
+    expect(strong).toHaveTextContent("bold text");
+  });
+
+  it("does not render raw Markdown symbols in the output", () => {
+    render(
+      <AgentMessageCard
+        {...defaultProps}
+        content="**Here are my questions:**"
+      />,
+    );
+    expect(screen.getByText("Here are my questions:")).toBeInTheDocument();
+    expect(screen.queryByText(/\*\*/)).not.toBeInTheDocument();
+  });
+
+  it("renders Markdown ordered lists as HTML list elements", () => {
+    const { container } = render(
+      <AgentMessageCard
+        {...defaultProps}
+        content={"1. First item\n2. Second item\n3. Third item"}
+      />,
+    );
+    const listItems = container.querySelectorAll("li");
+    expect(listItems).toHaveLength(3);
+    expect(listItems[0]).toHaveTextContent("First item");
+    expect(listItems[1]).toHaveTextContent("Second item");
+    expect(listItems[2]).toHaveTextContent("Third item");
+  });
+
+  it("renders inline Markdown within list items", () => {
+    const { container } = render(
+      <AgentMessageCard
+        {...defaultProps}
+        content={"1. **Who is your user?** Some details here."}
+      />,
+    );
+    const strong = container.querySelector("li strong");
+    expect(strong).toBeInTheDocument();
+    expect(strong).toHaveTextContent("Who is your user?");
+  });
 });
