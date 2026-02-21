@@ -31,6 +31,11 @@ These principles apply to **all code** in the project — backend, frontend, tes
 
 4. **File naming conventions.** All YAML files must use the `.yaml` extension, never `.yml`.
 
+5. **Logging and Error Handling.** All code must include sufficient logging for production debugging. Never swallow errors silently. Specific rules:
+   - **Frontend:** Use the structured logger (`lib/logger.ts`), never bare `console.*` calls. Every page route must have a Next.js `error.tsx` error boundary. The root layout must have `global-error.tsx`. User-facing error messages must be friendly — never expose stack traces or raw errors. Log context (component name, action, relevant IDs) with every log call.
+   - **Backend (.NET):** Use `ILogger<T>` via dependency injection — never `Console.Write*`. Log structural events only (session_id, round, agent_id, patch_count, latency). Never log raw user content, idea text, or agent responses in plaintext (see Security and Privacy Rules). All API endpoints must return appropriate HTTP error codes with problem details. Unhandled exceptions must be caught by global middleware and logged with correlation IDs.
+   - **Both:** Every `catch` block must log the error before handling it. Every async boundary (API calls, SignalR connections, provider calls) must have explicit error handling with retry or graceful degradation.
+
 ---
 
 ## Architectural Hard Rules
@@ -97,6 +102,8 @@ Always consult the relevant provider documentation when building or modifying ag
 - Pending Revalidation entities (after HITL constraint change) must be highlighted until resolved.
 - Keep components under 250–300 lines. Refactor aggressively. No god components.
 - Do not use `localStorage` or `sessionStorage` for session state. Use server state via SWR or React Query with the REST API.
+- **Error boundaries:** Every route segment (`app/`, `app/session/[id]/`, `app/session/new/`) must have an `error.tsx`. The root must also have `global-error.tsx` and `not-found.tsx`.
+- **Logging:** Use the structured logger (`lib/logger.ts`) — never bare `console.log/warn/error`. The logger is environment-aware (silent in tests, structured in dev/prod) and includes component context.
 
 ---
 

@@ -3,7 +3,10 @@
 import { useState, useRef } from "react";
 import { Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { createLogger } from "@/lib/logger";
 import type { SessionPhase } from "@/types";
+
+const logger = createLogger("MessageComposer");
 
 interface MessageComposerProps {
   readonly sessionId: string;
@@ -40,8 +43,8 @@ export default function MessageComposer({ sessionId, phase }: MessageComposerPro
     e.preventDefault();
     if (!message.trim() || disabled) return;
 
-    // TODO: POST /sessions/{sessionId}/messages
-    console.log("Send message:", { sessionId, message });
+    // Placeholder until backend POST /sessions/{sessionId}/messages is available
+    logger.info("message sent", { sessionId, length: message.trim().length });
     setMessage("");
 
     if (textareaRef.current) {

@@ -54,8 +54,11 @@ _(Nothing currently in progress)_
 - [x] Landing page with gradient branding + theme toggle
 - [x] Session UI components (thread view, agent message cards, message composer, session header, Truth Map drawer)
 - [x] Light/dark theme (ThemeProvider + ThemeToggle)
-- [x] Frontend test suite — 127 tests, 14 files, 87% line coverage
+- [x] Frontend test suite — 154 tests, 19 files
 - [x] CI pipeline — GitHub Actions (frontend-tests + backend-tests with .NET auto-detect)
 - [x] Pre-commit hook (frontend + backend, skips if no .NET project)
 - [x] Automatic coverage badges (frontend only — backend pending)
+- [x] Structured logger (`lib/logger.ts`) — environment-aware, component-scoped, never exposes raw user content
+- [x] Error boundaries — `global-error.tsx`, `error.tsx`, `not-found.tsx`, `session/[id]/error.tsx`
+- [x] Logging & error handling engineering principle (#5) added to copilot instructions
 - [x] File naming convention — `.yaml` not `.yml`
