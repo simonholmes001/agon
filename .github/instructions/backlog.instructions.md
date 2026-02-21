@@ -33,6 +33,7 @@ _(Nothing currently in progress)_
 ### Frontend
 
 - [ ] **Connect to real backend** — Replace demo/mock data with REST API + SignalR.
+- [ ] **SignalR sequencing** — Keep SignalR for the following branch (or add after REST wiring is stable).
 - [ ] **SignalR client integration** — Stream agent tokens, patches, convergence in real time.
 - [ ] **Session Timeline Scrubber (Phase 1.5)** — Snapshot access, Pause-and-Replay forks.
 - [ ] **Map View (Phase 1.5, desktop)** — Claim graph visualisation.

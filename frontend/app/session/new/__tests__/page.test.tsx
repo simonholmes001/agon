@@ -3,6 +3,7 @@ import { render, screen, waitFor } from "@/lib/test-utils";
 import userEvent from "@testing-library/user-event";
 
 const pushMock = vi.fn();
+const fetchMock = vi.fn();
 
 // Mock next/navigation before importing the component
 vi.mock("next/navigation", () => ({
@@ -21,11 +22,12 @@ import NewSessionPage from "@/app/session/new/page";
 describe("NewSessionPage", () => {
   beforeEach(() => {
     pushMock.mockClear();
-    vi.useFakeTimers({ shouldAdvanceTime: true });
+    fetchMock.mockReset();
+    vi.stubGlobal("fetch", fetchMock);
   });
 
   afterEach(() => {
-    vi.useRealTimers();
+    vi.unstubAllGlobals();
   });
 
   // ── Rendering ───────────────────────────────────────────────────
@@ -116,9 +118,32 @@ describe("NewSessionPage", () => {
     await userEvent.click(button);
 
     expect(pushMock).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("shows a submitting state after clicking Launch Council", async () => {
+    fetchMock
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            sessionId: "session-1",
+            phase: "Clarification",
+            frictionLevel: 50,
+          }),
+          { status: 201, headers: { "content-type": "application/json" } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            sessionId: "session-1",
+            phase: "DebateRound1",
+            frictionLevel: 50,
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      );
+
     render(<NewSessionPage />);
     const textarea = screen.getByPlaceholderText(/mobile app/i);
     await userEvent.type(textarea, "A marketplace for handmade crafts targeting artisan sellers");
@@ -132,7 +157,29 @@ describe("NewSessionPage", () => {
     expect(screen.getByRole("button", { name: /starting session/i })).toBeDisabled();
   });
 
-  it("navigates to the demo session after submission", async () => {
+  it("calls backend create/start endpoints and navigates to the created session", async () => {
+    fetchMock
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            sessionId: "session-42",
+            phase: "Clarification",
+            frictionLevel: 50,
+          }),
+          { status: 201, headers: { "content-type": "application/json" } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            sessionId: "session-42",
+            phase: "DebateRound1",
+            frictionLevel: 50,
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      );
+
     render(<NewSessionPage />);
     const textarea = screen.getByPlaceholderText(/mobile app/i);
     await userEvent.type(textarea, "A marketplace for handmade crafts targeting artisan sellers");
@@ -140,11 +187,23 @@ describe("NewSessionPage", () => {
     const button = screen.getByRole("button", { name: /launch council/i });
     await userEvent.click(button);
 
-    // The setTimeout fires after 800ms
-    vi.advanceTimersByTime(800);
-
     await waitFor(() => {
-      expect(pushMock).toHaveBeenCalledWith("/session/demo");
+      expect(fetchMock).toHaveBeenNthCalledWith(
+        1,
+        "/sessions",
+        expect.objectContaining({
+          method: "POST",
+          headers: expect.objectContaining({
+            "Content-Type": "application/json",
+          }),
+        }),
+      );
+      expect(fetchMock).toHaveBeenNthCalledWith(
+        2,
+        "/sessions/session-42/start",
+        expect.objectContaining({ method: "POST" }),
+      );
+      expect(pushMock).toHaveBeenCalledWith("/session/session-42");
     });
   });
 
@@ -159,7 +218,7 @@ describe("NewSessionPage", () => {
     expect(button).toBeDisabled();
     await userEvent.click(button);
 
-    vi.advanceTimersByTime(1000);
     expect(pushMock).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
