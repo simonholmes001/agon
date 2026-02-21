@@ -6,7 +6,7 @@
 [![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-v4-06B6D4?style=flat-square&logo=tailwindcss&logoColor=fff)](https://tailwindcss.com)
 [![.NET](https://img.shields.io/badge/.NET-9-512BD4?style=flat-square&logo=dotnet&logoColor=fff)](https://dotnet.microsoft.com)
 [![Vitest](https://img.shields.io/badge/Tested_with-Vitest-6E9F18?style=flat-square&logo=vitest&logoColor=fff)](https://vitest.dev)
-[![Tests](https://img.shields.io/badge/Tests-127_passing-brightgreen?style=flat-square)]()
+[![Tests](https://img.shields.io/badge/Tests-154_passing-brightgreen?style=flat-square)]()
 [![Coverage](https://img.shields.io/badge/Coverage-87%25_lines-green?style=flat-square)]()
 [![TDD](https://img.shields.io/badge/Methodology-TDD-red?style=flat-square)]()
 [![Licence](https://img.shields.io/badge/Licence-Private-lightgrey?style=flat-square)]()
@@ -139,6 +139,9 @@ agon/
 # Clone the repository
 git clone https://github.com/simonholmes001/agon.git
 cd agon
+
+# Enable pre-commit hooks
+git config core.hooksPath .githooks
 
 # Install frontend dependencies
 cd frontend
