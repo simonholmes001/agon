@@ -61,7 +61,9 @@ jobs:
         run: |
           OUTPUT=$(dotnet test --no-build --configuration Release --verbosity normal --collect:"XPlat Code Coverage" 2>&1)
           echo "$OUTPUT"
-          BACKEND_COUNT=$(echo "$OUTPUT" | grep -oE 'Passed:\s+[0-9]+' | grep -oE '[0-9]+' | head -1 || echo "0")
+          BACKEND_COUNT=$(echo "$OUTPUT" \
+            | sed -nE 's/.*Passed:[[:space:]]+([0-9]+).*/\1/p' \
+            | awk '{sum += $1} END {print sum + 0}')
           echo "test_count=${BACKEND_COUNT}" >> "$GITHUB_OUTPUT"
         working-directory: backend
 

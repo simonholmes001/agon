@@ -7,7 +7,7 @@
 [![.NET](https://img.shields.io/badge/.NET-9-512BD4?style=flat-square&logo=dotnet&logoColor=fff)](https://dotnet.microsoft.com)
 [![Vitest](https://img.shields.io/badge/Tested_with-Vitest-6E9F18?style=flat-square&logo=vitest&logoColor=fff)](https://vitest.dev)
 [![xUnit](https://img.shields.io/badge/Tested_with-xUnit-512BD4?style=flat-square&logo=dotnet&logoColor=fff)](https://xunit.net)
-[![Tests](https://img.shields.io/badge/Tests-296_passing-brightgreen?style=flat-square)]()
+[![Tests](https://img.shields.io/badge/Tests-312_passing-brightgreen?style=flat-square)]()
 [![Coverage](https://img.shields.io/badge/Coverage-87%25_lines-green?style=flat-square)]()
 [![TDD](https://img.shields.io/badge/Methodology-TDD-red?style=flat-square)]()
 [![Licence](https://img.shields.io/badge/Licence-Private-lightgrey?style=flat-square)]()
@@ -159,21 +159,21 @@ agon/
 │   │   │   ├── Sessions/           # SessionPhase, RoundPolicy, ConvergenceEvaluator
 │   │   │   ├── Engines/            # ConfidenceDecayEngine, ChangeImpactCalculator
 │   │   │   └── Snapshots/          # SessionSnapshot, ForkRequest
-│   │   ├── Agon.Application/       # (planned) Orchestrator, AgentRunner, interfaces
-│   │   │   ├── Orchestration/      # (planned) Orchestrator (state machine), AgentRunner
-│   │   │   ├── Interfaces/         # (planned) ICouncilAgent, ITruthMapRepository, etc.
-│   │   │   └── Services/           # (planned) SessionService, SnapshotService
-│   │   ├── Agon.Infrastructure/    # (planned) MAF agents, DB, SignalR, blob storage
-│   │   │   ├── Agents/             # (planned) MafCouncilAgent, FakeCouncilAgent, ResponseParser
-│   │   │   ├── Persistence/        # (planned) PostgreSQL, Redis, Blob
-│   │   │   └── SignalR/            # (planned) DebateHub (/hubs/debate)
-│   │   └── Agon.Api/               # (planned) Thin host — routing + DI
-│   │       ├── Controllers/        # (planned) REST endpoints
-│   │       └── Middleware/         # (planned) GlobalExceptionMiddleware
+│   │   ├── Agon.Application/       # Orchestration use-cases + interfaces
+│   │   │   ├── Orchestration/      # Orchestrator (deterministic transitions), AgentRunner
+│   │   │   ├── Interfaces/         # ICouncilAgent, ITruthMapRepository, ISessionRepository
+│   │   │   └── Services/           # SessionService, SnapshotService
+│   │   ├── Agon.Infrastructure/    # In-memory adapters + fake agents (vertical slice)
+│   │   │   ├── Agents/             # FakeCouncilAgent
+│   │   │   ├── Persistence/        # InMemorySessionRepository, InMemoryTruthMapRepository
+│   │   │   └── SignalR/            # Event broadcaster abstraction impls
+│   │   └── Agon.Api/               # Thin host — routing + DI
+│   │       └── Program.cs          # Core session endpoints
 │   └── tests/
 │       ├── Agon.Domain.Tests/       # Unit tests (TDD)
-│       ├── Agon.Application.Tests/  # (planned) Orchestration tests
-│       └── Agon.Infrastructure.Tests/ # (planned) Integration tests
+│       ├── Agon.Application.Tests/  # Orchestration + service tests
+│       ├── Agon.Infrastructure.Tests/ # In-memory adapter tests
+│       └── Agon.Api.Tests/          # API endpoint integration tests
 ├── frontend/                        # Next.js application
 │   ├── app/
 │   │   ├── layout.tsx          # Root layout (dark mode, Geist fonts)
@@ -232,9 +232,7 @@ cd ../backend
 dotnet restore
 dotnet build
 dotnet test
-# Agon.Api is planned but not yet implemented on this branch.
-# Once added, you will be able to run:
-# dotnet run --project src/Agon.Api
+dotnet run --project src/Agon.Api
 ```
 
 ### Available Scripts
@@ -256,7 +254,7 @@ dotnet test
 |---|---|
 | `dotnet build` | Build all projects |
 | `dotnet test` | Run all tests (xUnit) |
-| `dotnet run --project src/Agon.Api` | Start API server (planned; project not yet created on this branch) |
+| `dotnet run --project src/Agon.Api` | Start API server |
 
 ---
 
@@ -384,9 +382,10 @@ A completed Agon session produces:
 - [x] CI pipeline with automated badge updates
 - [x] Backend architecture decisions documented (MAF integration strategy)
 - [x] Domain model — TruthMap, PatchValidator, RoundPolicy, ConfidenceDecayEngine, ChangeImpactCalculator (TDD)
-- [ ] Application layer — Orchestrator state machine, AgentRunner, ICouncilAgent
-- [ ] Infrastructure layer — MAF agents, PostgreSQL, Redis, SignalR hub
-- [ ] API layer — REST endpoints, global exception middleware
+- [x] Backend vertical slice — Application/Infrastructure/API scaffold with in-memory adapters and core session endpoints
+- [ ] Application layer — full Orchestrator state machine, AgentRunner, ICouncilAgent expansion
+- [ ] Infrastructure layer — MAF agents, PostgreSQL, Redis, SignalR hub (replace in-memory adapters)
+- [ ] API layer — full REST endpoints + global exception middleware
 - [ ] Frontend–backend integration — replace mock data with REST API + SignalR
 
 ### Phase 1.5

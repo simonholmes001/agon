@@ -17,16 +17,15 @@ _(Nothing currently in progress)_
 
 ### Infrastructure
 
-- [ ] **Backend coverage badges** — Extend CI + `update-readme-badges.sh` to collect backend test count + coverage once the .NET project exists. The `dotnet test --collect:"XPlat Code Coverage"` step already runs but output is not parsed.
+- [ ] **Backend coverage badges** — Extend CI + `update-readme-badges.sh` to collect backend coverage across all backend test projects. Backend test count parsing now supports multi-project output; coverage aggregation is still pending.
 
 ### Backend (.NET)
 
-- [ ] **Scaffold .NET backend** — ASP.NET Core in `backend/` with Clean Architecture (Domain, Application, Infrastructure). See `architecture.instructions.md`.
 - [ ] **Backend logging** — `ILogger<T>` via DI in Application, Infrastructure, and Api layers. Orchestrator: phase transitions, round progression, convergence scores, patch counts, budget consumption. AgentRunner: dispatch, latency, timeout, token usage. MafCouncilAgent: provider calls, streaming, error/retry. GlobalExceptionMiddleware: unhandled exceptions with correlation IDs. Never log raw user content or agent responses in plaintext.
 - [ ] **Orchestrator state machine** — Deterministic phase transitions per `round-policy.instructions.md`. LLM outputs cannot trigger transitions.
 - [ ] **`IChatClient` integration** — Provider-agnostic LLM calls via MAF's `IChatClient` (from `Microsoft.Extensions.AI`) + `FakeCouncilAgent` for tests. See `backend-implementation.instructions.md` §1.3.
 - [ ] **SignalR hub (`/hubs/debate`)** — Streaming tokens, patches, convergence, round progress.
-- [ ] **REST API endpoints** — Per `architecture.instructions.md` §6.
+- [ ] **REST API endpoints** — Expand beyond vertical-slice core (`POST /sessions`, `GET /sessions/{id}`, `POST /sessions/{id}/start`, `GET /sessions/{id}/truthmap`) to full surface in `architecture.instructions.md` §6.
 - [ ] **PostgreSQL persistence** — Sessions, Truth Map (JSONB + normalised entities), append-only event log.
 - [ ] **pgvector semantic memory** — Embedding pipeline + top-K retrieval for agent context.
 - [ ] **Redis ephemeral state** — Round state, locks, rate limits.
@@ -63,6 +62,8 @@ _(Nothing currently in progress)_
 - [x] CI fix — Shell operator precedence in badge commit step
 - [x] PR #1 merged (`feature/frontend` → `main`)
 - [x] Domain layer scaffold — `Agon.sln` with `Agon.Domain` (net9.0, zero deps) + `Agon.Domain.Tests` (xUnit + FluentAssertions)
+- [x] Backend scaffold vertical slice — `Agon.Application`, `Agon.Infrastructure`, `Agon.Api` added with clean layer dependencies and in-memory adapters
+- [x] Core backend session endpoints — `POST /sessions`, `GET /sessions/{id}`, `POST /sessions/{id}/start`, `GET /sessions/{id}/truthmap`
 - [x] Truth Map domain model — `TruthMapState`, `TruthMapPatch`, `PatchValidator` (5 validation rules), all entity types with `derived_from` / `challenged_by`
 - [x] Domain entities — Claim, Assumption, Decision, Risk, Evidence, OpenQuestion, Persona, Constraints, Convergence, ConfidenceTransition + all enums
 - [x] Confidence Decay Engine — decay on undefended challenges, boost on evidence, clamp [0.0, 1.0], contested threshold
@@ -74,6 +75,6 @@ _(Nothing currently in progress)_
 - [x] Agent config — per-agent model provider, model name, max tokens, timeout, active phases with `DefaultCouncil`
 - [x] Agent identifiers — `AgentId` constants with `IsCouncilAgent` + `AllCouncil`
 - [x] Session enums — `SessionPhase` (9 phases), `SessionMode`, `SessionStatus`
-- [x] Backend test suite — 142 tests, TDD (Red → Green → Refactor)
+- [x] Backend test suite — 158 tests, TDD (Red → Green → Refactor)
 - [x] CI updated — backend test count captured + combined frontend+backend badge in `update-badges` job
 - [x] README badges — xUnit badge added, combined test count (frontend + backend)
