@@ -33,8 +33,11 @@ jobs:
         run: |
           OUTPUT=$(npx vitest run --coverage --reporter=verbose 2>&1)
           echo "$OUTPUT"
-          # Extract test count from Vitest summary line, e.g. "Tests  127 passed (127)"
-          TEST_COUNT=$(echo "$OUTPUT" | grep -E 'Tests\s+[0-9]+\s+passed' | grep -oE '[0-9]+' | head -1 || echo "0")
+          # Strip ANSI escape codes before parsing — Vitest emits bold/colour
+          # sequences that break regex matching in CI environments.
+          CLEAN=$(echo "$OUTPUT" | sed 's/\x1b\[[0-9;]*m//g')
+          # Extract test count from Vitest summary line, e.g. "Tests  154 passed (154)"
+          TEST_COUNT=$(echo "$CLEAN" | grep -E 'Tests\s+[0-9]+\s+passed' | grep -oE '[0-9]+' | head -1 || echo "0")
           echo "test_count=$TEST_COUNT" >> "$GITHUB_OUTPUT"
 
       - name: Update README badges
