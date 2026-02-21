@@ -62,3 +62,6 @@ _(Nothing currently in progress)_
 - [x] Error boundaries — `global-error.tsx`, `error.tsx`, `not-found.tsx`, `session/[id]/error.tsx`
 - [x] Logging & error handling engineering principle (#5) added to copilot instructions
 - [x] File naming convention — `.yaml` not `.yml`
+- [x] CI fix — ANSI escape code stripping for reliable test count parsing in badge automation
+- [x] CI fix — Shell operator precedence in badge commit step
+- [x] PR #1 merged (`feature/frontend` → `main`)
