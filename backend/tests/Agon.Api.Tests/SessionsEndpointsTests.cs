@@ -77,6 +77,50 @@ public class SessionsEndpointsTests : IClassFixture<WebApplicationFactory<Progra
         response.StatusCode.Should().Be(HttpStatusCode.OK);
     }
 
+    [Fact]
+    public async Task SignalRHub_NegotiateEndpoint_AllowsLocalFrontendOrigin()
+    {
+        using var request = new HttpRequestMessage(
+            HttpMethod.Post,
+            "/hubs/debate/negotiate?negotiateVersion=1")
+        {
+            Content = new StringContent(string.Empty)
+        };
+        request.Headers.Add("Origin", "http://localhost:3000");
+
+        var response = await client.SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        response.Headers.TryGetValues("Access-Control-Allow-Origin", out var values).Should().BeTrue();
+        values.Should().Contain("http://localhost:3000");
+    }
+
+    [Fact]
+    public async Task GetTranscript_ReturnsSystemKickoffAndAgentOutcomeMessages_AfterSessionStart()
+    {
+        var create = await client.PostAsJsonAsync("/sessions", new
+        {
+            idea = "A service that validates startup ideas with an AI council.",
+            mode = "Deep",
+            frictionLevel = 50
+        });
+        var created = await create.Content.ReadFromJsonAsync<SessionResponse>();
+        await client.PostAsync($"/sessions/{created!.SessionId}/start", content: null);
+
+        var response = await client.GetAsync($"/sessions/{created.SessionId}/transcript");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var transcript = await response.Content.ReadFromJsonAsync<List<TranscriptMessageResponse>>();
+        transcript.Should().NotBeNull();
+        transcript!.Should().NotBeEmpty();
+        transcript.Should().Contain(message =>
+            message.Type == "system"
+            && message.Content.Contains("Round 1"));
+        transcript.Should().Contain(message =>
+            (message.Type == "agent" && message.AgentId == "product-strategist")
+            || (message.Type == "system" && message.Content.Contains("product-strategist")));
+    }
+
     private sealed class SessionResponse
     {
         public Guid SessionId { get; init; }
@@ -86,5 +130,12 @@ public class SessionsEndpointsTests : IClassFixture<WebApplicationFactory<Progra
     private sealed class TruthMapResponse
     {
         public string CoreIdea { get; init; } = string.Empty;
+    }
+
+    private sealed class TranscriptMessageResponse
+    {
+        public string Type { get; init; } = string.Empty;
+        public string AgentId { get; init; } = string.Empty;
+        public string Content { get; init; } = string.Empty;
     }
 }

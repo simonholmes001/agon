@@ -90,6 +90,31 @@ public class AgentRunnerTests
         results[0].Patch.Should().BeNull();
     }
 
+    [Fact]
+    public async Task RunRoundAsync_ReturnsFailedResult_WhenAgentThrowsSynchronously()
+    {
+        var repository = Substitute.For<ITruthMapRepository>();
+        var eventBroadcaster = Substitute.For<IEventBroadcaster>();
+        var logger = Substitute.For<ILogger<AgentRunner>>();
+        var sut = new AgentRunner(repository, eventBroadcaster, logger);
+        var failingAgent = new SyncFailAgent("product_strategist");
+
+        var context = new AgentContext
+        {
+            SessionId = Guid.NewGuid(),
+            Round = 1,
+            Phase = SessionPhase.DebateRound1,
+            TruthMap = TruthMapState.CreateNew(Guid.NewGuid()),
+            FrictionLevel = 50
+        };
+
+        var results = await sut.RunRoundAsync([failingAgent], context, TimeSpan.FromSeconds(1), CancellationToken.None);
+
+        results.Should().ContainSingle();
+        results[0].TimedOut.Should().BeFalse();
+        results[0].Error.Should().Contain("missing api key");
+    }
+
     private static TruthMapPatch CreatePatch(string agent)
     {
         return new TruthMapPatch
@@ -120,6 +145,26 @@ public class AgentRunnerTests
         {
             await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken);
             yield return "done";
+        }
+    }
+
+    private sealed class SyncFailAgent(string agentId) : ICouncilAgent
+    {
+        public string AgentId { get; } = agentId;
+        public string ModelProvider => "fake";
+
+        public Task<AgentResponse> RunAsync(AgentContext context, CancellationToken cancellationToken)
+        {
+            throw new InvalidOperationException("missing api key");
+        }
+
+        public async IAsyncEnumerable<string> RunStreamingAsync(AgentContext context, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
+        {
+            await Task.Yield();
+            throw new InvalidOperationException("missing api key");
+#pragma warning disable CS0162
+            yield break;
+#pragma warning restore CS0162
         }
     }
 }

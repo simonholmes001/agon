@@ -64,7 +64,22 @@ public class AgentRunner(
         CancellationToken cancellationToken)
     {
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        var runTask = agent.RunAsync(context, timeoutCts.Token);
+        Task<AgentResponse> runTask;
+        try
+        {
+            runTask = agent.RunAsync(context, timeoutCts.Token);
+        }
+        catch (Exception exception)
+        {
+            logger.LogError(
+                exception,
+                "Agent failed synchronously before task creation. SessionId={SessionId} Round={Round} AgentId={AgentId}",
+                context.SessionId,
+                context.Round,
+                agent.AgentId);
+            return AgentExecutionResult.Failed(agent.AgentId, exception.Message);
+        }
+
         var timeoutTask = Task.Delay(timeoutPerAgent, cancellationToken);
 
         var completed = await Task.WhenAny(runTask, timeoutTask);

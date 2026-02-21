@@ -2,6 +2,7 @@ import { createLogger } from "@/lib/logger";
 
 const logger = createLogger("DebateHubClient");
 const SIGNALR_MODULE_NAME = "@microsoft/signalr";
+const DEFAULT_BACKEND_BASE_URL = "http://localhost:5000";
 
 export interface RoundProgressEvent {
   sessionId: string;
@@ -26,6 +27,21 @@ export function createDebateHubConnection(sessionId: string): DebateHubConnectio
   return new LazyDebateHubConnection(sessionId);
 }
 
+export function resolveDebateHubUrl(): string {
+  const configuredHubUrl = process.env.NEXT_PUBLIC_DEBATE_HUB_URL?.trim();
+  if (configuredHubUrl) {
+    return configuredHubUrl;
+  }
+
+  const backendBaseUrl = (
+    process.env.NEXT_PUBLIC_BACKEND_BASE_URL ??
+    process.env.BACKEND_API_BASE_URL ??
+    DEFAULT_BACKEND_BASE_URL
+  ).replace(/\/+$/, "");
+
+  return `${backendBaseUrl}/hubs/debate`;
+}
+
 class LazyDebateHubConnection implements DebateHubConnection {
   private readonly hubUrl: string;
   private connection: HubConnectionLike | null = null;
@@ -34,7 +50,7 @@ class LazyDebateHubConnection implements DebateHubConnection {
   private readonly reconnectedHandlers: Array<() => void> = [];
 
   constructor(private readonly sessionId: string) {
-    this.hubUrl = process.env.NEXT_PUBLIC_DEBATE_HUB_URL ?? "/hubs/debate";
+    this.hubUrl = resolveDebateHubUrl();
   }
 
   async start() {
@@ -47,7 +63,7 @@ class LazyDebateHubConnection implements DebateHubConnection {
       await connection.invoke("JoinSession", this.sessionId);
       logger.info("signalr session subscription registered", { sessionId: this.sessionId });
     } catch (error) {
-      logger.error(
+      logger.warn(
         "failed to start signalr connection",
         { sessionId: this.sessionId, hubUrl: this.hubUrl },
         error,
@@ -63,7 +79,7 @@ class LazyDebateHubConnection implements DebateHubConnection {
       await this.connection.stop();
       logger.info("signalr disconnected", { sessionId: this.sessionId, hubUrl: this.hubUrl });
     } catch (error) {
-      logger.error(
+      logger.warn(
         "failed to stop signalr connection",
         { sessionId: this.sessionId, hubUrl: this.hubUrl },
         error,
@@ -124,7 +140,7 @@ async function importSignalRModule(): Promise<SignalRModule | null> {
   try {
     return await import(SIGNALR_MODULE_NAME) as SignalRModule;
   } catch (error) {
-    logger.error(
+    logger.warn(
       "signalr client module is unavailable",
       { moduleName: SIGNALR_MODULE_NAME },
       error,
@@ -137,7 +153,7 @@ async function joinSession(connection: HubConnectionLike, sessionId: string) {
   try {
     await connection.invoke("JoinSession", sessionId);
   } catch (error) {
-    logger.error("failed to join signalr session", { sessionId }, error);
+    logger.warn("failed to join signalr session", { sessionId }, error);
   }
 }
 
@@ -145,7 +161,7 @@ async function leaveSession(connection: HubConnectionLike, sessionId: string) {
   try {
     await connection.invoke("LeaveSession", sessionId);
   } catch (error) {
-    logger.error("failed to leave signalr session", { sessionId }, error);
+    logger.warn("failed to leave signalr session", { sessionId }, error);
   }
 }
 

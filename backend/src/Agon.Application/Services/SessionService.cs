@@ -1,6 +1,7 @@
 using Agon.Application.Interfaces;
 using Agon.Application.Orchestration;
 using Agon.Application.Sessions;
+using Agon.Domain.Agents;
 using Agon.Domain.Sessions;
 using Agon.Domain.TruthMap;
 using Microsoft.Extensions.Logging;
@@ -10,7 +11,10 @@ namespace Agon.Application.Services;
 public class SessionService(
     ISessionRepository sessionRepository,
     ITruthMapRepository truthMapRepository,
+    ITranscriptRepository transcriptRepository,
     Orchestrator orchestrator,
+    AgentRunner agentRunner,
+    IEnumerable<ICouncilAgent> councilAgents,
     IEventBroadcaster eventBroadcaster,
     ILogger<SessionService> logger)
 {
@@ -88,6 +92,12 @@ public class SessionService(
             map.Round = session.RoundNumber;
             await truthMapRepository.UpdateAsync(map, cancellationToken);
             await eventBroadcaster.RoundProgressAsync(sessionId, session.Phase, cancellationToken);
+            await transcriptRepository.AppendAsync(
+                sessionId,
+                CreateRoundKickoffSystemMessage(sessionId, session.RoundNumber),
+                cancellationToken);
+
+            await RunCouncilRoundAsync(session, map, cancellationToken);
         }
         else
         {
@@ -111,4 +121,187 @@ public class SessionService(
 
     public Task<TruthMapState?> GetTruthMapAsync(Guid sessionId, CancellationToken cancellationToken) =>
         truthMapRepository.GetAsync(sessionId, cancellationToken);
+
+    public Task<IReadOnlyList<TranscriptMessage>> GetTranscriptAsync(
+        Guid sessionId,
+        CancellationToken cancellationToken) =>
+        transcriptRepository.GetBySessionAsync(sessionId, cancellationToken);
+
+    private static TranscriptMessage CreateRoundKickoffSystemMessage(Guid sessionId, int roundNumber)
+    {
+        return new TranscriptMessage
+        {
+            Id = Guid.NewGuid(),
+            SessionId = sessionId,
+            Type = TranscriptMessageType.System,
+            AgentId = null,
+            Content = $"Round {roundNumber} started. Dispatching council agents.",
+            Round = roundNumber,
+            IsStreaming = false,
+            CreatedAtUtc = DateTimeOffset.UtcNow
+        };
+    }
+
+    private async Task RunCouncilRoundAsync(
+        SessionState session,
+        TruthMapState map,
+        CancellationToken cancellationToken)
+    {
+        var activeAgents = SelectActiveAgentsForPhase(session.Phase);
+        if (activeAgents.Count == 0)
+        {
+            logger.LogWarning(
+                "No active council agents configured for phase. SessionId={SessionId} Phase={Phase}",
+                session.SessionId,
+                session.Phase);
+            return;
+        }
+
+        var context = new AgentContext
+        {
+            SessionId = session.SessionId,
+            Round = session.RoundNumber,
+            Phase = session.Phase,
+            FrictionLevel = session.FrictionLevel,
+            TruthMap = map.DeepCopy()
+        };
+
+        var timeout = ResolveRoundTimeout(activeAgents);
+        logger.LogInformation(
+            "Dispatching council round. SessionId={SessionId} Round={Round} Phase={Phase} AgentCount={AgentCount} TimeoutSeconds={TimeoutSeconds}",
+            session.SessionId,
+            session.RoundNumber,
+            session.Phase,
+            activeAgents.Count,
+            timeout.TotalSeconds);
+
+        var results = await agentRunner.RunRoundAsync(
+            activeAgents,
+            context,
+            timeout,
+            cancellationToken);
+
+        var storedMessages = await AppendRoundTranscriptMessagesAsync(
+            session.SessionId,
+            session.RoundNumber,
+            results,
+            cancellationToken);
+
+        await agentRunner.ApplyValidatedPatchesAsync(session.SessionId, results, cancellationToken);
+
+        logger.LogInformation(
+            "Council round completed. SessionId={SessionId} Round={Round} AgentCount={AgentCount} StoredMessages={StoredMessages} TimedOut={TimedOut} Failed={Failed}",
+            session.SessionId,
+            session.RoundNumber,
+            activeAgents.Count,
+            storedMessages,
+            results.Count(result => result.TimedOut),
+            results.Count(result => result.Error is not null && result.Error != "timeout"));
+    }
+
+    private List<ICouncilAgent> SelectActiveAgentsForPhase(SessionPhase phase)
+    {
+        var byId = AgentConfig.DefaultCouncil.ToDictionary(config => config.AgentId, StringComparer.Ordinal);
+
+        return councilAgents
+            .Where(agent =>
+            {
+                var canonicalAgentId = CanonicalizeAgentId(agent.AgentId);
+                return byId.TryGetValue(canonicalAgentId, out var config)
+                    && config.ActivePhases.Contains(phase);
+            })
+            .ToList();
+    }
+
+    private static TimeSpan ResolveRoundTimeout(IReadOnlyList<ICouncilAgent> activeAgents)
+    {
+        var byId = AgentConfig.DefaultCouncil.ToDictionary(config => config.AgentId, StringComparer.Ordinal);
+        var timeoutSeconds = activeAgents
+            .Select(agent => CanonicalizeAgentId(agent.AgentId))
+            .Where(byId.ContainsKey)
+            .Select(agentId => byId[agentId].TimeoutSeconds)
+            .DefaultIfEmpty(90)
+            .Max();
+
+        return TimeSpan.FromSeconds(timeoutSeconds);
+    }
+
+    private async Task<int> AppendRoundTranscriptMessagesAsync(
+        Guid sessionId,
+        int roundNumber,
+        IEnumerable<AgentExecutionResult> results,
+        CancellationToken cancellationToken)
+    {
+        var stored = 0;
+        foreach (var result in results)
+        {
+            TranscriptMessage? transcriptMessage = null;
+
+            if (!string.IsNullOrWhiteSpace(result.Message))
+            {
+                transcriptMessage = new TranscriptMessage
+                {
+                    Id = Guid.NewGuid(),
+                    SessionId = sessionId,
+                    Type = TranscriptMessageType.Agent,
+                    AgentId = PresentableAgentId(result.AgentId),
+                    Content = result.Message,
+                    Round = roundNumber,
+                    IsStreaming = false,
+                    CreatedAtUtc = DateTimeOffset.UtcNow
+                };
+            }
+            else if (result.TimedOut)
+            {
+                transcriptMessage = new TranscriptMessage
+                {
+                    Id = Guid.NewGuid(),
+                    SessionId = sessionId,
+                    Type = TranscriptMessageType.System,
+                    Content = $"Agent '{PresentableAgentId(result.AgentId)}' timed out in round {roundNumber}.",
+                    Round = roundNumber,
+                    IsStreaming = false,
+                    CreatedAtUtc = DateTimeOffset.UtcNow
+                };
+            }
+            else if (!string.IsNullOrWhiteSpace(result.Error))
+            {
+                transcriptMessage = new TranscriptMessage
+                {
+                    Id = Guid.NewGuid(),
+                    SessionId = sessionId,
+                    Type = TranscriptMessageType.System,
+                    Content = $"Agent '{PresentableAgentId(result.AgentId)}' failed in round {roundNumber}. Reason: {TrimError(result.Error)}",
+                    Round = roundNumber,
+                    IsStreaming = false,
+                    CreatedAtUtc = DateTimeOffset.UtcNow
+                };
+            }
+
+            if (transcriptMessage is null) continue;
+            await transcriptRepository.AppendAsync(sessionId, transcriptMessage, cancellationToken);
+            stored++;
+        }
+
+        return stored;
+    }
+
+    private static string CanonicalizeAgentId(string agentId) =>
+        (agentId ?? string.Empty).Trim().ToLowerInvariant().Replace("-", "_");
+
+    private static string PresentableAgentId(string agentId) =>
+        CanonicalizeAgentId(agentId).Replace("_", "-");
+
+    private static string TrimError(string? error)
+    {
+        if (string.IsNullOrWhiteSpace(error))
+        {
+            return "unknown";
+        }
+
+        var trimmed = error.Trim();
+        return trimmed.Length <= 180
+            ? trimmed
+            : trimmed[..180];
+    }
 }

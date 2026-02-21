@@ -1,0 +1,87 @@
+using System.Net;
+using System.Text;
+using Agon.Application.Orchestration;
+using Agon.Domain.Sessions;
+using Agon.Domain.TruthMap;
+using Agon.Infrastructure.Agents;
+using FluentAssertions;
+using Microsoft.Extensions.Logging.Abstractions;
+
+namespace Agon.Infrastructure.Tests.Agents;
+
+public class OpenAiCouncilAgentTests
+{
+    [Fact]
+    public async Task RunAsync_ReturnsOutputText_FromResponsesApi()
+    {
+        var handler = new StubHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(
+                """
+                {
+                  "output_text": "Use customer interviews to validate demand."
+                }
+                """,
+                Encoding.UTF8,
+                "application/json")
+        });
+        var httpClient = new HttpClient(handler);
+        var options = new OpenAiCouncilAgentOptions(
+            AgentId: "research_librarian",
+            ApiKey: "test-key",
+            ModelName: "gpt-4o-mini",
+            MaxOutputTokens: 256);
+        var sut = new OpenAiCouncilAgent(httpClient, options, NullLogger<OpenAiCouncilAgent>.Instance);
+
+        var response = await sut.RunAsync(CreateContext(), CancellationToken.None);
+
+        response.Message.Should().Be("Use customer interviews to validate demand.");
+        response.Patch.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task RunAsync_Throws_WhenOpenAiReturnsNonSuccessStatus()
+    {
+        var handler = new StubHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.Unauthorized)
+        {
+            Content = new StringContent("{\"error\":\"unauthorized\"}", Encoding.UTF8, "application/json")
+        });
+        var httpClient = new HttpClient(handler);
+        var options = new OpenAiCouncilAgentOptions(
+            AgentId: "research_librarian",
+            ApiKey: "bad-key",
+            ModelName: "gpt-4o-mini",
+            MaxOutputTokens: 256);
+        var sut = new OpenAiCouncilAgent(httpClient, options, NullLogger<OpenAiCouncilAgent>.Instance);
+
+        var act = () => sut.RunAsync(CreateContext(), CancellationToken.None);
+
+        await act.Should().ThrowAsync<HttpRequestException>();
+    }
+
+    private static AgentContext CreateContext()
+    {
+        var sessionId = Guid.NewGuid();
+        var map = TruthMapState.CreateNew(sessionId);
+        map.CoreIdea = "Test core idea";
+
+        return new AgentContext
+        {
+            SessionId = sessionId,
+            Round = 1,
+            Phase = SessionPhase.DebateRound1,
+            FrictionLevel = 50,
+            TruthMap = map
+        };
+    }
+
+    private sealed class StubHttpMessageHandler(Func<HttpRequestMessage, HttpResponseMessage> handler) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            return Task.FromResult(handler(request));
+        }
+    }
+}

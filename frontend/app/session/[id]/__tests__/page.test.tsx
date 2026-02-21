@@ -81,6 +81,21 @@ describe("SessionPage", () => {
           }),
           { status: 200, headers: { "content-type": "application/json" } },
         ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify([
+            {
+              id: "msg-1",
+              type: "agent",
+              agentId: "socratic-clarifier",
+              round: 1,
+              isStreaming: false,
+              content: "I have reviewed your core idea and will challenge assumptions.",
+            },
+          ]),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
       );
   });
 
@@ -95,11 +110,20 @@ describe("SessionPage", () => {
     });
   });
 
-  it("renders the thread view with demo messages", async () => {
+  it("renders the thread view with backend session context", async () => {
     render(<SessionPage />);
     await waitFor(() => {
       expect(
-        screen.getByText(/session started/i),
+        screen.getByText(/session session-123 loaded from backend/i),
+      ).toBeInTheDocument();
+    });
+  });
+
+  it("renders transcript messages returned by the backend", async () => {
+    render(<SessionPage />);
+    await waitFor(() => {
+      expect(
+        screen.getByText(/i have reviewed your core idea and will challenge assumptions/i),
       ).toBeInTheDocument();
     });
   });
@@ -140,7 +164,7 @@ describe("SessionPage", () => {
   it("displays the mapped phase label from backend session state", async () => {
     render(<SessionPage />);
     await waitFor(() => {
-      expect(screen.getByText("Round 1 — Divergence")).toBeInTheDocument();
+      expect(screen.getAllByText("Round 1 — Divergence").length).toBeGreaterThanOrEqual(1);
     });
   });
 
@@ -155,8 +179,9 @@ describe("SessionPage", () => {
     render(<SessionPage />);
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenNthCalledWith(1, "/sessions/session-123");
-      expect(fetchMock).toHaveBeenNthCalledWith(2, "/sessions/session-123/truthmap");
+      expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/backend/sessions/session-123");
+      expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/backend/sessions/session-123/truthmap");
+      expect(fetchMock).toHaveBeenNthCalledWith(3, "/api/backend/sessions/session-123/transcript");
     });
   });
 
@@ -188,7 +213,7 @@ describe("SessionPage", () => {
       handler?.({ phase: "DebateRound2" });
     });
 
-    expect(screen.getByText("Round 2 — Crossfire")).toBeInTheDocument();
+    expect(screen.getAllByText("Round 2 — Crossfire").length).toBeGreaterThanOrEqual(1);
   });
 
   it("re-fetches session and truth map on hub reconnect", async () => {
@@ -204,6 +229,24 @@ describe("SessionPage", () => {
               version: 2,
               round: 2,
             }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          ),
+        );
+      }
+
+      if (url.includes("/transcript")) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify([
+              {
+                id: "msg-1",
+                type: "agent",
+                agentId: "socratic-clarifier",
+                round: 1,
+                isStreaming: false,
+                content: "I have reviewed your core idea and will challenge assumptions.",
+              },
+            ]),
             { status: 200, headers: { "content-type": "application/json" } },
           ),
         );
@@ -238,8 +281,20 @@ describe("SessionPage", () => {
     });
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenNthCalledWith(3, "/sessions/session-123");
-      expect(fetchMock).toHaveBeenNthCalledWith(4, "/sessions/session-123/truthmap");
+      expect(fetchMock).toHaveBeenNthCalledWith(4, "/api/backend/sessions/session-123");
+      expect(fetchMock).toHaveBeenNthCalledWith(5, "/api/backend/sessions/session-123/truthmap");
+      expect(fetchMock).toHaveBeenNthCalledWith(6, "/api/backend/sessions/session-123/transcript");
+    });
+  });
+
+  it("shows realtime unavailable state when signalr startup fails", async () => {
+    startMock.mockRejectedValueOnce(new Error("Failed to fetch"));
+    render(<SessionPage />);
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(/real-time updates unavailable/i),
+      ).toBeInTheDocument();
     });
   });
 });

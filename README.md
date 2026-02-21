@@ -241,8 +241,38 @@ For local frontend-to-backend realtime transport:
 
 ```bash
 # frontend/.env.local
-NEXT_PUBLIC_DEBATE_HUB_URL=http://localhost:5000/hubs/debate
+BACKEND_API_BASE_URL=http://localhost:5000
+# Optional override (defaults to BACKEND_API_BASE_URL or http://localhost:5000)
+# NEXT_PUBLIC_DEBATE_HUB_URL=http://localhost:5000/hubs/debate
+
+# backend/.env (or exported shell environment)
+# Provider keys (missing keys now surface as explicit system error transcript messages;
+# no fake-agent fallback is used)
+# OPENAI_KEY=your-openai-api-key
+# GEMINI_KEY=your-gemini-api-key
+# ANTHROPIC_KEY=your-anthropic-api-key
+# CLAUDE_KEY=your-anthropic-api-key   # supported alias
+# DEEPSEEK_KEY=your-deepseek-api-key
+#
+# Optional model overrides
+# OPENAI_MODEL=gpt-4o-mini
+# GEMINI_MODEL=gemini-2.0-flash
+# ANTHROPIC_MODEL=claude-3-5-sonnet-latest
+# DEEPSEEK_MODEL=deepseek-chat
 ```
+
+`BACKEND_API_BASE_URL` is used by Next.js route handlers under
+`/api/backend/*` to proxy REST calls to ASP.NET Core and avoid CORS and route
+collisions with frontend pages.
+
+If `NEXT_PUBLIC_DEBATE_HUB_URL` is not set, the frontend builds the hub URL
+from `NEXT_PUBLIC_BACKEND_BASE_URL` (fallback: `BACKEND_API_BASE_URL`,
+fallback: `http://localhost:5000`) with `/hubs/debate` appended. This avoids
+WebSocket upgrade issues through Next.js route handlers.
+
+The API now enables CORS for local frontend origins by default:
+`http://localhost:3000` and `https://localhost:3000`. Override via
+`Cors:AllowedOrigins` in backend configuration when needed.
 
 ### Available Scripts
 
@@ -332,7 +362,8 @@ Full specification: [`.github/instructions/round-policy.instructions.md`](.githu
 |---|---|---|
 | `POST` | `/sessions` | Create a new session |
 | `GET` | `/sessions/{id}` | Get session state |
-| `POST` | `/sessions/{id}/start` | Begin clarification phase |
+| `POST` | `/sessions/{id}/start` | Transition from clarification to debate round 1 and run a council round |
+| `GET` | `/sessions/{id}/transcript` | Get persisted transcript provenance for the session |
 | `POST` | `/sessions/{id}/messages` | User message (clarification response or post-delivery question) |
 | `POST` | `/sessions/{id}/hitl/challenge` | Challenge a specific claim |
 | `POST` | `/sessions/{id}/hitl/constraint` | Add/modify constraint (triggers change propagation) |

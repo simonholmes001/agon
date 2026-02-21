@@ -68,6 +68,16 @@ describe("NewSessionPage", () => {
     expect(screen.getByText("Adversarial")).toBeInTheDocument();
   });
 
+  it("renders a theme toggle control in the header", () => {
+    render(<NewSessionPage />);
+    expect(screen.getByRole("button", { name: /toggle theme/i })).toBeInTheDocument();
+  });
+
+  it("renders a persistent launch action bar", () => {
+    render(<NewSessionPage />);
+    expect(screen.getByTestId("launch-action-bar")).toBeInTheDocument();
+  });
+
   // ── Character count ─────────────────────────────────────────────
 
   it("shows 'at least 10 characters' when idea is empty", () => {
@@ -190,7 +200,7 @@ describe("NewSessionPage", () => {
     await waitFor(() => {
       expect(fetchMock).toHaveBeenNthCalledWith(
         1,
-        "/sessions",
+        "/api/backend/sessions",
         expect.objectContaining({
           method: "POST",
           headers: expect.objectContaining({
@@ -200,10 +210,55 @@ describe("NewSessionPage", () => {
       );
       expect(fetchMock).toHaveBeenNthCalledWith(
         2,
-        "/sessions/session-42/start",
+        "/api/backend/sessions/session-42/start",
         expect.objectContaining({ method: "POST" }),
       );
       expect(pushMock).toHaveBeenCalledWith("/session/session-42");
+    });
+  });
+
+  it("submits and starts session when Enter is pressed in the idea textarea", async () => {
+    fetchMock
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            sessionId: "session-88",
+            phase: "Clarification",
+            frictionLevel: 50,
+          }),
+          { status: 201, headers: { "content-type": "application/json" } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            sessionId: "session-88",
+            phase: "DebateRound1",
+            frictionLevel: 50,
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      );
+
+    render(<NewSessionPage />);
+    const textarea = screen.getByPlaceholderText(/mobile app/i);
+    await userEvent.type(
+      textarea,
+      "An app that helps fans follow Kovi's releases and events{enter}",
+    );
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenNthCalledWith(
+        1,
+        "/api/backend/sessions",
+        expect.objectContaining({ method: "POST" }),
+      );
+      expect(fetchMock).toHaveBeenNthCalledWith(
+        2,
+        "/api/backend/sessions/session-88/start",
+        expect.objectContaining({ method: "POST" }),
+      );
+      expect(pushMock).toHaveBeenCalledWith("/session/session-88");
     });
   });
 
