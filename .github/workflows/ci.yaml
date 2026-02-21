@@ -10,6 +10,8 @@ jobs:
   frontend-tests:
     name: Frontend Tests
     runs-on: ubuntu-latest
+    outputs:
+      test_count: ${{ steps.test-run.outputs.test_count }}
     defaults:
       run:
         working-directory: frontend
@@ -40,32 +42,19 @@ jobs:
           TEST_COUNT=$(echo "$CLEAN" | grep -E 'Tests\s+[0-9]+\s+passed' | grep -oE '[0-9]+' | head -1 || echo "0")
           echo "test_count=$TEST_COUNT" >> "$GITHUB_OUTPUT"
 
-      - name: Update README badges
+      - name: Upload coverage artifact
         if: github.event_name == 'push'
-        run: |
-          bash .github/scripts/update-readme-badges.sh \
-            "${{ steps.test-run.outputs.test_count }}" \
-            "frontend/coverage/coverage-summary.json" \
-            "README.md"
-        working-directory: .
-
-      - name: Commit updated badges
-        if: github.event_name == 'push'
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add README.md
-          if git diff --cached --quiet; then
-            echo "No badge changes to commit."
-          else
-            git commit -m "chore: update test & coverage badges [skip ci]"
-            git push
-          fi
-        working-directory: .
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-coverage
+          path: frontend/coverage/coverage-summary.json
+          retention-days: 1
 
   backend-tests:
     name: Backend Tests
     runs-on: ubuntu-latest
+    outputs:
+      test_count: ${{ steps.backend-test-run.outputs.test_count }}
     defaults:
       run:
         working-directory: backend
@@ -101,4 +90,52 @@ jobs:
 
       - name: Run tests
         if: steps.check.outputs.exists == 'true'
-        run: dotnet test --no-build --configuration Release --verbosity normal --collect:"XPlat Code Coverage"
+        id: backend-test-run
+        run: |
+          OUTPUT=$(dotnet test --no-build --configuration Release --verbosity normal --collect:"XPlat Code Coverage" 2>&1)
+          echo "$OUTPUT"
+          # Extract test count from dotnet test summary, e.g. "Passed!  - Failed:     0, Passed:   122"
+          BACKEND_COUNT=$(echo "$OUTPUT" | grep -oE 'Passed:\s+[0-9]+' | grep -oE '[0-9]+' | head -1 || echo "0")
+          echo "test_count=${BACKEND_COUNT}" >> "$GITHUB_OUTPUT"
+
+  update-badges:
+    name: Update README Badges
+    needs: [frontend-tests, backend-tests]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download frontend coverage
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-coverage
+          path: frontend-coverage
+
+      - name: Combine test counts and update badges
+        run: |
+          FRONTEND_COUNT="${{ needs.frontend-tests.outputs.test_count }}"
+          BACKEND_COUNT="${{ needs.backend-tests.outputs.test_count }}"
+          FRONTEND_COUNT=${FRONTEND_COUNT:-0}
+          BACKEND_COUNT=${BACKEND_COUNT:-0}
+          TOTAL_COUNT=$((FRONTEND_COUNT + BACKEND_COUNT))
+          echo "📊 Frontend: $FRONTEND_COUNT | Backend: $BACKEND_COUNT | Total: $TOTAL_COUNT"
+
+          bash .github/scripts/update-readme-badges.sh \
+            "$TOTAL_COUNT" \
+            "frontend-coverage/coverage-summary.json" \
+            "README.md"
+
+      - name: Commit updated badges
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add README.md
+          if git diff --cached --quiet; then
+            echo "No badge changes to commit."
+          else
+            git commit -m "chore: update test & coverage badges [skip ci]"
+            git push
+          fi
