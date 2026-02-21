@@ -1,9 +1,13 @@
 using Agon.Application.Interfaces;
 using Agon.Domain.TruthMap;
+using Microsoft.Extensions.Logging;
 
 namespace Agon.Application.Orchestration;
 
-public class AgentRunner(ITruthMapRepository truthMapRepository)
+public class AgentRunner(
+    ITruthMapRepository truthMapRepository,
+    IEventBroadcaster eventBroadcaster,
+    ILogger<AgentRunner> logger)
 {
     public async Task<IReadOnlyList<AgentExecutionResult>> RunRoundAsync(
         IEnumerable<ICouncilAgent> agents,
@@ -11,8 +15,25 @@ public class AgentRunner(ITruthMapRepository truthMapRepository)
         TimeSpan timeoutPerAgent,
         CancellationToken cancellationToken)
     {
-        var tasks = agents.Select(agent => ExecuteAgentAsync(agent, context, timeoutPerAgent, cancellationToken));
-        return await Task.WhenAll(tasks);
+        var agentList = agents.ToList();
+        logger.LogInformation(
+            "Running agent round. SessionId={SessionId} Round={Round} Phase={Phase} AgentCount={AgentCount}",
+            context.SessionId,
+            context.Round,
+            context.Phase,
+            agentList.Count);
+
+        var tasks = agentList.Select(agent => ExecuteAgentAsync(agent, context, timeoutPerAgent, cancellationToken));
+        var results = await Task.WhenAll(tasks);
+
+        logger.LogInformation(
+            "Completed agent round. SessionId={SessionId} Round={Round} TimedOut={TimedOutCount} Failed={FailedCount}",
+            context.SessionId,
+            context.Round,
+            results.Count(result => result.TimedOut),
+            results.Count(result => result.Error is not null && result.Error != "timeout"));
+
+        return results;
     }
 
     public async Task ApplyValidatedPatchesAsync(
@@ -25,10 +46,18 @@ public class AgentRunner(ITruthMapRepository truthMapRepository)
                      .OrderBy(result => result.AgentId, StringComparer.Ordinal))
         {
             await truthMapRepository.ApplyPatchAsync(sessionId, result.Patch!, cancellationToken);
+            var updatedMap = await truthMapRepository.GetAsync(sessionId, cancellationToken);
+            var version = updatedMap?.Version ?? 0;
+            await eventBroadcaster.TruthMapPatchedAsync(sessionId, result.Patch!, version, cancellationToken);
+            logger.LogInformation(
+                "Applied validated patch. SessionId={SessionId} Agent={Agent} Version={Version}",
+                sessionId,
+                result.AgentId,
+                version);
         }
     }
 
-    private static async Task<AgentExecutionResult> ExecuteAgentAsync(
+    private async Task<AgentExecutionResult> ExecuteAgentAsync(
         ICouncilAgent agent,
         AgentContext context,
         TimeSpan timeoutPerAgent,
@@ -42,20 +71,43 @@ public class AgentRunner(ITruthMapRepository truthMapRepository)
         if (completed != runTask)
         {
             timeoutCts.Cancel();
+            logger.LogWarning(
+                "Agent timed out. SessionId={SessionId} Round={Round} AgentId={AgentId} TimeoutMs={TimeoutMs}",
+                context.SessionId,
+                context.Round,
+                agent.AgentId,
+                timeoutPerAgent.TotalMilliseconds);
             return AgentExecutionResult.Timeout(agent.AgentId);
         }
 
         try
         {
             var response = await runTask;
+            logger.LogInformation(
+                "Agent completed. SessionId={SessionId} Round={Round} AgentId={AgentId} HasPatch={HasPatch}",
+                context.SessionId,
+                context.Round,
+                agent.AgentId,
+                response.Patch is not null);
             return AgentExecutionResult.Success(agent.AgentId, response.Patch, response.Message);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
+            logger.LogWarning(
+                "Agent canceled due to timeout. SessionId={SessionId} Round={Round} AgentId={AgentId}",
+                context.SessionId,
+                context.Round,
+                agent.AgentId);
             return AgentExecutionResult.Timeout(agent.AgentId);
         }
         catch (Exception exception)
         {
+            logger.LogError(
+                exception,
+                "Agent failed. SessionId={SessionId} Round={Round} AgentId={AgentId}",
+                context.SessionId,
+                context.Round,
+                agent.AgentId);
             return AgentExecutionResult.Failed(agent.AgentId, exception.Message);
         }
     }

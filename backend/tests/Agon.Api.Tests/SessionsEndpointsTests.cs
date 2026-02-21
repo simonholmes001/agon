@@ -69,6 +69,14 @@ public class SessionsEndpointsTests : IClassFixture<WebApplicationFactory<Progra
         map!.CoreIdea.Should().Contain("validates startup ideas");
     }
 
+    [Fact]
+    public async Task SignalRHub_NegotiateEndpoint_IsExposed()
+    {
+        var response = await client.PostAsync("/hubs/debate/negotiate?negotiateVersion=1", new StringContent(string.Empty));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
     private sealed class SessionResponse
     {
         public Guid SessionId { get; init; }

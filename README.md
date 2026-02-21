@@ -163,10 +163,10 @@ agon/
 │   │   │   ├── Orchestration/      # Orchestrator (deterministic transitions), AgentRunner
 │   │   │   ├── Interfaces/         # ICouncilAgent, ITruthMapRepository, ISessionRepository
 │   │   │   └── Services/           # SessionService, SnapshotService
-│   │   ├── Agon.Infrastructure/    # In-memory adapters + fake agents (vertical slice)
+│   │   ├── Agon.Infrastructure/    # In-memory adapters + SignalR broadcaster
 │   │   │   ├── Agents/             # FakeCouncilAgent
 │   │   │   ├── Persistence/        # InMemorySessionRepository, InMemoryTruthMapRepository
-│   │   │   └── SignalR/            # Event broadcaster abstraction impls
+│   │   │   └── SignalR/            # DebateHub + SignalREventBroadcaster
 │   │   └── Agon.Api/               # Thin host — routing + DI
 │   │       └── Program.cs          # Core session endpoints
 │   └── tests/
@@ -194,6 +194,7 @@ agon/
 │   │   └── ui/                 # shadcn/ui primitives
 │   ├── lib/
 │   │   ├── constants.ts        # Agent registry, phase labels, friction config
+│   │   ├── realtime/           # Debate hub client + reconnect/resync wiring
 │   │   ├── utils.ts            # Utilities (cn)
 │   │   └── test-utils.tsx      # Custom test render wrapper
 │   └── types/
@@ -224,6 +225,7 @@ git config core.hooksPath .githooks
 # --- Frontend ---
 cd frontend
 npm install
+npm install @microsoft/signalr   # required for live SignalR streaming
 npm run dev
 # Open http://localhost:3000
 
@@ -233,6 +235,13 @@ dotnet restore
 dotnet build
 dotnet test
 dotnet run --project src/Agon.Api
+```
+
+For local frontend-to-backend realtime transport:
+
+```bash
+# frontend/.env.local
+NEXT_PUBLIC_DEBATE_HUB_URL=http://localhost:5000/hubs/debate
 ```
 
 ### Available Scripts
@@ -335,9 +344,13 @@ Full specification: [`.github/instructions/round-policy.instructions.md`](.githu
 
 ### SignalR (WebSockets) — Real-Time Streaming
 
-The frontend connects to `/hubs/debate` for all real-time updates. The UI never polls — all results arrive as server-pushed events:
+The frontend connects to `/hubs/debate` for server-pushed updates. Current baseline events:
 
-`AgentTokens` · `RoundProgress` · `TruthMapPatch` · `ConfidenceTransition` · `ConvergenceUpdate` · `PendingRevalidation` · `ArtifactReady` · `BudgetWarning`
+`RoundProgress` · `TruthMapPatch`
+
+Planned event expansion (next increments):
+
+`AgentTokens` · `ConfidenceTransition` · `ConvergenceUpdate` · `PendingRevalidation` · `ArtifactReady` · `BudgetWarning`
 
 ---
 
@@ -378,15 +391,15 @@ A completed Agon session produces:
 - [x] Frontend shell — landing, session creation, debate view, sessions list
 - [x] Type system mirroring backend schemas
 - [x] Agent registry with model assignments and visual identity
-- [x] Component test suite (154 tests, 87% line coverage)
+- [x] Component test suite (159 tests, 20 files)
 - [x] CI pipeline with automated badge updates
 - [x] Backend architecture decisions documented (MAF integration strategy)
 - [x] Domain model — TruthMap, PatchValidator, RoundPolicy, ConfidenceDecayEngine, ChangeImpactCalculator (TDD)
 - [x] Backend vertical slice — Application/Infrastructure/API scaffold with in-memory adapters and core session endpoints
 - [ ] Application layer — full Orchestrator state machine, AgentRunner, ICouncilAgent expansion
-- [ ] Infrastructure layer — MAF agents, PostgreSQL, Redis, SignalR hub (replace in-memory adapters)
+- [ ] Infrastructure layer — MAF agents, PostgreSQL, Redis, full SignalR event surface (replace in-memory adapters)
 - [ ] API layer — full REST endpoints + global exception middleware
-- [ ] Frontend–backend integration — replace mock data with REST API + SignalR
+- [ ] Frontend–backend integration — replace remaining demo thread/truth-map state with live REST + SignalR event data
 
 ### Phase 1.5
 - [ ] Map View (desktop graph visualisation)

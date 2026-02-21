@@ -4,6 +4,7 @@ using Agon.Application.Sessions;
 using Agon.Domain.Sessions;
 using Agon.Domain.TruthMap;
 using FluentAssertions;
+using Microsoft.Extensions.Logging;
 using NSubstitute;
 
 namespace Agon.Application.Tests.Orchestration;
@@ -14,7 +15,9 @@ public class AgentRunnerTests
     public async Task ApplyValidatedPatchesAsync_AppliesInAlphabeticalAgentOrder()
     {
         var repository = Substitute.For<ITruthMapRepository>();
-        var sut = new AgentRunner(repository);
+        var eventBroadcaster = Substitute.For<IEventBroadcaster>();
+        var logger = Substitute.For<ILogger<AgentRunner>>();
+        var sut = new AgentRunner(repository, eventBroadcaster, logger);
         var sessionId = Guid.NewGuid();
 
         var responses = new List<AgentExecutionResult>
@@ -35,10 +38,40 @@ public class AgentRunnerTests
     }
 
     [Fact]
+    public async Task ApplyValidatedPatchesAsync_BroadcastsPatchEventsAfterApply()
+    {
+        var repository = Substitute.For<ITruthMapRepository>();
+        var eventBroadcaster = Substitute.For<IEventBroadcaster>();
+        var logger = Substitute.For<ILogger<AgentRunner>>();
+        var sut = new AgentRunner(repository, eventBroadcaster, logger);
+        var sessionId = Guid.NewGuid();
+
+        var mapAfterPatch = TruthMapState.CreateNew(sessionId);
+        mapAfterPatch.IncrementVersion();
+        repository.GetAsync(sessionId, Arg.Any<CancellationToken>()).Returns(mapAfterPatch);
+
+        var responses = new List<AgentExecutionResult>
+        {
+            AgentExecutionResult.Success("contrarian", CreatePatch("contrarian")),
+            AgentExecutionResult.Success("product_strategist", CreatePatch("product_strategist"))
+        };
+
+        await sut.ApplyValidatedPatchesAsync(sessionId, responses, CancellationToken.None);
+
+        await eventBroadcaster.Received(2).TruthMapPatchedAsync(
+            sessionId,
+            Arg.Any<TruthMapPatch>(),
+            Arg.Is(1),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task RunRoundAsync_MarksTimedOutAgent()
     {
         var repository = Substitute.For<ITruthMapRepository>();
-        var sut = new AgentRunner(repository);
+        var eventBroadcaster = Substitute.For<IEventBroadcaster>();
+        var logger = Substitute.For<ILogger<AgentRunner>>();
+        var sut = new AgentRunner(repository, eventBroadcaster, logger);
         var slowAgent = new SlowAgent("contrarian");
 
         var context = new AgentContext

@@ -5,6 +5,7 @@ using Agon.Application.Services;
 using Agon.Domain.Sessions;
 using Agon.Domain.TruthMap;
 using FluentAssertions;
+using Microsoft.Extensions.Logging;
 using NSubstitute;
 
 namespace Agon.Application.Tests.Services;
@@ -16,8 +17,10 @@ public class SessionServiceTests
     {
         var sessionRepository = Substitute.For<ISessionRepository>();
         var truthMapRepository = Substitute.For<ITruthMapRepository>();
+        var eventBroadcaster = Substitute.For<IEventBroadcaster>();
         var orchestrator = new Orchestrator();
-        var sut = new SessionService(sessionRepository, truthMapRepository, orchestrator);
+        var logger = Substitute.For<ILogger<SessionService>>();
+        var sut = new SessionService(sessionRepository, truthMapRepository, orchestrator, eventBroadcaster, logger);
 
         var session = await sut.CreateSessionAsync(
             idea: "A platform to stress-test startup ideas.",
@@ -43,8 +46,10 @@ public class SessionServiceTests
     {
         var sessionRepository = Substitute.For<ISessionRepository>();
         var truthMapRepository = Substitute.For<ITruthMapRepository>();
+        var eventBroadcaster = Substitute.For<IEventBroadcaster>();
         var orchestrator = new Orchestrator();
-        var sut = new SessionService(sessionRepository, truthMapRepository, orchestrator);
+        var logger = Substitute.For<ILogger<SessionService>>();
+        var sut = new SessionService(sessionRepository, truthMapRepository, orchestrator, eventBroadcaster, logger);
 
         var act = () => sut.CreateSessionAsync("short", SessionMode.Quick, 50, CancellationToken.None);
 
@@ -72,14 +77,18 @@ public class SessionServiceTests
 
         var truthMapRepository = Substitute.For<ITruthMapRepository>();
         truthMapRepository.GetAsync(sessionId, Arg.Any<CancellationToken>()).Returns(map);
+        var eventBroadcaster = Substitute.For<IEventBroadcaster>();
 
         var orchestrator = new Orchestrator();
-        var sut = new SessionService(sessionRepository, truthMapRepository, orchestrator);
+        var logger = Substitute.For<ILogger<SessionService>>();
+        var sut = new SessionService(sessionRepository, truthMapRepository, orchestrator, eventBroadcaster, logger);
 
         var updated = await sut.StartSessionAsync(sessionId, CancellationToken.None);
 
         updated.Phase.Should().Be(SessionPhase.DebateRound1);
         updated.RoundNumber.Should().Be(1);
         await sessionRepository.Received(1).UpdateAsync(updated, Arg.Any<CancellationToken>());
+        await eventBroadcaster.Received(1)
+            .RoundProgressAsync(sessionId, SessionPhase.DebateRound1, Arg.Any<CancellationToken>());
     }
 }
