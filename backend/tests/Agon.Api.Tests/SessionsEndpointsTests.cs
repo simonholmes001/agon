@@ -51,6 +51,27 @@ public class SessionsEndpointsTests : IClassFixture<WebApplicationFactory<Progra
     }
 
     [Fact]
+    public async Task StartSession_ReturnsCorrelationIdHeader_WhenProvidedByClient()
+    {
+        var create = await client.PostAsJsonAsync("/sessions", new
+        {
+            idea = "A service that validates startup ideas with an AI council.",
+            mode = "Deep",
+            frictionLevel = 50
+        });
+        var created = await create.Content.ReadFromJsonAsync<SessionResponse>();
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, $"/sessions/{created!.SessionId}/start");
+        request.Headers.Add("X-Correlation-ID", "corr-api-123");
+
+        var startResponse = await client.SendAsync(request);
+
+        startResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        startResponse.Headers.TryGetValues("X-Correlation-ID", out var values).Should().BeTrue();
+        values.Should().Contain("corr-api-123");
+    }
+
+    [Fact]
     public async Task GetTruthMap_ReturnsCurrentMapForSession()
     {
         var create = await client.PostAsJsonAsync("/sessions", new

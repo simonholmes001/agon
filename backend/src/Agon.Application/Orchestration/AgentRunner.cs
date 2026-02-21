@@ -17,21 +17,23 @@ public class AgentRunner(
     {
         var agentList = agents.ToList();
         logger.LogInformation(
-            "Running agent round. SessionId={SessionId} Round={Round} Phase={Phase} AgentCount={AgentCount}",
+            "Running agent round. SessionId={SessionId} Round={Round} Phase={Phase} AgentCount={AgentCount} CorrelationId={CorrelationId}",
             context.SessionId,
             context.Round,
             context.Phase,
-            agentList.Count);
+            agentList.Count,
+            context.CorrelationId);
 
         var tasks = agentList.Select(agent => ExecuteAgentAsync(agent, context, timeoutPerAgent, cancellationToken));
         var results = await Task.WhenAll(tasks);
 
         logger.LogInformation(
-            "Completed agent round. SessionId={SessionId} Round={Round} TimedOut={TimedOutCount} Failed={FailedCount}",
+            "Completed agent round. SessionId={SessionId} Round={Round} TimedOut={TimedOutCount} Failed={FailedCount} CorrelationId={CorrelationId}",
             context.SessionId,
             context.Round,
             results.Count(result => result.TimedOut),
-            results.Count(result => result.Error is not null && result.Error != "timeout"));
+            results.Count(result => result.Error is not null && result.Error != "timeout"),
+            context.CorrelationId);
 
         return results;
     }
@@ -73,10 +75,11 @@ public class AgentRunner(
         {
             logger.LogError(
                 exception,
-                "Agent failed synchronously before task creation. SessionId={SessionId} Round={Round} AgentId={AgentId}",
+                "Agent failed synchronously before task creation. SessionId={SessionId} Round={Round} AgentId={AgentId} CorrelationId={CorrelationId}",
                 context.SessionId,
                 context.Round,
-                agent.AgentId);
+                agent.AgentId,
+                context.CorrelationId);
             return AgentExecutionResult.Failed(agent.AgentId, exception.Message);
         }
 
@@ -87,11 +90,12 @@ public class AgentRunner(
         {
             timeoutCts.Cancel();
             logger.LogWarning(
-                "Agent timed out. SessionId={SessionId} Round={Round} AgentId={AgentId} TimeoutMs={TimeoutMs}",
+                "Agent timed out. SessionId={SessionId} Round={Round} AgentId={AgentId} TimeoutMs={TimeoutMs} CorrelationId={CorrelationId}",
                 context.SessionId,
                 context.Round,
                 agent.AgentId,
-                timeoutPerAgent.TotalMilliseconds);
+                timeoutPerAgent.TotalMilliseconds,
+                context.CorrelationId);
             return AgentExecutionResult.Timeout(agent.AgentId);
         }
 
@@ -99,30 +103,33 @@ public class AgentRunner(
         {
             var response = await runTask;
             logger.LogInformation(
-                "Agent completed. SessionId={SessionId} Round={Round} AgentId={AgentId} HasPatch={HasPatch}",
+                "Agent completed. SessionId={SessionId} Round={Round} AgentId={AgentId} HasPatch={HasPatch} CorrelationId={CorrelationId}",
                 context.SessionId,
                 context.Round,
                 agent.AgentId,
-                response.Patch is not null);
+                response.Patch is not null,
+                context.CorrelationId);
             return AgentExecutionResult.Success(agent.AgentId, response.Patch, response.Message);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
             logger.LogWarning(
-                "Agent canceled due to timeout. SessionId={SessionId} Round={Round} AgentId={AgentId}",
+                "Agent canceled due to timeout. SessionId={SessionId} Round={Round} AgentId={AgentId} CorrelationId={CorrelationId}",
                 context.SessionId,
                 context.Round,
-                agent.AgentId);
+                agent.AgentId,
+                context.CorrelationId);
             return AgentExecutionResult.Timeout(agent.AgentId);
         }
         catch (Exception exception)
         {
             logger.LogError(
                 exception,
-                "Agent failed. SessionId={SessionId} Round={Round} AgentId={AgentId}",
+                "Agent failed. SessionId={SessionId} Round={Round} AgentId={AgentId} CorrelationId={CorrelationId}",
                 context.SessionId,
                 context.Round,
-                agent.AgentId);
+                agent.AgentId,
+                context.CorrelationId);
             return AgentExecutionResult.Failed(agent.AgentId, exception.Message);
         }
     }

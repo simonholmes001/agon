@@ -36,7 +36,7 @@ describe("AGENTS registry", () => {
     expect(AGENTS["socratic-clarifier"].model).toBe("GPT-5.2 Thinking");
     expect(AGENTS["framing-challenger"].model).toBe("Gemini 3");
     expect(AGENTS["product-strategist"].model).toBe("Claude Opus 4.6");
-    expect(AGENTS["technical-architect"].model).toBe("DeepSeek-V3.2");
+    expect(AGENTS["technical-architect"].model).toBe("GPT-5.2 Thinking");
     expect(AGENTS["contrarian"].model).toBe("Gemini 3");
     expect(AGENTS["research-librarian"].model).toBe("GPT-5.2 Thinking");
     expect(AGENTS["synthesis-validation"].model).toBe("GPT-5.2 Thinking");

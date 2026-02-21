@@ -26,7 +26,7 @@ Unlike a single-prompt AI chat, Agon maintains a **living Truth Map**: a structu
 |---|---|
 | **Truth Map** | Shared state graph (claims, assumptions, risks, decisions, evidence) — the single source of truth for the session. Agents propose patches; the Orchestrator validates and applies them. |
 | **Council** | Seven specialist agents: Socratic Clarifier, Framing Challenger, Product Strategist, Technical Architect, Contrarian / Red Team, Research Librarian, Synthesis + Validation. |
-| **Multi-Model** | Each agent uses a different LLM provider (GPT-5.2, Gemini 3, Claude Opus 4.6, DeepSeek-V3.2) — diversity of reasoning reduces blind spots. |
+| **Multi-Model** | Agents use multiple providers (GPT-5.2, Gemini 3, Claude Opus 4.6). Technical Architect is temporarily mapped to GPT-5.2 while DeepSeek billing is paused. |
 | **Friction Slider** | User-controlled dial (0–100) that modulates agent tone *and* convergence thresholds — from brainstorm (low friction) to adversarial red-team (high friction). |
 | **Bounded Debate** | Hard-capped rounds and token budgets. Sessions always terminate. Degradation is graceful and surfaced, never silent. |
 | **HITL** | Human-in-the-loop: pause, challenge a claim, force a deep dive, change a constraint mid-session — with full change propagation. |
@@ -127,12 +127,12 @@ Full implementation guide: [`.github/instructions/backend-implementation.instruc
 | Socratic Clarifier | GPT-5.2 Thinking | OpenAI |
 | Framing Challenger | Gemini 3 (thinking: high) | Google |
 | Product Strategist | Claude Opus 4.6 | Anthropic |
-| Technical Architect | DeepSeek-V3.2 (thinking) | DeepSeek |
+| Technical Architect | GPT-5.2 Thinking (temporary override) | OpenAI |
 | Contrarian / Red Team | Gemini 3 (thinking: high) | Google |
 | Research Librarian | GPT-5.2 Thinking | OpenAI |
 | Synthesis + Validation | GPT-5.2 Thinking | OpenAI |
 
-All providers are accessed via `IChatClient` — interchangeable behind the interface. DeepSeek uses OpenAI-compatible API via `OpenAIClient` with a custom endpoint.
+All providers are accessed via `IChatClient` — interchangeable behind the interface. DeepSeek wiring remains in the codebase and can be restored once billing is enabled.
 
 ---
 
@@ -245,25 +245,25 @@ BACKEND_API_BASE_URL=http://localhost:5000
 # Optional override (defaults to BACKEND_API_BASE_URL or http://localhost:5000)
 # NEXT_PUBLIC_DEBATE_HUB_URL=http://localhost:5000/hubs/debate
 
-# backend/.env (or exported shell environment)
-# Provider keys (missing keys now surface as explicit system error transcript messages;
-# no fake-agent fallback is used)
-# OPENAI_KEY=your-openai-api-key
-# GEMINI_KEY=your-gemini-api-key
-# ANTHROPIC_KEY=your-anthropic-api-key
-# CLAUDE_KEY=your-anthropic-api-key   # supported alias
-# DEEPSEEK_KEY=your-deepseek-api-key
-#
+# project root .env
+OPENAI_KEY=your-openai-api-key
+GEMINI_KEY=your-gemini-api-key
+CLAUDE_KEY=your-anthropic-api-key
+DEEPSEEK_KEY=your-deepseek-api-key
 # Optional model overrides
-# OPENAI_MODEL=gpt-4o-mini
-# GEMINI_MODEL=gemini-2.0-flash
-# ANTHROPIC_MODEL=claude-3-5-sonnet-latest
-# DEEPSEEK_MODEL=deepseek-chat
+OPENAI_MODEL=gpt-4o-mini
+GEMINI_MODEL=gemini-2.0-flash
+ANTHROPIC_MODEL=claude-3-5-sonnet-latest
+DEEPSEEK_MODEL=deepseek-chat
 ```
 
 `BACKEND_API_BASE_URL` is used by Next.js route handlers under
 `/api/backend/*` to proxy REST calls to ASP.NET Core and avoid CORS and route
 collisions with frontend pages.
+
+`Agon.Api` now auto-loads the nearest `.env` file on startup (walking up from
+`backend/src/Agon.Api`), so local key setup works without manual `source`/`export`.
+Existing process environment variables still take precedence over `.env` values.
 
 If `NEXT_PUBLIC_DEBATE_HUB_URL` is not set, the frontend builds the hub URL
 from `NEXT_PUBLIC_BACKEND_BASE_URL` (fallback: `BACKEND_API_BASE_URL`,
@@ -372,6 +372,10 @@ Full specification: [`.github/instructions/round-policy.instructions.md`](.githu
 | `GET` | `/sessions/{id}/truthmap` | Get current Truth Map state |
 | `GET` | `/sessions/{id}/artifacts/{type}` | Retrieve a generated artifact |
 | `GET` | `/sessions/{id}/snapshots` | List available round snapshots |
+
+`POST /sessions/{id}/start` accepts optional `X-Correlation-ID`. When provided,
+the same value is echoed in the response header and included in API +
+orchestration + provider call logs for end-to-end tracing.
 
 ### SignalR (WebSockets) — Real-Time Streaming
 

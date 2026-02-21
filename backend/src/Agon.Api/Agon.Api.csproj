@@ -4,6 +4,7 @@
     <TargetFramework>net9.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <UserSecretsId>agon-api-25384581-3f5d-4ff7-9975-60e5268f993e</UserSecretsId>
   </PropertyGroup>
 
   <ItemGroup>

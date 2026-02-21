@@ -45,28 +45,32 @@ public class DeepSeekCouncilAgent(
             var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
             if (!response.IsSuccessStatusCode)
             {
+                var errorSummary = ProviderErrorSummary.FromResponseBody(responseBody);
                 logger.LogError(
-                    "DeepSeek call failed. SessionId={SessionId} Round={Round} AgentId={AgentId} Model={Model} StatusCode={StatusCode} LatencyMs={LatencyMs}",
+                    "DeepSeek call failed. SessionId={SessionId} Round={Round} AgentId={AgentId} Model={Model} StatusCode={StatusCode} LatencyMs={LatencyMs} CorrelationId={CorrelationId} ErrorSummary={ErrorSummary}",
                     context.SessionId,
                     context.Round,
                     AgentId,
                     options.ModelName,
                     (int)response.StatusCode,
-                    startedAt.ElapsedMilliseconds);
+                    startedAt.ElapsedMilliseconds,
+                    context.CorrelationId,
+                    errorSummary);
                 throw new HttpRequestException(
-                    $"DeepSeek request failed with status {(int)response.StatusCode}.",
+                    $"DeepSeek request failed with status {(int)response.StatusCode}. Cause: {errorSummary}",
                     null,
                     response.StatusCode);
             }
 
             var message = ParseOutputText(responseBody);
             logger.LogInformation(
-                "DeepSeek call succeeded. SessionId={SessionId} Round={Round} AgentId={AgentId} Model={Model} LatencyMs={LatencyMs}",
+                "DeepSeek call succeeded. SessionId={SessionId} Round={Round} AgentId={AgentId} Model={Model} LatencyMs={LatencyMs} CorrelationId={CorrelationId}",
                 context.SessionId,
                 context.Round,
                 AgentId,
                 options.ModelName,
-                startedAt.ElapsedMilliseconds);
+                startedAt.ElapsedMilliseconds,
+                context.CorrelationId);
             return new AgentResponse
             {
                 Message = message,
@@ -78,12 +82,13 @@ public class DeepSeekCouncilAgent(
         {
             logger.LogError(
                 exception,
-                "DeepSeek call failed unexpectedly. SessionId={SessionId} Round={Round} AgentId={AgentId} Model={Model} LatencyMs={LatencyMs}",
+                "DeepSeek call failed unexpectedly. SessionId={SessionId} Round={Round} AgentId={AgentId} Model={Model} LatencyMs={LatencyMs} CorrelationId={CorrelationId}",
                 context.SessionId,
                 context.Round,
                 AgentId,
                 options.ModelName,
-                startedAt.ElapsedMilliseconds);
+                startedAt.ElapsedMilliseconds,
+                context.CorrelationId);
             throw;
         }
     }

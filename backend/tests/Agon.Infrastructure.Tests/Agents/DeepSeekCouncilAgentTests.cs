@@ -46,7 +46,16 @@ public class DeepSeekCouncilAgentTests
     {
         var handler = new StubHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.Unauthorized)
         {
-            Content = new StringContent("{\"error\":\"unauthorized\"}", Encoding.UTF8, "application/json")
+            Content = new StringContent(
+                """
+                {
+                  "error": {
+                    "message": "insufficient balance"
+                  }
+                }
+                """,
+                Encoding.UTF8,
+                "application/json")
         });
         var sut = new DeepSeekCouncilAgent(
             new HttpClient(handler),
@@ -55,7 +64,8 @@ public class DeepSeekCouncilAgentTests
 
         var act = () => sut.RunAsync(CreateContext(), CancellationToken.None);
 
-        await act.Should().ThrowAsync<HttpRequestException>();
+        var exception = await act.Should().ThrowAsync<HttpRequestException>();
+        exception.Which.Message.Should().Contain("insufficient balance");
     }
 
     private static AgentContext CreateContext()

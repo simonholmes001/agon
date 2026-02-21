@@ -42,7 +42,17 @@ public class AnthropicCouncilAgentTests
     {
         var handler = new StubHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.BadRequest)
         {
-            Content = new StringContent("{\"error\":\"bad_request\"}", Encoding.UTF8, "application/json")
+            Content = new StringContent(
+                """
+                {
+                  "error": {
+                    "type": "invalid_request_error",
+                    "message": "credit balance is too low"
+                  }
+                }
+                """,
+                Encoding.UTF8,
+                "application/json")
         });
         var sut = new AnthropicCouncilAgent(
             new HttpClient(handler),
@@ -51,7 +61,8 @@ public class AnthropicCouncilAgentTests
 
         var act = () => sut.RunAsync(CreateContext(), CancellationToken.None);
 
-        await act.Should().ThrowAsync<HttpRequestException>();
+        var exception = await act.Should().ThrowAsync<HttpRequestException>();
+        exception.Which.Message.Should().Contain("credit balance is too low");
     }
 
     private static AgentContext CreateContext()

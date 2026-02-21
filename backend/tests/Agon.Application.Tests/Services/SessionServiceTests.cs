@@ -250,6 +250,51 @@ public class SessionServiceTests
     }
 
     [Fact]
+    public async Task StartSessionAsync_PropagatesCorrelationId_ToAgentContext()
+    {
+        var sessionId = Guid.NewGuid();
+        var session = new SessionState
+        {
+            SessionId = sessionId,
+            Phase = SessionPhase.Clarification,
+            Status = SessionStatus.Active,
+            Mode = SessionMode.Deep,
+            FrictionLevel = 50,
+            RoundPolicy = new RoundPolicy()
+        };
+        var map = TruthMapState.CreateNew(sessionId);
+
+        var sessionRepository = Substitute.For<ISessionRepository>();
+        sessionRepository.GetAsync(sessionId, Arg.Any<CancellationToken>()).Returns(session);
+
+        var truthMapRepository = Substitute.For<ITruthMapRepository>();
+        truthMapRepository.GetAsync(sessionId, Arg.Any<CancellationToken>()).Returns(map);
+
+        var transcriptRepository = Substitute.For<ITranscriptRepository>();
+        var eventBroadcaster = Substitute.For<IEventBroadcaster>();
+        var orchestrator = new Orchestrator();
+        var runnerLogger = Substitute.For<ILogger<AgentRunner>>();
+        var agentRunner = new AgentRunner(truthMapRepository, eventBroadcaster, runnerLogger);
+        var capturingAgent = new ContextCapturingAgent("product_strategist", "message");
+        var logger = Substitute.For<ILogger<SessionService>>();
+
+        var sut = new SessionService(
+            sessionRepository,
+            truthMapRepository,
+            transcriptRepository,
+            orchestrator,
+            agentRunner,
+            [capturingAgent],
+            eventBroadcaster,
+            logger);
+
+        await sut.StartSessionAsync(sessionId, CancellationToken.None, "corr-start-123");
+
+        capturingAgent.LastContext.Should().NotBeNull();
+        capturingAgent.LastContext!.CorrelationId.Should().Be("corr-start-123");
+    }
+
+    [Fact]
     public async Task GetTranscriptAsync_ReturnsMessagesFromRepository()
     {
         var sessionId = Guid.NewGuid();
@@ -337,6 +382,31 @@ public class SessionServiceTests
 #pragma warning disable CS0162
             yield break;
 #pragma warning restore CS0162
+        }
+    }
+
+    private sealed class ContextCapturingAgent(string agentId, string message) : ICouncilAgent
+    {
+        public string AgentId { get; } = agentId;
+        public string ModelProvider => "test";
+        public AgentContext? LastContext { get; private set; }
+
+        public Task<AgentResponse> RunAsync(AgentContext context, CancellationToken cancellationToken)
+        {
+            LastContext = context;
+            return Task.FromResult(new AgentResponse
+            {
+                Message = message,
+                RawOutput = message
+            });
+        }
+
+        public async IAsyncEnumerable<string> RunStreamingAsync(
+            AgentContext context,
+            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
+        {
+            await Task.Yield();
+            yield return message;
         }
     }
 }

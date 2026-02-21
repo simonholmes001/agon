@@ -48,7 +48,16 @@ public class GeminiCouncilAgentTests
     {
         var handler = new StubHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.Forbidden)
         {
-            Content = new StringContent("{\"error\":\"forbidden\"}", Encoding.UTF8, "application/json")
+            Content = new StringContent(
+                """
+                {
+                  "error": {
+                    "message": "quota exceeded"
+                  }
+                }
+                """,
+                Encoding.UTF8,
+                "application/json")
         });
         var sut = new GeminiCouncilAgent(
             new HttpClient(handler),
@@ -57,7 +66,8 @@ public class GeminiCouncilAgentTests
 
         var act = () => sut.RunAsync(CreateContext(), CancellationToken.None);
 
-        await act.Should().ThrowAsync<HttpRequestException>();
+        var exception = await act.Should().ThrowAsync<HttpRequestException>();
+        exception.Which.Message.Should().Contain("quota exceeded");
     }
 
     private static AgentContext CreateContext()

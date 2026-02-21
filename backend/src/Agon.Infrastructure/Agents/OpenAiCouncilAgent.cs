@@ -45,29 +45,33 @@ public class OpenAiCouncilAgent(
 
             if (!response.IsSuccessStatusCode)
             {
+                var errorSummary = ProviderErrorSummary.FromResponseBody(responseBody);
                 logger.LogError(
-                    "OpenAI call failed. SessionId={SessionId} Round={Round} AgentId={AgentId} Model={Model} StatusCode={StatusCode} LatencyMs={LatencyMs}",
+                    "OpenAI call failed. SessionId={SessionId} Round={Round} AgentId={AgentId} Model={Model} StatusCode={StatusCode} LatencyMs={LatencyMs} CorrelationId={CorrelationId} ErrorSummary={ErrorSummary}",
                     context.SessionId,
                     context.Round,
                     AgentId,
                     options.ModelName,
                     (int)response.StatusCode,
-                    startedAt.ElapsedMilliseconds);
+                    startedAt.ElapsedMilliseconds,
+                    context.CorrelationId,
+                    errorSummary);
 
                 throw new HttpRequestException(
-                    $"OpenAI request failed with status {(int)response.StatusCode}.",
+                    $"OpenAI request failed with status {(int)response.StatusCode}. Cause: {errorSummary}",
                     null,
                     response.StatusCode);
             }
 
             var message = ParseOutputText(responseBody);
             logger.LogInformation(
-                "OpenAI call succeeded. SessionId={SessionId} Round={Round} AgentId={AgentId} Model={Model} LatencyMs={LatencyMs}",
+                "OpenAI call succeeded. SessionId={SessionId} Round={Round} AgentId={AgentId} Model={Model} LatencyMs={LatencyMs} CorrelationId={CorrelationId}",
                 context.SessionId,
                 context.Round,
                 AgentId,
                 options.ModelName,
-                startedAt.ElapsedMilliseconds);
+                startedAt.ElapsedMilliseconds,
+                context.CorrelationId);
 
             return new AgentResponse
             {
@@ -80,12 +84,13 @@ public class OpenAiCouncilAgent(
         {
             logger.LogError(
                 exception,
-                "OpenAI call failed unexpectedly. SessionId={SessionId} Round={Round} AgentId={AgentId} Model={Model} LatencyMs={LatencyMs}",
+                "OpenAI call failed unexpectedly. SessionId={SessionId} Round={Round} AgentId={AgentId} Model={Model} LatencyMs={LatencyMs} CorrelationId={CorrelationId}",
                 context.SessionId,
                 context.Round,
                 AgentId,
                 options.ModelName,
-                startedAt.ElapsedMilliseconds);
+                startedAt.ElapsedMilliseconds,
+                context.CorrelationId);
             throw;
         }
     }

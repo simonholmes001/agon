@@ -1,3 +1,4 @@
+using Agon.Api.Configuration;
 using Agon.Api.Middleware;
 using Agon.Application.Interfaces;
 using Agon.Application.Orchestration;
@@ -12,24 +13,42 @@ using Microsoft.AspNetCore.SignalR;
 var builder = WebApplication.CreateBuilder(args);
 
 const string FrontendCorsPolicy = "FrontendCorsPolicy";
+const string CorrelationHeaderName = "X-Correlation-ID";
 const string OpenAiDefaultModel = "gpt-4o-mini";
+const string TechnicalArchitectTemporaryModelDefault = "gpt-5.2-thinking";
 const string GeminiDefaultModel = "gemini-2.0-flash";
 const string AnthropicDefaultModel = "claude-3-5-sonnet-latest";
-const string DeepSeekDefaultModel = "deepseek-chat";
 var allowedOrigins = builder.Configuration
     .GetSection("Cors:AllowedOrigins")
     .Get<string[]>()
     ?? ["http://localhost:3000", "https://localhost:3000"];
-var openAiApiKey = builder.Configuration["OPENAI_KEY"] ?? builder.Configuration["OpenAI:ApiKey"];
-var openAiModel = builder.Configuration["OpenAI:Model"] ?? OpenAiDefaultModel;
-var geminiApiKey = builder.Configuration["GEMINI_KEY"] ?? builder.Configuration["Gemini:ApiKey"];
-var geminiModel = builder.Configuration["Gemini:Model"] ?? GeminiDefaultModel;
-var anthropicApiKey = builder.Configuration["ANTHROPIC_KEY"]
+var dotEnvLoadResult = DotEnvLoader.Load(builder.Environment.ContentRootPath);
+
+var openAiApiKey = Environment.GetEnvironmentVariable("OPENAI_KEY")
+    ?? builder.Configuration["OPENAI_KEY"]
+    ?? builder.Configuration["OpenAI:ApiKey"];
+var openAiModel = Environment.GetEnvironmentVariable("OPENAI_MODEL")
+    ?? builder.Configuration["OPENAI_MODEL"]
+    ?? builder.Configuration["OpenAI:Model"]
+    ?? OpenAiDefaultModel;
+var geminiApiKey = Environment.GetEnvironmentVariable("GEMINI_KEY")
+    ?? builder.Configuration["GEMINI_KEY"]
+    ?? builder.Configuration["Gemini:ApiKey"];
+var geminiModel = Environment.GetEnvironmentVariable("GEMINI_MODEL")
+    ?? builder.Configuration["GEMINI_MODEL"]
+    ?? builder.Configuration["Gemini:Model"]
+    ?? GeminiDefaultModel;
+var anthropicApiKey = Environment.GetEnvironmentVariable("ANTHROPIC_KEY")
+    ?? Environment.GetEnvironmentVariable("CLAUDE_KEY")
+    ?? builder.Configuration["ANTHROPIC_KEY"]
     ?? builder.Configuration["CLAUDE_KEY"]
     ?? builder.Configuration["Anthropic:ApiKey"];
-var anthropicModel = builder.Configuration["Anthropic:Model"] ?? AnthropicDefaultModel;
-var deepSeekApiKey = builder.Configuration["DEEPSEEK_KEY"] ?? builder.Configuration["DeepSeek:ApiKey"];
-var deepSeekModel = builder.Configuration["DeepSeek:Model"] ?? DeepSeekDefaultModel;
+var anthropicModel = Environment.GetEnvironmentVariable("ANTHROPIC_MODEL")
+    ?? builder.Configuration["ANTHROPIC_MODEL"]
+    ?? builder.Configuration["Anthropic:Model"]
+    ?? AnthropicDefaultModel;
+var technicalArchitectModel = Environment.GetEnvironmentVariable("TECHNICAL_ARCHITECT_MODEL")
+    ?? TechnicalArchitectTemporaryModelDefault;
 
 builder.Logging.AddFilter("Microsoft.AspNetCore.Hosting.Diagnostics", LogLevel.Warning);
 builder.Logging.AddFilter("Microsoft.AspNetCore.Routing.EndpointMiddleware", LogLevel.Warning);
@@ -140,35 +159,45 @@ builder.Services.AddSingleton<ICouncilAgent>(sp =>
 });
 builder.Services.AddSingleton<ICouncilAgent>(sp =>
 {
-    if (string.IsNullOrWhiteSpace(deepSeekApiKey))
+    if (string.IsNullOrWhiteSpace(openAiApiKey))
     {
         return new ConfigurationErrorCouncilAgent(
             AgentId.TechnicalArchitect,
-            modelProvider: "deepseek",
-            errorMessage: "Missing DEEPSEEK_KEY for agent 'technical_architect'.",
+            modelProvider: "openai",
+            errorMessage: "Missing OPENAI_KEY for agent 'technical_architect' temporary OpenAI override.",
             logger: sp.GetRequiredService<ILogger<ConfigurationErrorCouncilAgent>>());
     }
 
-    return new DeepSeekCouncilAgent(
+    return new OpenAiCouncilAgent(
         sp.GetRequiredService<IHttpClientFactory>().CreateClient(),
-        new DeepSeekCouncilAgentOptions(
+        new OpenAiCouncilAgentOptions(
             AgentId.TechnicalArchitect,
-            deepSeekApiKey,
-            deepSeekModel,
+            openAiApiKey,
+            technicalArchitectModel,
             MaxOutputTokens: 600),
-        sp.GetRequiredService<ILogger<DeepSeekCouncilAgent>>());
+        sp.GetRequiredService<ILogger<OpenAiCouncilAgent>>());
 });
 
 var app = builder.Build();
 app.UseMiddleware<GlobalExceptionMiddleware>();
 app.UseCors(FrontendCorsPolicy);
 
+if (dotEnvLoadResult.FilePath is not null)
+{
+    app.Logger.LogInformation(
+        ".env configuration loaded. Path={Path} LoadedKeys={LoadedKeys} SkippedExistingKeys={SkippedExistingKeys}",
+        dotEnvLoadResult.FilePath,
+        dotEnvLoadResult.LoadedCount,
+        dotEnvLoadResult.SkippedExistingCount);
+}
+
 app.Logger.LogInformation(
-    "Council provider configuration. OpenAI={OpenAiConfigured} Gemini={GeminiConfigured} Anthropic={AnthropicConfigured} DeepSeek={DeepSeekConfigured}",
+    "Council provider configuration. OpenAI={OpenAiConfigured} Gemini={GeminiConfigured} Anthropic={AnthropicConfigured} TechnicalArchitectProvider={TechnicalArchitectProvider} TechnicalArchitectModel={TechnicalArchitectModel}",
     !string.IsNullOrWhiteSpace(openAiApiKey),
     !string.IsNullOrWhiteSpace(geminiApiKey),
     !string.IsNullOrWhiteSpace(anthropicApiKey),
-    !string.IsNullOrWhiteSpace(deepSeekApiKey));
+    "openai-temporary-override",
+    technicalArchitectModel);
 
 if (string.IsNullOrWhiteSpace(openAiApiKey))
 {
@@ -185,10 +214,9 @@ if (string.IsNullOrWhiteSpace(anthropicApiKey))
     app.Logger.LogWarning("ANTHROPIC_KEY/CLAUDE_KEY is not configured. anthropic-backed agents will emit system error messages.");
 }
 
-if (string.IsNullOrWhiteSpace(deepSeekApiKey))
-{
-    app.Logger.LogWarning("DEEPSEEK_KEY is not configured. deepseek-backed agents will emit system error messages.");
-}
+app.Logger.LogWarning(
+    "Temporary provider override active: technical_architect is mapped to OpenAI model {Model} until DeepSeek billing is restored.",
+    technicalArchitectModel);
 
 app.MapPost("/sessions", async (
     CreateSessionRequest request,
@@ -272,19 +300,30 @@ app.MapGet("/sessions/{sessionId:guid}", async (
 app.MapPost("/sessions/{sessionId:guid}/start", async (
     Guid sessionId,
     SessionService sessionService,
+    HttpContext httpContext,
     ILoggerFactory loggerFactory,
     CancellationToken cancellationToken) =>
 {
+    var correlationId = ResolveCorrelationId(httpContext);
+    httpContext.Response.Headers[CorrelationHeaderName] = correlationId;
+
     var logger = loggerFactory.CreateLogger("SessionsApi");
-    logger.LogInformation("POST /sessions/{SessionId}/start received.", sessionId);
+    logger.LogInformation(
+        "POST /sessions/{SessionId}/start received. CorrelationId={CorrelationId}",
+        sessionId,
+        correlationId);
 
     try
     {
-        var session = await sessionService.StartSessionAsync(sessionId, cancellationToken);
-        logger.LogInformation(
-            "POST /sessions/{SessionId}/start transitioned to phase {Phase}.",
+        var session = await sessionService.StartSessionAsync(
             sessionId,
-            session.Phase);
+            cancellationToken,
+            correlationId);
+        logger.LogInformation(
+            "POST /sessions/{SessionId}/start transitioned to phase {Phase}. CorrelationId={CorrelationId}",
+            sessionId,
+            session.Phase,
+            correlationId);
         return Results.Ok(new SessionResponse(
             session.SessionId,
             session.Status.ToString(),
@@ -296,12 +335,19 @@ app.MapPost("/sessions/{sessionId:guid}/start", async (
     }
     catch (KeyNotFoundException)
     {
-        logger.LogWarning("POST /sessions/{SessionId}/start returned not found.", sessionId);
+        logger.LogWarning(
+            "POST /sessions/{SessionId}/start returned not found. CorrelationId={CorrelationId}",
+            sessionId,
+            correlationId);
         return Results.NotFound();
     }
     catch (Exception exception)
     {
-        logger.LogError(exception, "POST /sessions/{SessionId}/start failed unexpectedly.", sessionId);
+        logger.LogError(
+            exception,
+            "POST /sessions/{SessionId}/start failed unexpectedly. CorrelationId={CorrelationId}",
+            sessionId,
+            correlationId);
         throw;
     }
 });
@@ -364,6 +410,18 @@ app.MapGet("/sessions/{sessionId:guid}/transcript", async (
 app.MapHub<DebateHub>("/hubs/debate");
 
 app.Run();
+
+static string ResolveCorrelationId(HttpContext context)
+{
+    var fromHeader = context.Request.Headers[CorrelationHeaderName].FirstOrDefault();
+    if (!string.IsNullOrWhiteSpace(fromHeader))
+    {
+        context.TraceIdentifier = fromHeader;
+        return fromHeader;
+    }
+
+    return context.TraceIdentifier;
+}
 
 public record CreateSessionRequest(string Idea, string Mode, int FrictionLevel);
 

@@ -60,8 +60,8 @@ public sealed record AgentConfig
             ActivePhases: [SessionPhase.DebateRound1, SessionPhase.DebateRound2]),
 
         new(Agents.AgentId.TechnicalArchitect,
-            ModelProvider: "deepseek",
-            ModelName: "deepseek-v3.2",
+            ModelProvider: "openai",
+            ModelName: "gpt-5.2-thinking",
             MaxOutputTokens: 4096,
             ActivePhases: [SessionPhase.DebateRound1, SessionPhase.DebateRound2]),
 

@@ -70,19 +70,29 @@ public class SessionService(
         return session;
     }
 
-    public async Task<SessionState> StartSessionAsync(Guid sessionId, CancellationToken cancellationToken)
+    public async Task<SessionState> StartSessionAsync(
+        Guid sessionId,
+        CancellationToken cancellationToken,
+        string? correlationId = null)
     {
+        var resolvedCorrelationId = NormalizeCorrelationId(correlationId);
         var session = await sessionRepository.GetAsync(sessionId, cancellationToken);
         if (session is null)
         {
-            logger.LogWarning("Cannot start session because it was not found. SessionId={SessionId}", sessionId);
+            logger.LogWarning(
+                "Cannot start session because it was not found. SessionId={SessionId} CorrelationId={CorrelationId}",
+                sessionId,
+                resolvedCorrelationId);
             throw new KeyNotFoundException($"Session '{sessionId}' was not found.");
         }
 
         var map = await truthMapRepository.GetAsync(sessionId, cancellationToken);
         if (map is null)
         {
-            logger.LogWarning("Cannot start session because truth map was not found. SessionId={SessionId}", sessionId);
+            logger.LogWarning(
+                "Cannot start session because truth map was not found. SessionId={SessionId} CorrelationId={CorrelationId}",
+                sessionId,
+                resolvedCorrelationId);
             throw new KeyNotFoundException($"Truth map for session '{sessionId}' was not found.");
         }
 
@@ -97,22 +107,24 @@ public class SessionService(
                 CreateRoundKickoffSystemMessage(sessionId, session.RoundNumber),
                 cancellationToken);
 
-            await RunCouncilRoundAsync(session, map, cancellationToken);
+            await RunCouncilRoundAsync(session, map, resolvedCorrelationId, cancellationToken);
         }
         else
         {
             logger.LogDebug(
-                "StartSession called but session is not in clarification. SessionId={SessionId} Phase={Phase}",
+                "StartSession called but session is not in clarification. SessionId={SessionId} Phase={Phase} CorrelationId={CorrelationId}",
                 sessionId,
-                session.Phase);
+                session.Phase,
+                resolvedCorrelationId);
         }
 
         await sessionRepository.UpdateAsync(session, cancellationToken);
         logger.LogInformation(
-            "Started session. SessionId={SessionId} Phase={Phase} Round={Round}",
+            "Started session. SessionId={SessionId} Phase={Phase} Round={Round} CorrelationId={CorrelationId}",
             sessionId,
             session.Phase,
-            session.RoundNumber);
+            session.RoundNumber,
+            resolvedCorrelationId);
         return session;
     }
 
@@ -145,21 +157,24 @@ public class SessionService(
     private async Task RunCouncilRoundAsync(
         SessionState session,
         TruthMapState map,
+        string correlationId,
         CancellationToken cancellationToken)
     {
         var activeAgents = SelectActiveAgentsForPhase(session.Phase);
         if (activeAgents.Count == 0)
         {
             logger.LogWarning(
-                "No active council agents configured for phase. SessionId={SessionId} Phase={Phase}",
+                "No active council agents configured for phase. SessionId={SessionId} Phase={Phase} CorrelationId={CorrelationId}",
                 session.SessionId,
-                session.Phase);
+                session.Phase,
+                correlationId);
             return;
         }
 
         var context = new AgentContext
         {
             SessionId = session.SessionId,
+            CorrelationId = correlationId,
             Round = session.RoundNumber,
             Phase = session.Phase,
             FrictionLevel = session.FrictionLevel,
@@ -168,12 +183,13 @@ public class SessionService(
 
         var timeout = ResolveRoundTimeout(activeAgents);
         logger.LogInformation(
-            "Dispatching council round. SessionId={SessionId} Round={Round} Phase={Phase} AgentCount={AgentCount} TimeoutSeconds={TimeoutSeconds}",
+            "Dispatching council round. SessionId={SessionId} Round={Round} Phase={Phase} AgentCount={AgentCount} TimeoutSeconds={TimeoutSeconds} CorrelationId={CorrelationId}",
             session.SessionId,
             session.RoundNumber,
             session.Phase,
             activeAgents.Count,
-            timeout.TotalSeconds);
+            timeout.TotalSeconds,
+            correlationId);
 
         var results = await agentRunner.RunRoundAsync(
             activeAgents,
@@ -190,13 +206,14 @@ public class SessionService(
         await agentRunner.ApplyValidatedPatchesAsync(session.SessionId, results, cancellationToken);
 
         logger.LogInformation(
-            "Council round completed. SessionId={SessionId} Round={Round} AgentCount={AgentCount} StoredMessages={StoredMessages} TimedOut={TimedOut} Failed={Failed}",
+            "Council round completed. SessionId={SessionId} Round={Round} AgentCount={AgentCount} StoredMessages={StoredMessages} TimedOut={TimedOut} Failed={Failed} CorrelationId={CorrelationId}",
             session.SessionId,
             session.RoundNumber,
             activeAgents.Count,
             storedMessages,
             results.Count(result => result.TimedOut),
-            results.Count(result => result.Error is not null && result.Error != "timeout"));
+            results.Count(result => result.Error is not null && result.Error != "timeout"),
+            correlationId);
     }
 
     private List<ICouncilAgent> SelectActiveAgentsForPhase(SessionPhase phase)
@@ -304,4 +321,7 @@ public class SessionService(
             ? trimmed
             : trimmed[..180];
     }
+
+    private static string NormalizeCorrelationId(string? correlationId) =>
+        string.IsNullOrWhiteSpace(correlationId) ? "n/a" : correlationId.Trim();
 }

@@ -97,13 +97,13 @@ public class AgentConfigTests
     }
 
     [Fact]
-    public void DefaultCouncilConfigs_TechnicalArchitect_UsesDeepSeek()
+    public void DefaultCouncilConfigs_TechnicalArchitect_UsesOpenAiTemporarily()
     {
         var config = AgentConfig.DefaultCouncil
             .Single(c => c.AgentId == AgentId.TechnicalArchitect);
 
-        config.ModelProvider.Should().Be("deepseek");
-        config.ModelName.Should().Be("deepseek-v3.2");
+        config.ModelProvider.Should().Be("openai");
+        config.ModelName.Should().Be("gpt-5.2-thinking");
     }
 
     [Fact]

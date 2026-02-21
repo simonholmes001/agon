@@ -16,7 +16,7 @@ const features = [
     icon: Sparkles,
     title: "Multi-Model Council",
     description:
-      "Seven specialist agents powered by GPT-5.2, Gemini 3, Claude Opus 4.6, and DeepSeek debate your idea from every angle.",
+      "Seven specialist agents powered by GPT-5.2, Gemini 3, and Claude Opus 4.6, with a temporary GPT-5.2 override for architecture debate.",
   },
   {
     icon: Shield,

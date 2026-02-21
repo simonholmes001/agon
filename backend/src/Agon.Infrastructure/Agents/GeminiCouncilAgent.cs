@@ -43,28 +43,32 @@ public class GeminiCouncilAgent(
             var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
             if (!response.IsSuccessStatusCode)
             {
+                var errorSummary = ProviderErrorSummary.FromResponseBody(responseBody);
                 logger.LogError(
-                    "Gemini call failed. SessionId={SessionId} Round={Round} AgentId={AgentId} Model={Model} StatusCode={StatusCode} LatencyMs={LatencyMs}",
+                    "Gemini call failed. SessionId={SessionId} Round={Round} AgentId={AgentId} Model={Model} StatusCode={StatusCode} LatencyMs={LatencyMs} CorrelationId={CorrelationId} ErrorSummary={ErrorSummary}",
                     context.SessionId,
                     context.Round,
                     AgentId,
                     options.ModelName,
                     (int)response.StatusCode,
-                    startedAt.ElapsedMilliseconds);
+                    startedAt.ElapsedMilliseconds,
+                    context.CorrelationId,
+                    errorSummary);
                 throw new HttpRequestException(
-                    $"Gemini request failed with status {(int)response.StatusCode}.",
+                    $"Gemini request failed with status {(int)response.StatusCode}. Cause: {errorSummary}",
                     null,
                     response.StatusCode);
             }
 
             var message = ParseOutputText(responseBody);
             logger.LogInformation(
-                "Gemini call succeeded. SessionId={SessionId} Round={Round} AgentId={AgentId} Model={Model} LatencyMs={LatencyMs}",
+                "Gemini call succeeded. SessionId={SessionId} Round={Round} AgentId={AgentId} Model={Model} LatencyMs={LatencyMs} CorrelationId={CorrelationId}",
                 context.SessionId,
                 context.Round,
                 AgentId,
                 options.ModelName,
-                startedAt.ElapsedMilliseconds);
+                startedAt.ElapsedMilliseconds,
+                context.CorrelationId);
             return new AgentResponse
             {
                 Message = message,
@@ -76,12 +80,13 @@ public class GeminiCouncilAgent(
         {
             logger.LogError(
                 exception,
-                "Gemini call failed unexpectedly. SessionId={SessionId} Round={Round} AgentId={AgentId} Model={Model} LatencyMs={LatencyMs}",
+                "Gemini call failed unexpectedly. SessionId={SessionId} Round={Round} AgentId={AgentId} Model={Model} LatencyMs={LatencyMs} CorrelationId={CorrelationId}",
                 context.SessionId,
                 context.Round,
                 AgentId,
                 options.ModelName,
-                startedAt.ElapsedMilliseconds);
+                startedAt.ElapsedMilliseconds,
+                context.CorrelationId);
             throw;
         }
     }
