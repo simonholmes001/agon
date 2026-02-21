@@ -5,7 +5,7 @@ applyTo: '**'
 
 **Version:** 2.0
 
-> This file contains coding rules and implementation guidelines. For full system architecture, runtime responsibilities, data model, and API surface, see `architecture.instructions.md`. For agent prompts, see `prompt-engineering-config.instructions.md`. For JSON schemas, see `schemas.instructions.md`.
+> This file contains coding rules and implementation guidelines. For full system architecture, runtime responsibilities, data model, and API surface, see `architecture.instructions.md`. For agent prompts, see `prompt-engineering-config.instructions.md`. For JSON schemas, see `schemas.instructions.md`. For concrete backend implementation decisions (MAF integration, solution structure, layer rules, NuGet strategy), see `backend-implementation.instructions.md`.
 
 ---
 
@@ -81,12 +81,12 @@ Always consult the relevant provider documentation when building or modifying ag
 
 ### Rules
 
-- All LLM calls go through `IChatModelClient`. Never call provider SDKs directly from use-cases.
+- All LLM calls go through `IChatClient` (from `Microsoft.Extensions.AI`, provided by MAF). The spec's original `IChatModelClient` name maps to this interface. Never call provider SDKs directly from use-cases. See `backend-implementation.instructions.md` §1.3 for details.
 - Always pass to every model call:
   - `max_output_tokens` (per agent, configured in `AgentConfig`)
   - `reasoning_mode: high` (provider-specific parameter mapping handled in each client implementation)
   - Trace metadata: `session_id`, `agent_id`, `round_id`
-- Never call real vendor APIs in unit tests. Use `IFakeChatModelClient` with canned responses.
+- Never call real vendor APIs in unit tests. Use `FakeCouncilAgent` (Infrastructure layer) with canned responses. See `backend-implementation.instructions.md` §4.
 - The Orchestrator may route low-stakes sub-tasks (patch formatting, question generation, summarisation) to a cheaper model. This routing logic lives in `AgentRunner`, not in domain code.
 
 ---

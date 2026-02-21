@@ -22,12 +22,9 @@ _(Nothing currently in progress)_
 ### Backend (.NET)
 
 - [ ] **Scaffold .NET backend** — ASP.NET Core in `backend/` with Clean Architecture (Domain, Application, Infrastructure). See `architecture.instructions.md`.
-- [ ] **Truth Map domain model** — `TruthMap`, `TruthMapPatch`, entity types with `derived_from` / `challenged_by`. Zero framework dependencies in Domain.
+- [ ] **Backend logging** — `ILogger<T>` via DI in Application, Infrastructure, and Api layers. Orchestrator: phase transitions, round progression, convergence scores, patch counts, budget consumption. AgentRunner: dispatch, latency, timeout, token usage. MafCouncilAgent: provider calls, streaming, error/retry. GlobalExceptionMiddleware: unhandled exceptions with correlation IDs. Never log raw user content or agent responses in plaintext.
 - [ ] **Orchestrator state machine** — Deterministic phase transitions per `round-policy.instructions.md`. LLM outputs cannot trigger transitions.
-- [ ] **`IChatModelClient` interface** — Provider-agnostic LLM abstraction + `IFakeChatModelClient` for tests.
-- [ ] **Confidence Decay Engine** — Decay on undefended challenges, boost on evidence, clamp [0.0, 1.0].
-- [ ] **Change Impact Calculator** — `derived_from` graph traversal → downstream impact set.
-- [ ] **Snapshot Service** — Immutable round-end snapshots, content-addressed, `ForkSession` support.
+- [ ] **`IChatClient` integration** — Provider-agnostic LLM calls via MAF's `IChatClient` (from `Microsoft.Extensions.AI`) + `FakeCouncilAgent` for tests. See `backend-implementation.instructions.md` §1.3.
 - [ ] **SignalR hub (`/hubs/debate`)** — Streaming tokens, patches, convergence, round progress.
 - [ ] **REST API endpoints** — Per `architecture.instructions.md` §6.
 - [ ] **PostgreSQL persistence** — Sessions, Truth Map (JSONB + normalised entities), append-only event log.
@@ -65,3 +62,18 @@ _(Nothing currently in progress)_
 - [x] CI fix — ANSI escape code stripping for reliable test count parsing in badge automation
 - [x] CI fix — Shell operator precedence in badge commit step
 - [x] PR #1 merged (`feature/frontend` → `main`)
+- [x] Domain layer scaffold — `Agon.sln` with `Agon.Domain` (net9.0, zero deps) + `Agon.Domain.Tests` (xUnit + FluentAssertions)
+- [x] Truth Map domain model — `TruthMapState`, `TruthMapPatch`, `PatchValidator` (5 validation rules), all entity types with `derived_from` / `challenged_by`
+- [x] Domain entities — Claim, Assumption, Decision, Risk, Evidence, OpenQuestion, Persona, Constraints, Convergence, ConfidenceTransition + all enums
+- [x] Confidence Decay Engine — decay on undefended challenges, boost on evidence, clamp [0.0, 1.0], contested threshold
+- [x] Change Impact Calculator — BFS `derived_from`/`supports`/`contradicts` graph traversal → impact set
+- [x] Round Policy — loop termination, budget exhaustion, friction-adjusted convergence thresholds
+- [x] Convergence Evaluator — rubric scoring, overall calculation, weak dimension identification
+- [x] Session Snapshot — immutable round-end snapshots with SHA-256 content hashing + ForkRequest
+- [x] Agent system prompts — all 7 agent prompts from prompt-engineering-config spec
+- [x] Agent config — per-agent model provider, model name, max tokens, timeout, active phases with `DefaultCouncil`
+- [x] Agent identifiers — `AgentId` constants with `IsCouncilAgent` + `AllCouncil`
+- [x] Session enums — `SessionPhase` (9 phases), `SessionMode`, `SessionStatus`
+- [x] Backend test suite — 142 tests, TDD (Red → Green → Refactor)
+- [x] CI updated — backend test count captured + combined frontend+backend badge in `update-badges` job
+- [x] README badges — xUnit badge added, combined test count (frontend + backend)

@@ -29,39 +29,8 @@ jobs:
         run: npm ci
 
       - name: Run tests with coverage
-        id: test-run
         run: |
-          OUTPUT=$(npx vitest run --coverage --reporter=verbose 2>&1)
-          echo "$OUTPUT"
-          # Strip ANSI escape codes before parsing — Vitest emits bold/colour
-          # sequences that break regex matching in CI environments.
-          CLEAN=$(echo "$OUTPUT" | sed 's/\x1b\[[0-9;]*m//g')
-          # Extract test count from Vitest summary line, e.g. "Tests  154 passed (154)"
-          TEST_COUNT=$(echo "$CLEAN" | grep -E 'Tests\s+[0-9]+\s+passed' | grep -oE '[0-9]+' | head -1 || echo "0")
-          echo "test_count=$TEST_COUNT" >> "$GITHUB_OUTPUT"
-
-      - name: Update README badges
-        if: github.event_name == 'push'
-        run: |
-          bash .github/scripts/update-readme-badges.sh \
-            "${{ steps.test-run.outputs.test_count }}" \
-            "frontend/coverage/coverage-summary.json" \
-            "README.md"
-        working-directory: .
-
-      - name: Commit updated badges
-        if: github.event_name == 'push'
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add README.md
-          if git diff --cached --quiet; then
-            echo "No badge changes to commit."
-          else
-            git commit -m "chore: update test & coverage badges [skip ci]"
-            git push
-          fi
-        working-directory: .
+          npx vitest run --coverage --reporter=verbose
 
   backend-tests:
     name: Backend Tests
