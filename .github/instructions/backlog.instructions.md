@@ -74,6 +74,6 @@ _(Nothing currently in progress)_
 - [x] Agent config — per-agent model provider, model name, max tokens, timeout, active phases with `DefaultCouncil`
 - [x] Agent identifiers — `AgentId` constants with `IsCouncilAgent` + `AllCouncil`
 - [x] Session enums — `SessionPhase` (9 phases), `SessionMode`, `SessionStatus`
-- [x] Backend test suite — 134 tests, TDD (Red → Green → Refactor)
+- [x] Backend test suite — 142 tests, TDD (Red → Green → Refactor)
 - [x] CI updated — backend test count captured + combined frontend+backend badge in `update-badges` job
 - [x] README badges — xUnit badge added, combined test count (frontend + backend)

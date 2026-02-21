@@ -123,6 +123,31 @@ public class PatchValidatorTests
         result.Errors.Should().ContainSingle(e => e.Contains("mismatch"));
     }
 
+    [Fact]
+    public void Validate_RejectsReplace_WhenIndexTargetDoesNotMatchValueId()
+    {
+        var map = CreateMapWithClaim("c1");
+        var patch = CreatePatch("product_strategist", 1,
+            new PatchOperation
+            {
+                Op = PatchOperationType.Replace,
+                Path = "/claims/0",
+                Value = new Claim
+                {
+                    Id = "c_wrong",
+                    Agent = "product_strategist",
+                    Round = 1,
+                    Text = "Updated text.",
+                    Confidence = 0.9f
+                }
+            });
+
+        var result = PatchValidator.Validate(patch, map);
+
+        result.IsValid.Should().BeFalse();
+        result.Errors.Should().ContainSingle(e => e.Contains("mismatch"));
+    }
+
     // --- Rule 3: Prevent cross-agent text modification ---
 
     [Fact]
@@ -192,6 +217,77 @@ public class PatchValidatorTests
         var result = PatchValidator.Validate(patch, map);
 
         result.IsValid.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Validate_AllowsIndexBasedPath_ForExistingEntity()
+    {
+        var map = CreateMapWithClaim("c1", "product_strategist");
+        var patch = CreatePatch("contrarian", 1,
+            new PatchOperation
+            {
+                Op = PatchOperationType.Replace,
+                Path = "/claims/0/status",
+                Value = "contested"
+            });
+
+        var result = PatchValidator.Validate(patch, map);
+
+        result.IsValid.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Validate_RejectsIndexBasedPath_WhenOutOfRange()
+    {
+        var map = CreateMapWithClaim("c1", "product_strategist");
+        var patch = CreatePatch("contrarian", 1,
+            new PatchOperation
+            {
+                Op = PatchOperationType.Replace,
+                Path = "/claims/7/status",
+                Value = "contested"
+            });
+
+        var result = PatchValidator.Validate(patch, map);
+
+        result.IsValid.Should().BeFalse();
+        result.Errors.Should().ContainSingle(e => e.Contains("index 7"));
+    }
+
+    [Fact]
+    public void Validate_RejectsCrossAgentTextModification_ForIndexBasedPath()
+    {
+        var map = CreateMapWithClaim("c1", "product_strategist");
+        var patch = CreatePatch("contrarian", 1,
+            new PatchOperation
+            {
+                Op = PatchOperationType.Replace,
+                Path = "/claims/0/text",
+                Value = "Attempting to overwrite by index."
+            });
+
+        var result = PatchValidator.Validate(patch, map);
+
+        result.IsValid.Should().BeFalse();
+        result.Errors.Should().ContainSingle(e => e.Contains("Cross-agent"));
+    }
+
+    [Fact]
+    public void Validate_AllowsSingletonPath_WithoutEntityLookup()
+    {
+        var map = TruthMapState.CreateNew(Guid.NewGuid());
+        var patch = CreatePatch("socratic_clarifier", 1,
+            new PatchOperation
+            {
+                Op = PatchOperationType.Replace,
+                Path = "/constraints/budget",
+                Value = "USD 1M"
+            });
+
+        var result = PatchValidator.Validate(patch, map);
+
+        result.IsValid.Should().BeTrue();
+        result.Errors.Should().BeEmpty();
     }
 
     // --- Rule 4: Require rationale on decisions ---

@@ -60,4 +60,125 @@ public class TruthMapState
     {
         return Claims.FirstOrDefault(c => c.Id == claimId);
     }
+
+    /// <summary>
+    /// Creates a deep copy of the full Truth Map state.
+    /// </summary>
+    public TruthMapState DeepCopy()
+    {
+        return new TruthMapState
+        {
+            SessionId = SessionId,
+            Version = Version,
+            Round = Round,
+            CoreIdea = CoreIdea,
+            Constraints = new Constraints
+            {
+                Budget = Constraints.Budget,
+                Timeline = Constraints.Timeline,
+                TechStack = [.. Constraints.TechStack],
+                NonNegotiables = [.. Constraints.NonNegotiables]
+            },
+            SuccessMetrics = [.. SuccessMetrics],
+            Personas = Personas
+                .Select(persona => new Persona
+                {
+                    Id = persona.Id,
+                    Name = persona.Name,
+                    Description = persona.Description
+                })
+                .ToList(),
+            Claims = Claims
+                .Select(claim => new Claim
+                {
+                    Id = claim.Id,
+                    Agent = claim.Agent,
+                    Round = claim.Round,
+                    Text = claim.Text,
+                    Confidence = claim.Confidence,
+                    Status = claim.Status,
+                    DerivedFrom = [.. claim.DerivedFrom],
+                    ChallengedBy = [.. claim.ChallengedBy]
+                })
+                .ToList(),
+            Assumptions = Assumptions
+                .Select(assumption => new Assumption
+                {
+                    Id = assumption.Id,
+                    Text = assumption.Text,
+                    ValidationStep = assumption.ValidationStep,
+                    Status = assumption.Status,
+                    DerivedFrom = [.. assumption.DerivedFrom]
+                })
+                .ToList(),
+            Decisions = Decisions
+                .Select(decision => new Decision
+                {
+                    Id = decision.Id,
+                    Text = decision.Text,
+                    Rationale = decision.Rationale,
+                    Owner = decision.Owner,
+                    Binding = decision.Binding,
+                    DerivedFrom = [.. decision.DerivedFrom]
+                })
+                .ToList(),
+            Risks = Risks
+                .Select(risk => new Risk
+                {
+                    Id = risk.Id,
+                    Text = risk.Text,
+                    Category = risk.Category,
+                    Severity = risk.Severity,
+                    Likelihood = risk.Likelihood,
+                    Mitigation = risk.Mitigation,
+                    Agent = risk.Agent,
+                    DerivedFrom = [.. risk.DerivedFrom]
+                })
+                .ToList(),
+            OpenQuestions = OpenQuestions
+                .Select(question => new OpenQuestion
+                {
+                    Id = question.Id,
+                    Text = question.Text,
+                    Blocking = question.Blocking,
+                    RaisedBy = question.RaisedBy
+                })
+                .ToList(),
+            Evidence = Evidence
+                .Select(evidence => new Evidence
+                {
+                    Id = evidence.Id,
+                    Title = evidence.Title,
+                    Source = evidence.Source,
+                    RetrievedAt = evidence.RetrievedAt,
+                    Summary = evidence.Summary,
+                    Supports = [.. evidence.Supports],
+                    Contradicts = [.. evidence.Contradicts]
+                })
+                .ToList(),
+            Convergence = new Convergence
+            {
+                ClaritySpecificity = Convergence.ClaritySpecificity,
+                Feasibility = Convergence.Feasibility,
+                RiskCoverage = Convergence.RiskCoverage,
+                AssumptionExplicitness = Convergence.AssumptionExplicitness,
+                Coherence = Convergence.Coherence,
+                Actionability = Convergence.Actionability,
+                EvidenceQuality = Convergence.EvidenceQuality,
+                Overall = Convergence.Overall,
+                Threshold = Convergence.Threshold,
+                Status = Convergence.Status
+            },
+            ConfidenceTransitions = ConfidenceTransitions
+                .Select(transition => new ConfidenceTransition
+                {
+                    ClaimId = transition.ClaimId,
+                    Round = transition.Round,
+                    From = transition.From,
+                    To = transition.To,
+                    Reason = transition.Reason
+                })
+                .ToList()
+        };
+    }
 }

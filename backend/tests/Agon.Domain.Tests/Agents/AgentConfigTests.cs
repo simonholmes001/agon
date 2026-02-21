@@ -43,6 +43,19 @@ public class AgentConfigTests
     }
 
     [Fact]
+    public void Create_WithNullActivePhases_DefaultsToEmpty()
+    {
+        var config = new AgentConfig(
+            AgentId: Domain.Agents.AgentId.Contrarian,
+            ModelProvider: "gemini",
+            ModelName: "gemini-3",
+            ActivePhases: null);
+
+        config.ActivePhases.Should().NotBeNull();
+        config.ActivePhases.Should().BeEmpty();
+    }
+
+    [Fact]
     public void DefaultCouncilConfigs_ContainsAllSevenAgents()
     {
         var configs = AgentConfig.DefaultCouncil;

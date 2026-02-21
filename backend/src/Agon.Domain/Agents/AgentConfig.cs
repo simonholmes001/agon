@@ -7,20 +7,33 @@ namespace Agon.Domain.Agents;
 /// This is a Domain-layer value object defining the shape of the config.
 /// At runtime, values are bound from appsettings.json in the Infrastructure/Api layer.
 /// </summary>
-public sealed record AgentConfig(
-    string AgentId,
-    string ModelProvider,
-    string ModelName,
-    int MaxOutputTokens = 4096,
-    string ReasoningMode = "high",
-    int TimeoutSeconds = 90,
-    IReadOnlyList<SessionPhase>? ActivePhases = null)
+public sealed record AgentConfig
 {
-    /// <summary>
-    /// Active phases defaults to empty if not provided.
-    /// </summary>
-    public IReadOnlyList<SessionPhase> ActivePhases { get; init; } =
-        ActivePhases ?? Array.Empty<SessionPhase>();
+    public string AgentId { get; init; }
+    public string ModelProvider { get; init; }
+    public string ModelName { get; init; }
+    public int MaxOutputTokens { get; init; } = 4096;
+    public string ReasoningMode { get; init; } = "high";
+    public int TimeoutSeconds { get; init; } = 90;
+    public IReadOnlyList<SessionPhase> ActivePhases { get; init; } = Array.Empty<SessionPhase>();
+
+    public AgentConfig(
+        string AgentId,
+        string ModelProvider,
+        string ModelName,
+        int MaxOutputTokens = 4096,
+        string ReasoningMode = "high",
+        int TimeoutSeconds = 90,
+        IReadOnlyList<SessionPhase>? ActivePhases = null)
+    {
+        this.AgentId = AgentId;
+        this.ModelProvider = ModelProvider;
+        this.ModelName = ModelName;
+        this.MaxOutputTokens = MaxOutputTokens;
+        this.ReasoningMode = ReasoningMode;
+        this.TimeoutSeconds = TimeoutSeconds;
+        this.ActivePhases = ActivePhases ?? Array.Empty<SessionPhase>();
+    }
 
     /// <summary>
     /// Default council configuration matching the agent roster
