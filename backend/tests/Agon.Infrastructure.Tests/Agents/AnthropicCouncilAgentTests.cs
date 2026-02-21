@@ -29,7 +29,7 @@ public class AnthropicCouncilAgentTests
         });
         var sut = new AnthropicCouncilAgent(
             new HttpClient(handler),
-            new AnthropicCouncilAgentOptions("product_strategist", "anthropic-key", "claude-3-5-sonnet-latest", 256),
+            new AnthropicCouncilAgentOptions("product_strategist", "anthropic-key", "claude-opus-4-6", 256),
             NullLogger<AnthropicCouncilAgent>.Instance);
 
         var response = await sut.RunAsync(CreateContext(), CancellationToken.None);
@@ -56,7 +56,7 @@ public class AnthropicCouncilAgentTests
         });
         var sut = new AnthropicCouncilAgent(
             new HttpClient(handler),
-            new AnthropicCouncilAgentOptions("product_strategist", "bad", "claude-3-5-sonnet-latest", 256),
+            new AnthropicCouncilAgentOptions("product_strategist", "bad", "claude-opus-4-6", 256),
             NullLogger<AnthropicCouncilAgent>.Instance);
 
         var act = () => sut.RunAsync(CreateContext(), CancellationToken.None);

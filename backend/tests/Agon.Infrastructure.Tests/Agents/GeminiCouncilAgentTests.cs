@@ -35,7 +35,7 @@ public class GeminiCouncilAgentTests
         });
         var sut = new GeminiCouncilAgent(
             new HttpClient(handler),
-            new GeminiCouncilAgentOptions("framing_challenger", "gemini-key", "gemini-2.0-flash", 256),
+            new GeminiCouncilAgentOptions("framing_challenger", "gemini-key", "gemini-3.1-pro-preview", 256),
             NullLogger<GeminiCouncilAgent>.Instance);
 
         var response = await sut.RunAsync(CreateContext(), CancellationToken.None);
@@ -61,7 +61,7 @@ public class GeminiCouncilAgentTests
         });
         var sut = new GeminiCouncilAgent(
             new HttpClient(handler),
-            new GeminiCouncilAgentOptions("framing_challenger", "bad", "gemini-2.0-flash", 256),
+            new GeminiCouncilAgentOptions("framing_challenger", "bad", "gemini-3.1-pro-preview", 256),
             NullLogger<GeminiCouncilAgent>.Instance);
 
         var act = () => sut.RunAsync(CreateContext(), CancellationToken.None);

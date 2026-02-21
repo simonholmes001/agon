@@ -251,9 +251,9 @@ GEMINI_KEY=your-gemini-api-key
 CLAUDE_KEY=your-anthropic-api-key
 DEEPSEEK_KEY=your-deepseek-api-key
 # Optional model overrides
-OPENAI_MODEL=gpt-4o-mini
-GEMINI_MODEL=gemini-2.0-flash
-ANTHROPIC_MODEL=claude-3-5-sonnet-latest
+OPENAI_MODEL=gpt-5.2
+GEMINI_MODEL=gemini-3.1-pro-preview
+ANTHROPIC_MODEL=claude-opus-4-6
 DEEPSEEK_MODEL=deepseek-chat
 ```
 

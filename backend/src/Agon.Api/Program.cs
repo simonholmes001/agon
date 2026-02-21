@@ -14,10 +14,10 @@ var builder = WebApplication.CreateBuilder(args);
 
 const string FrontendCorsPolicy = "FrontendCorsPolicy";
 const string CorrelationHeaderName = "X-Correlation-ID";
-const string OpenAiDefaultModel = "gpt-4o-mini";
-const string TechnicalArchitectTemporaryModelDefault = "gpt-5.2-thinking";
-const string GeminiDefaultModel = "gemini-2.0-flash";
-const string AnthropicDefaultModel = "claude-3-5-sonnet-latest";
+const string OpenAiDefaultModel = "gpt-5.2";
+const string TechnicalArchitectTemporaryModelDefault = "gpt-5.2";
+const string GeminiDefaultModel = "gemini-3.1-pro-preview";
+const string AnthropicDefaultModel = "claude-opus-4-6";
 var allowedOrigins = builder.Configuration
     .GetSection("Cors:AllowedOrigins")
     .Get<string[]>()

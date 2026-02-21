@@ -29,7 +29,7 @@ public class OpenAiCouncilAgentTests
         var options = new OpenAiCouncilAgentOptions(
             AgentId: "research_librarian",
             ApiKey: "test-key",
-            ModelName: "gpt-4o-mini",
+            ModelName: "gpt-5.2",
             MaxOutputTokens: 256);
         var sut = new OpenAiCouncilAgent(httpClient, options, NullLogger<OpenAiCouncilAgent>.Instance);
 
@@ -60,7 +60,7 @@ public class OpenAiCouncilAgentTests
         var options = new OpenAiCouncilAgentOptions(
             AgentId: "research_librarian",
             ApiKey: "bad-key",
-            ModelName: "gpt-4o-mini",
+            ModelName: "gpt-5.2",
             MaxOutputTokens: 256);
         var sut = new OpenAiCouncilAgent(httpClient, options, NullLogger<OpenAiCouncilAgent>.Instance);
 
