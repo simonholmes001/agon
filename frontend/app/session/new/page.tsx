@@ -13,6 +13,9 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { getFrictionLabel } from "@/lib/constants";
+import { createLogger } from "@/lib/logger";
+
+const logger = createLogger("NewSessionPage");
 
 export default function NewSessionPage() {
   const router = useRouter();
@@ -22,17 +25,52 @@ export default function NewSessionPage() {
 
   const frictionInfo = getFrictionLabel(frictionLevel);
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!idea.trim() || idea.trim().length < 10) return;
+    const trimmedIdea = idea.trim();
+    if (!trimmedIdea || trimmedIdea.length < 10) return;
 
     setIsSubmitting(true);
 
-    // TODO: POST /sessions → then redirect to /session/[id]
-    // For now, simulate and redirect to a demo session
-    setTimeout(() => {
-      router.push("/session/demo");
-    }, 800);
+    try {
+      const createResponse = await fetch("/sessions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          idea: trimmedIdea,
+          mode: "deep",
+          frictionLevel,
+        }),
+      });
+
+      if (!createResponse.ok) {
+        throw new Error(`Create session failed with status ${createResponse.status}`);
+      }
+
+      const createdSession = await createResponse.json() as { sessionId?: string };
+      const sessionId = createdSession.sessionId;
+      if (!sessionId) {
+        throw new Error("Create session response did not include sessionId");
+      }
+
+      const startResponse = await fetch(`/sessions/${sessionId}/start`, {
+        method: "POST",
+      });
+      if (!startResponse.ok) {
+        throw new Error(`Start session failed with status ${startResponse.status}`);
+      }
+
+      router.push(`/session/${sessionId}`);
+    } catch (error) {
+      logger.error(
+        "failed to create or start session",
+        { frictionLevel, ideaLength: trimmedIdea.length },
+        error,
+      );
+      setIsSubmitting(false);
+    }
   }
 
   return (
