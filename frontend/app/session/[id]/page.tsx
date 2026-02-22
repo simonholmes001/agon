@@ -1,20 +1,57 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useParams } from "next/navigation";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useParams, useSearchParams } from "next/navigation";
 import SessionHeader from "@/components/session/session-header";
-import ThreadView from "@/components/session/thread-view";
+import ThreadView, { type ThreadViewMessage } from "@/components/session/thread-view";
 import TruthMapDrawer from "@/components/session/truth-map-drawer";
 import MessageComposer from "@/components/session/message-composer";
 import { createLogger } from "@/lib/logger";
+import {
+  createDebateHubConnection,
+  type RoundProgressEvent,
+  type TranscriptMessageEvent,
+  type TruthMapPatchEvent,
+} from "@/lib/realtime/debate-hub";
 import type { SessionPhase } from "@/types";
 
 const logger = createLogger("SessionPage");
+const BACKEND_API_PREFIX = "/api/backend";
 
 interface BackendSessionResponse {
   sessionId?: string;
   phase?: string;
   frictionLevel?: number;
+}
+
+interface BackendTruthMapResponse {
+  coreIdea?: string;
+}
+
+interface BackendTranscriptMessageResponse {
+  id?: string;
+  type?: string;
+  agentId?: string;
+  content?: string;
+  round?: number;
+  isStreaming?: boolean;
+}
+
+type RoundStartState = "idle" | "starting" | "started" | "failed";
+
+async function readJsonResponse<T>(
+  response: Response,
+  requestName: string,
+): Promise<T> {
+  const contentType = response.headers.get("content-type") ?? "";
+  if (!contentType.toLowerCase().includes("application/json")) {
+    const bodyPreview = (await response.text()).slice(0, 120);
+    throw new Error(
+      `${requestName} returned non-JSON response (${contentType || "unknown"}). Preview: ${bodyPreview}`,
+    );
+  }
+
+  return await response.json() as T;
 }
 
 function mapBackendPhaseToSessionPhase(phase: string | undefined): SessionPhase {
@@ -58,54 +95,218 @@ function getRouteSessionId(id: string | string[] | undefined): string | undefine
   return id;
 }
 
+function mapTranscriptMessages(
+  transcript: BackendTranscriptMessageResponse[],
+): ThreadViewMessage[] {
+  return transcript
+    .map((message, index) => mapTranscriptMessage(message, `transcript-${index}`))
+    .filter((message): message is ThreadViewMessage => message !== null);
+}
+
+function mapTranscriptMessage(
+  message: Pick<BackendTranscriptMessageResponse, "id" | "type" | "agentId" | "content" | "round" | "isStreaming">,
+  fallbackId: string,
+): ThreadViewMessage | null {
+  const content = message.content?.trim();
+  if (!content) return null;
+
+  const type = message.type?.toLowerCase() === "agent" ? "agent" : "system";
+  return {
+    id: message.id ?? fallbackId,
+    type,
+    content,
+    agentId: message.agentId,
+    round: typeof message.round === "number" ? message.round : undefined,
+    isStreaming: Boolean(message.isStreaming),
+  };
+}
+
+function upsertTranscriptMessage(
+  messages: ThreadViewMessage[],
+  nextMessage: ThreadViewMessage,
+): ThreadViewMessage[] {
+  const existingIndex = messages.findIndex((message) => message.id === nextMessage.id);
+  if (existingIndex < 0) {
+    return [...messages, nextMessage];
+  }
+
+  const updated = [...messages];
+  updated[existingIndex] = nextMessage;
+  return updated;
+}
+
 export default function SessionPage() {
   const params = useParams<{ id?: string | string[] }>();
+  const searchParams = useSearchParams();
   const routeSessionId = getRouteSessionId(params.id);
+  const shouldAutoStart = searchParams.get("start") === "1";
+  const hasTriggeredAutoStartRef = useRef(false);
 
   const [truthMapOpen, setTruthMapOpen] = useState(false);
   const [sessionId, setSessionId] = useState(routeSessionId ?? "");
   const [phase, setPhase] = useState<SessionPhase>("CLARIFICATION");
   const [frictionLevel, setFrictionLevel] = useState(50);
+  const [coreIdea, setCoreIdea] = useState("");
+  const [messages, setMessages] = useState<ThreadViewMessage[]>([]);
+  const [realtimeStatus, setRealtimeStatus] = useState<"connecting" | "connected" | "unavailable">("connecting");
+  const [roundStartState, setRoundStartState] = useState<RoundStartState>("idle");
+
+  const loadSessionState = useCallback(async (id: string) => {
+    logger.info("loading session state", { sessionId: id });
+    try {
+      const [sessionResponse, truthMapResponse, transcriptResponse] = await Promise.all([
+        fetch(`${BACKEND_API_PREFIX}/sessions/${id}`),
+        fetch(`${BACKEND_API_PREFIX}/sessions/${id}/truthmap`),
+        fetch(`${BACKEND_API_PREFIX}/sessions/${id}/transcript`),
+      ]);
+
+      if (!sessionResponse.ok) {
+        throw new Error(`Get session failed with status ${sessionResponse.status}`);
+      }
+
+      const session = await readJsonResponse<BackendSessionResponse>(
+        sessionResponse,
+        "Get session",
+      );
+
+      if (!truthMapResponse.ok) {
+        throw new Error(`Get truth map failed with status ${truthMapResponse.status}`);
+      }
+
+      const truthMap = await readJsonResponse<BackendTruthMapResponse>(
+        truthMapResponse,
+        "Get truth map",
+      );
+
+      if (!transcriptResponse.ok) {
+        throw new Error(`Get transcript failed with status ${transcriptResponse.status}`);
+      }
+
+      const transcript = await readJsonResponse<BackendTranscriptMessageResponse[]>(
+        transcriptResponse,
+        "Get transcript",
+      );
+
+      setSessionId(session.sessionId ?? id);
+      setPhase(mapBackendPhaseToSessionPhase(session.phase));
+      setCoreIdea(truthMap.coreIdea ?? "");
+      setMessages(mapTranscriptMessages(transcript));
+      if (typeof session.frictionLevel === "number") {
+        setFrictionLevel(session.frictionLevel);
+      }
+
+      logger.info("loaded session state", {
+        sessionId: session.sessionId ?? id,
+        phase: session.phase,
+        frictionLevel: session.frictionLevel,
+        transcriptMessageCount: transcript.length,
+      });
+    } catch (error) {
+      logger.error("failed to load session page data", { sessionId: id }, error);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!routeSessionId) return;
+    void loadSessionState(routeSessionId);
+  }, [routeSessionId, loadSessionState]);
 
   useEffect(() => {
     if (!routeSessionId) return;
 
-    let isCancelled = false;
+    setRealtimeStatus("connecting");
+    const connection = createDebateHubConnection(routeSessionId);
+    connection.onRoundProgress((event: RoundProgressEvent) => {
+      setPhase(mapBackendPhaseToSessionPhase(event.phase));
+      setRealtimeStatus("connected");
+      logger.info("received round progress event", {
+        sessionId: routeSessionId,
+        phase: event.phase,
+      });
+    });
 
-    async function loadSession() {
-      try {
-        const sessionResponse = await fetch(`/sessions/${routeSessionId}`);
-        if (!sessionResponse.ok) {
-          throw new Error(`Get session failed with status ${sessionResponse.status}`);
-        }
+    connection.onTruthMapPatch((event: TruthMapPatchEvent) => {
+      setRealtimeStatus("connected");
+      logger.info("received truth map patch event", {
+        sessionId: routeSessionId,
+        version: event.version,
+      });
+    });
 
-        const session = await sessionResponse.json() as BackendSessionResponse;
-
-        const truthMapResponse = await fetch(`/sessions/${routeSessionId}/truthmap`);
-        if (!truthMapResponse.ok) {
-          throw new Error(`Get truth map failed with status ${truthMapResponse.status}`);
-        }
-
-        await truthMapResponse.json();
-
-        if (isCancelled) return;
-
-        setSessionId(session.sessionId ?? routeSessionId);
-        setPhase(mapBackendPhaseToSessionPhase(session.phase));
-        if (typeof session.frictionLevel === "number") {
-          setFrictionLevel(session.frictionLevel);
-        }
-      } catch (error) {
-        logger.error("failed to load session page data", { sessionId: routeSessionId }, error);
+    connection.onTranscriptMessage((event: TranscriptMessageEvent) => {
+      const mapped = mapTranscriptMessage(event, `stream-${event.id}`);
+      if (!mapped) {
+        return;
       }
-    }
 
-    void loadSession();
+      setRealtimeStatus("connected");
+      setMessages((current) => upsertTranscriptMessage(current, mapped));
+      logger.info("received transcript message event", {
+        sessionId: routeSessionId,
+        messageId: event.id,
+        type: event.type,
+        agentId: event.agentId ?? "system",
+        round: event.round,
+      });
+    });
+
+    connection.onReconnected(() => {
+      setRealtimeStatus("connected");
+      logger.warn("signalr reconnect detected, resyncing session state", {
+        sessionId: routeSessionId,
+      });
+      void loadSessionState(routeSessionId);
+    });
+
+    void connection
+      .start()
+      .then(() => {
+        setRealtimeStatus("connected");
+      })
+      .catch((error) => {
+        setRealtimeStatus("unavailable");
+        logger.warn(
+          "signalr unavailable, continuing with rest-only session state",
+          { sessionId: routeSessionId },
+          error,
+        );
+      });
 
     return () => {
-      isCancelled = true;
+      void connection.stop().catch((error) => {
+        logger.warn(
+          "failed to stop signalr connection",
+          { sessionId: routeSessionId },
+          error,
+        );
+      });
     };
-  }, [routeSessionId]);
+  }, [routeSessionId, loadSessionState]);
+
+  useEffect(() => {
+    if (!routeSessionId || !shouldAutoStart) return;
+    if (hasTriggeredAutoStartRef.current) return;
+    if (realtimeStatus !== "connected") return;
+
+    hasTriggeredAutoStartRef.current = true;
+    setRoundStartState("starting");
+
+    void fetch(`${BACKEND_API_PREFIX}/sessions/${routeSessionId}/start`, {
+      method: "POST",
+    })
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error(`Start session failed with status ${response.status}`);
+        }
+
+        setRoundStartState("started");
+        logger.info("auto-start request accepted", { sessionId: routeSessionId });
+      })
+      .catch((error) => {
+        setRoundStartState("failed");
+        logger.error("failed to auto-start session from route", { sessionId: routeSessionId }, error);
+      });
+  }, [routeSessionId, shouldAutoStart, realtimeStatus]);
 
   return (
     <div className="flex h-[100dvh] flex-col bg-background">
@@ -120,7 +321,14 @@ export default function SessionPage() {
 
       <div className="relative flex flex-1 overflow-hidden">
         {/* Thread — always visible */}
-        <ThreadView sessionId={sessionId || routeSessionId || "unknown"} />
+        <ThreadView
+          sessionId={sessionId || routeSessionId || "unknown"}
+          phase={phase}
+          coreIdea={coreIdea}
+          realtimeStatus={realtimeStatus}
+          roundStartState={roundStartState}
+          messages={messages}
+        />
 
         {/* Truth Map — drawer on mobile, sidebar on desktop */}
         <TruthMapDrawer

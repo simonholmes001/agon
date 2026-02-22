@@ -24,7 +24,8 @@ _(Nothing currently in progress)_
 - [ ] **Backend logging** — `ILogger<T>` via DI in Application, Infrastructure, and Api layers. Orchestrator: phase transitions, round progression, convergence scores, patch counts, budget consumption. AgentRunner: dispatch, latency, timeout, token usage. MafCouncilAgent: provider calls, streaming, error/retry. GlobalExceptionMiddleware: unhandled exceptions with correlation IDs. Never log raw user content or agent responses in plaintext.
 - [ ] **Orchestrator state machine** — Deterministic phase transitions per `round-policy.instructions.md`. LLM outputs cannot trigger transitions.
 - [ ] **`IChatClient` integration** — Provider-agnostic LLM calls via MAF's `IChatClient` (from `Microsoft.Extensions.AI`) + `FakeCouncilAgent` for tests. See `backend-implementation.instructions.md` §1.3.
-- [ ] **SignalR hub (`/hubs/debate`)** — Streaming tokens, patches, convergence, round progress.
+- [ ] **MAF compliance audit (follow-up)** — Verify provider adapters, reasoning parameter mapping, and trace metadata (`session_id`, `agent_id`, `round_id`) are fully aligned with `copilot.instructions.md` §Model and Provider Rules.
+- [ ] **SignalR event surface expansion** — Extend `/hubs/debate` beyond baseline `RoundProgress` + `TruthMapPatch` to full event set (tokens, convergence, budget warnings, artifacts).
 - [ ] **REST API endpoints** — Expand beyond vertical-slice core (`POST /sessions`, `GET /sessions/{id}`, `POST /sessions/{id}/start`, `GET /sessions/{id}/truthmap`) to full surface in `architecture.instructions.md` §6.
 - [ ] **PostgreSQL persistence** — Sessions, Truth Map (JSONB + normalised entities), append-only event log.
 - [ ] **pgvector semantic memory** — Embedding pipeline + top-K retrieval for agent context.
@@ -33,8 +34,9 @@ _(Nothing currently in progress)_
 ### Frontend
 
 - [ ] **Connect to real backend** — Replace demo/mock data with REST API + SignalR.
+- [ ] **Council Moderator interaction loop** — Implement `POST /sessions/{id}/messages` so user chat goes through one moderator lane that can trigger targeted multi-agent follow-up and return a concise synthesis.
 - [ ] **SignalR sequencing** — Keep SignalR for the following branch (or add after REST wiring is stable).
-- [ ] **SignalR client integration** — Stream agent tokens, patches, convergence in real time.
+- [ ] **SignalR client integration expansion** — Stream agent tokens, patch deltas, convergence, and budget warnings in real time across thread + Truth Map UI.
 - [ ] **Session Timeline Scrubber (Phase 1.5)** — Snapshot access, Pause-and-Replay forks.
 - [ ] **Map View (Phase 1.5, desktop)** — Claim graph visualisation.
 
@@ -65,6 +67,8 @@ _(Nothing currently in progress)_
 - [x] Domain layer scaffold — `Agon.sln` with `Agon.Domain` (net9.0, zero deps) + `Agon.Domain.Tests` (xUnit + FluentAssertions)
 - [x] Backend scaffold vertical slice — `Agon.Application`, `Agon.Infrastructure`, `Agon.Api` added with clean layer dependencies and in-memory adapters
 - [x] Core backend session endpoints — `POST /sessions`, `GET /sessions/{id}`, `POST /sessions/{id}/start`, `GET /sessions/{id}/truthmap`
+- [x] SignalR baseline — `/hubs/debate` mapped with session group join/leave and baseline events (`RoundProgress`, `TruthMapPatch`, `TranscriptMessage`)
+- [x] Frontend SignalR baseline — session route hub connection, round progress updates, reconnect + REST resync
 - [x] Truth Map domain model — `TruthMapState`, `TruthMapPatch`, `PatchValidator` (5 validation rules), all entity types with `derived_from` / `challenged_by`
 - [x] Domain entities — Claim, Assumption, Decision, Risk, Evidence, OpenQuestion, Persona, Constraints, Convergence, ConfidenceTransition + all enums
 - [x] Confidence Decay Engine — decay on undefended challenges, boost on evidence, clamp [0.0, 1.0], contested threshold

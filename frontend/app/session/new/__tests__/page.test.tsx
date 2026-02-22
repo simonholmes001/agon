@@ -49,6 +49,15 @@ describe("NewSessionPage", () => {
     expect(screen.getByText(/friction level/i)).toBeInTheDocument();
   });
 
+  it("renders the friction controls before the idea textbox", () => {
+    render(<NewSessionPage />);
+    const frictionHeading = screen.getByText(/friction level/i);
+    const textbox = screen.getByRole("textbox");
+
+    const frictionPosition = frictionHeading.compareDocumentPosition(textbox);
+    expect(frictionPosition & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it("shows friction label 'Balanced' at default value 50", () => {
     render(<NewSessionPage />);
     const balancedElements = screen.getAllByText("Balanced");
@@ -66,6 +75,16 @@ describe("NewSessionPage", () => {
     expect(screen.getByText("Brainstorm")).toBeInTheDocument();
     expect(screen.getAllByText("Balanced").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("Adversarial")).toBeInTheDocument();
+  });
+
+  it("renders a theme toggle control in the header", () => {
+    render(<NewSessionPage />);
+    expect(screen.getByRole("button", { name: /toggle theme/i })).toBeInTheDocument();
+  });
+
+  it("renders a persistent launch action bar", () => {
+    render(<NewSessionPage />);
+    expect(screen.getByTestId("launch-action-bar")).toBeInTheDocument();
   });
 
   // ── Character count ─────────────────────────────────────────────
@@ -132,16 +151,6 @@ describe("NewSessionPage", () => {
           }),
           { status: 201, headers: { "content-type": "application/json" } },
         ),
-      )
-      .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            sessionId: "session-1",
-            phase: "DebateRound1",
-            frictionLevel: 50,
-          }),
-          { status: 200, headers: { "content-type": "application/json" } },
-        ),
       );
 
     render(<NewSessionPage />);
@@ -155,9 +164,13 @@ describe("NewSessionPage", () => {
     expect(screen.getByText(/starting session/i)).toBeInTheDocument();
     // And the button is disabled to prevent double-submit
     expect(screen.getByRole("button", { name: /starting session/i })).toBeDisabled();
+    // A visible in-page status makes progress obvious without scrolling to the action bar
+    expect(screen.getByRole("status", { name: /session startup status/i })).toHaveTextContent(
+      /analyzing your idea/i,
+    );
   });
 
-  it("calls backend create/start endpoints and navigates to the created session", async () => {
+  it("calls backend create endpoint and navigates to the created session with autostart", async () => {
     fetchMock
       .mockResolvedValueOnce(
         new Response(
@@ -167,16 +180,6 @@ describe("NewSessionPage", () => {
             frictionLevel: 50,
           }),
           { status: 201, headers: { "content-type": "application/json" } },
-        ),
-      )
-      .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            sessionId: "session-42",
-            phase: "DebateRound1",
-            frictionLevel: 50,
-          }),
-          { status: 200, headers: { "content-type": "application/json" } },
         ),
       );
 
@@ -190,7 +193,7 @@ describe("NewSessionPage", () => {
     await waitFor(() => {
       expect(fetchMock).toHaveBeenNthCalledWith(
         1,
-        "/sessions",
+        "/api/backend/sessions",
         expect.objectContaining({
           method: "POST",
           headers: expect.objectContaining({
@@ -198,12 +201,39 @@ describe("NewSessionPage", () => {
           }),
         }),
       );
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(pushMock).toHaveBeenCalledWith("/session/session-42?start=1");
+    });
+  });
+
+  it("submits and navigates with autostart when Enter is pressed in the idea textarea", async () => {
+    fetchMock
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            sessionId: "session-88",
+            phase: "Clarification",
+            frictionLevel: 50,
+          }),
+          { status: 201, headers: { "content-type": "application/json" } },
+        ),
+      );
+
+    render(<NewSessionPage />);
+    const textarea = screen.getByPlaceholderText(/mobile app/i);
+    await userEvent.type(
+      textarea,
+      "An app that helps fans follow Kovi's releases and events{enter}",
+    );
+
+    await waitFor(() => {
       expect(fetchMock).toHaveBeenNthCalledWith(
-        2,
-        "/sessions/session-42/start",
+        1,
+        "/api/backend/sessions",
         expect.objectContaining({ method: "POST" }),
       );
-      expect(pushMock).toHaveBeenCalledWith("/session/session-42");
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(pushMock).toHaveBeenCalledWith("/session/session-88?start=1");
     });
   });
 

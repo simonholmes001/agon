@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 import { render, screen } from "@/lib/test-utils";
 import userEvent from "@testing-library/user-event";
 import MessageComposer from "@/components/session/message-composer";
@@ -48,14 +48,14 @@ describe("MessageComposer", () => {
   it("shows phase-appropriate placeholder for DEBATE_ROUND_1", () => {
     render(<MessageComposer {...defaultProps} phase="DEBATE_ROUND_1" />);
     expect(
-      screen.getByPlaceholderText(/challenge a claim/i),
+      screen.getByPlaceholderText(/message the council moderator/i),
     ).toBeInTheDocument();
   });
 
   it("shows phase-appropriate placeholder for POST_DELIVERY", () => {
     render(<MessageComposer {...defaultProps} phase="POST_DELIVERY" />);
     expect(
-      screen.getByPlaceholderText(/ask about the results/i),
+      screen.getByPlaceholderText(/council moderator/i),
     ).toBeInTheDocument();
   });
 
@@ -81,7 +81,6 @@ describe("MessageComposer", () => {
   });
 
   it("clears input after submit", async () => {
-    const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     render(<MessageComposer {...defaultProps} />);
     const textarea = screen.getByPlaceholderText(
       /answer the clarifying questions/i,
@@ -89,6 +88,5 @@ describe("MessageComposer", () => {
     await userEvent.type(textarea, "My budget is $50k");
     await userEvent.keyboard("{Enter}");
     expect(textarea).toHaveValue("");
-    consoleSpy.mockRestore();
   });
 });

@@ -43,43 +43,43 @@ public sealed record AgentConfig
     [
         new(Agents.AgentId.SocraticClarifier,
             ModelProvider: "openai",
-            ModelName: "gpt-5.2-thinking",
+            ModelName: "gpt-5.2",
             MaxOutputTokens: 4096,
             ActivePhases: [SessionPhase.Clarification]),
 
         new(Agents.AgentId.FramingChallenger,
             ModelProvider: "gemini",
-            ModelName: "gemini-3",
+            ModelName: "gemini-3.1-pro-preview",
             MaxOutputTokens: 4096,
             ActivePhases: [SessionPhase.DebateRound1]),
 
         new(Agents.AgentId.ProductStrategist,
             ModelProvider: "anthropic",
-            ModelName: "claude-opus-4.6",
+            ModelName: "claude-opus-4-6",
             MaxOutputTokens: 4096,
             ActivePhases: [SessionPhase.DebateRound1, SessionPhase.DebateRound2]),
 
         new(Agents.AgentId.TechnicalArchitect,
-            ModelProvider: "deepseek",
-            ModelName: "deepseek-v3.2",
+            ModelProvider: "openai",
+            ModelName: "gpt-5.2",
             MaxOutputTokens: 4096,
             ActivePhases: [SessionPhase.DebateRound1, SessionPhase.DebateRound2]),
 
         new(Agents.AgentId.Contrarian,
             ModelProvider: "gemini",
-            ModelName: "gemini-3",
+            ModelName: "gemini-3.1-pro-preview",
             MaxOutputTokens: 4096,
             ActivePhases: [SessionPhase.DebateRound1, SessionPhase.DebateRound2]),
 
         new(Agents.AgentId.ResearchLibrarian,
             ModelProvider: "openai",
-            ModelName: "gpt-5.2-thinking",
+            ModelName: "gpt-5.2",
             MaxOutputTokens: 4096,
             ActivePhases: [SessionPhase.DebateRound1]),
 
         new(Agents.AgentId.SynthesisValidation,
             ModelProvider: "openai",
-            ModelName: "gpt-5.2-thinking",
+            ModelName: "gpt-5.2",
             MaxOutputTokens: 8192,
             ActivePhases: [SessionPhase.Synthesis, SessionPhase.TargetedLoop])
     ];

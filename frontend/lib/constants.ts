@@ -33,7 +33,7 @@ export const AGENTS: Record<AgentId, AgentInfo> = {
     name: "Technical Architect",
     shortName: "Architect",
     role: "Proposes feasible architecture and identifies technical risks",
-    model: "DeepSeek-V3.2",
+    model: "GPT-5.2 Thinking",
     color: "#3b82f6", // blue
     icon: "⚙️",
   },

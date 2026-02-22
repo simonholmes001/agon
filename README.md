@@ -26,7 +26,7 @@ Unlike a single-prompt AI chat, Agon maintains a **living Truth Map**: a structu
 |---|---|
 | **Truth Map** | Shared state graph (claims, assumptions, risks, decisions, evidence) — the single source of truth for the session. Agents propose patches; the Orchestrator validates and applies them. |
 | **Council** | Seven specialist agents: Socratic Clarifier, Framing Challenger, Product Strategist, Technical Architect, Contrarian / Red Team, Research Librarian, Synthesis + Validation. |
-| **Multi-Model** | Each agent uses a different LLM provider (GPT-5.2, Gemini 3, Claude Opus 4.6, DeepSeek-V3.2) — diversity of reasoning reduces blind spots. |
+| **Multi-Model** | Agents use multiple providers (GPT-5.2, Gemini 3, Claude Opus 4.6). Technical Architect is temporarily mapped to GPT-5.2 while DeepSeek billing is paused. |
 | **Friction Slider** | User-controlled dial (0–100) that modulates agent tone *and* convergence thresholds — from brainstorm (low friction) to adversarial red-team (high friction). |
 | **Bounded Debate** | Hard-capped rounds and token budgets. Sessions always terminate. Degradation is graceful and surfaced, never silent. |
 | **HITL** | Human-in-the-loop: pause, challenge a claim, force a deep dive, change a constraint mid-session — with full change propagation. |
@@ -127,12 +127,12 @@ Full implementation guide: [`.github/instructions/backend-implementation.instruc
 | Socratic Clarifier | GPT-5.2 Thinking | OpenAI |
 | Framing Challenger | Gemini 3 (thinking: high) | Google |
 | Product Strategist | Claude Opus 4.6 | Anthropic |
-| Technical Architect | DeepSeek-V3.2 (thinking) | DeepSeek |
+| Technical Architect | GPT-5.2 Thinking (temporary override) | OpenAI |
 | Contrarian / Red Team | Gemini 3 (thinking: high) | Google |
 | Research Librarian | GPT-5.2 Thinking | OpenAI |
 | Synthesis + Validation | GPT-5.2 Thinking | OpenAI |
 
-All providers are accessed via `IChatClient` — interchangeable behind the interface. DeepSeek uses OpenAI-compatible API via `OpenAIClient` with a custom endpoint.
+All providers are accessed via `IChatClient` — interchangeable behind the interface. DeepSeek wiring remains in the codebase and can be restored once billing is enabled.
 
 ---
 
@@ -163,10 +163,10 @@ agon/
 │   │   │   ├── Orchestration/      # Orchestrator (deterministic transitions), AgentRunner
 │   │   │   ├── Interfaces/         # ICouncilAgent, ITruthMapRepository, ISessionRepository
 │   │   │   └── Services/           # SessionService, SnapshotService
-│   │   ├── Agon.Infrastructure/    # In-memory adapters + fake agents (vertical slice)
+│   │   ├── Agon.Infrastructure/    # In-memory adapters + SignalR broadcaster
 │   │   │   ├── Agents/             # FakeCouncilAgent
 │   │   │   ├── Persistence/        # InMemorySessionRepository, InMemoryTruthMapRepository
-│   │   │   └── SignalR/            # Event broadcaster abstraction impls
+│   │   │   └── SignalR/            # DebateHub + SignalREventBroadcaster
 │   │   └── Agon.Api/               # Thin host — routing + DI
 │   │       └── Program.cs          # Core session endpoints
 │   └── tests/
@@ -194,6 +194,7 @@ agon/
 │   │   └── ui/                 # shadcn/ui primitives
 │   ├── lib/
 │   │   ├── constants.ts        # Agent registry, phase labels, friction config
+│   │   ├── realtime/           # Debate hub client + reconnect/resync wiring
 │   │   ├── utils.ts            # Utilities (cn)
 │   │   └── test-utils.tsx      # Custom test render wrapper
 │   └── types/
@@ -224,6 +225,7 @@ git config core.hooksPath .githooks
 # --- Frontend ---
 cd frontend
 npm install
+npm install @microsoft/signalr   # required for live SignalR streaming
 npm run dev
 # Open http://localhost:3000
 
@@ -234,6 +236,49 @@ dotnet build
 dotnet test
 dotnet run --project src/Agon.Api
 ```
+
+For local frontend-to-backend realtime transport:
+
+```bash
+# frontend/.env.local
+BACKEND_API_BASE_URL=http://localhost:5000
+# Optional override (defaults to BACKEND_API_BASE_URL or http://localhost:5000)
+# NEXT_PUBLIC_DEBATE_HUB_URL=http://localhost:5000/hubs/debate
+
+# project root .env
+OPENAI_KEY=your-openai-api-key
+GEMINI_KEY=your-gemini-api-key
+CLAUDE_KEY=your-anthropic-api-key
+DEEPSEEK_KEY=your-deepseek-api-key
+# Optional model overrides
+OPENAI_MODEL=gpt-5.2
+GEMINI_MODEL=gemini-3.1-pro-preview
+ANTHROPIC_MODEL=claude-opus-4-6
+DEEPSEEK_MODEL=deepseek-chat
+# Optional temperature overrides (0.0 - 2.0, provider defaults when omitted)
+OPENAI_TEMPERATURE=0.4
+GEMINI_TEMPERATURE=0.4
+ANTHROPIC_TEMPERATURE=0.4
+# Optional override for temporary openai-backed technical_architect
+TECHNICAL_ARCHITECT_TEMPERATURE=0.3
+```
+
+`BACKEND_API_BASE_URL` is used by Next.js route handlers under
+`/api/backend/*` to proxy REST calls to ASP.NET Core and avoid CORS and route
+collisions with frontend pages.
+
+`Agon.Api` now auto-loads the nearest `.env` file on startup (walking up from
+`backend/src/Agon.Api`), so local key setup works without manual `source`/`export`.
+Existing process environment variables still take precedence over `.env` values.
+
+If `NEXT_PUBLIC_DEBATE_HUB_URL` is not set, the frontend builds the hub URL
+from `NEXT_PUBLIC_BACKEND_BASE_URL` (fallback: `BACKEND_API_BASE_URL`,
+fallback: `http://localhost:5000`) with `/hubs/debate` appended. This avoids
+WebSocket upgrade issues through Next.js route handlers.
+
+The API now enables CORS for local frontend origins by default:
+`http://localhost:3000` and `https://localhost:3000`. Override via
+`Cors:AllowedOrigins` in backend configuration when needed.
 
 ### Available Scripts
 
@@ -323,7 +368,8 @@ Full specification: [`.github/instructions/round-policy.instructions.md`](.githu
 |---|---|---|
 | `POST` | `/sessions` | Create a new session |
 | `GET` | `/sessions/{id}` | Get session state |
-| `POST` | `/sessions/{id}/start` | Begin clarification phase |
+| `POST` | `/sessions/{id}/start` | Transition from clarification to debate round 1 and run a council round |
+| `GET` | `/sessions/{id}/transcript` | Get persisted transcript provenance for the session |
 | `POST` | `/sessions/{id}/messages` | User message (clarification response or post-delivery question) |
 | `POST` | `/sessions/{id}/hitl/challenge` | Challenge a specific claim |
 | `POST` | `/sessions/{id}/hitl/constraint` | Add/modify constraint (triggers change propagation) |
@@ -333,11 +379,19 @@ Full specification: [`.github/instructions/round-policy.instructions.md`](.githu
 | `GET` | `/sessions/{id}/artifacts/{type}` | Retrieve a generated artifact |
 | `GET` | `/sessions/{id}/snapshots` | List available round snapshots |
 
+`POST /sessions/{id}/start` accepts optional `X-Correlation-ID`. When provided,
+the same value is echoed in the response header and included in API +
+orchestration + provider call logs for end-to-end tracing.
+
 ### SignalR (WebSockets) — Real-Time Streaming
 
-The frontend connects to `/hubs/debate` for all real-time updates. The UI never polls — all results arrive as server-pushed events:
+The frontend connects to `/hubs/debate` for server-pushed updates. Current baseline events:
 
-`AgentTokens` · `RoundProgress` · `TruthMapPatch` · `ConfidenceTransition` · `ConvergenceUpdate` · `PendingRevalidation` · `ArtifactReady` · `BudgetWarning`
+`RoundProgress` · `TruthMapPatch` · `TranscriptMessage`
+
+Planned event expansion (next increments):
+
+`AgentTokens` · `ConfidenceTransition` · `ConvergenceUpdate` · `PendingRevalidation` · `ArtifactReady` · `BudgetWarning`
 
 ---
 
@@ -378,15 +432,15 @@ A completed Agon session produces:
 - [x] Frontend shell — landing, session creation, debate view, sessions list
 - [x] Type system mirroring backend schemas
 - [x] Agent registry with model assignments and visual identity
-- [x] Component test suite (154 tests, 87% line coverage)
+- [x] Component test suite (159 tests, 20 files)
 - [x] CI pipeline with automated badge updates
 - [x] Backend architecture decisions documented (MAF integration strategy)
 - [x] Domain model — TruthMap, PatchValidator, RoundPolicy, ConfidenceDecayEngine, ChangeImpactCalculator (TDD)
 - [x] Backend vertical slice — Application/Infrastructure/API scaffold with in-memory adapters and core session endpoints
 - [ ] Application layer — full Orchestrator state machine, AgentRunner, ICouncilAgent expansion
-- [ ] Infrastructure layer — MAF agents, PostgreSQL, Redis, SignalR hub (replace in-memory adapters)
+- [ ] Infrastructure layer — MAF agents, PostgreSQL, Redis, full SignalR event surface (replace in-memory adapters)
 - [ ] API layer — full REST endpoints + global exception middleware
-- [ ] Frontend–backend integration — replace mock data with REST API + SignalR
+- [ ] Frontend–backend integration — replace remaining demo thread/truth-map state with live REST + SignalR event data
 
 ### Phase 1.5
 - [ ] Map View (desktop graph visualisation)

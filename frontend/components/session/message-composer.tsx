@@ -19,12 +19,12 @@ function getPlaceholder(phase: SessionPhase): string {
       return "Answer the clarifying questions…";
     case "DEBATE_ROUND_1":
     case "DEBATE_ROUND_2":
-      return "Challenge a claim, ask a question, or add a constraint…";
+      return "Message the Council Moderator. They will coordinate with the council…";
     case "SYNTHESIS":
     case "TARGETED_LOOP":
       return "The council is synthesising…";
     case "POST_DELIVERY":
-      return "Ask about the results, challenge a decision, or request a deep dive…";
+      return "Message the Council Moderator for follow-up decisions, challenges, or deep dives…";
     default:
       return "Type a message…";
   }
@@ -69,6 +69,11 @@ export default function MessageComposer({ sessionId, phase }: MessageComposerPro
 
   return (
     <div className="border-t border-border/50 bg-card/30 backdrop-blur-sm">
+      {(phase === "DEBATE_ROUND_1" || phase === "DEBATE_ROUND_2" || phase === "POST_DELIVERY") ? (
+        <div className="mx-auto max-w-3xl px-4 pt-3 text-xs text-muted-foreground sm:px-6">
+          Council Moderator channel
+        </div>
+      ) : null}
       <form
         onSubmit={handleSubmit}
         className="mx-auto flex max-w-3xl items-end gap-2 px-4 py-3 sm:px-6"
