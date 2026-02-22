@@ -322,6 +322,7 @@ describe("SessionPage", () => {
         agentId?: string;
         round?: number;
         isStreaming?: boolean;
+        createdAtUtc?: string;
       }) => void)
       | undefined;
     expect(transcriptHandler).toBeTypeOf("function");
