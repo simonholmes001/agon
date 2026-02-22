@@ -217,6 +217,48 @@ builder.Services.AddSingleton<ICouncilAgent>(sp =>
             Temperature: technicalArchitectTemperature),
         sp.GetRequiredService<ILogger<OpenAiCouncilAgent>>());
 });
+builder.Services.AddSingleton<ICouncilAgent>(sp =>
+{
+    if (string.IsNullOrWhiteSpace(openAiApiKey))
+    {
+        return new ConfigurationErrorCouncilAgent(
+            AgentId.SocraticClarifier,
+            modelProvider: "openai",
+            errorMessage: "Missing OPENAI_KEY for agent 'socratic_clarifier'.",
+            logger: sp.GetRequiredService<ILogger<ConfigurationErrorCouncilAgent>>());
+    }
+
+    return new OpenAiCouncilAgent(
+        sp.GetRequiredService<IHttpClientFactory>().CreateClient(),
+        new OpenAiCouncilAgentOptions(
+            AgentId.SocraticClarifier,
+            openAiApiKey,
+            openAiModel,
+            MaxOutputTokens: 600,
+            Temperature: openAiTemperature),
+        sp.GetRequiredService<ILogger<OpenAiCouncilAgent>>());
+});
+builder.Services.AddSingleton<ICouncilAgent>(sp =>
+{
+    if (string.IsNullOrWhiteSpace(openAiApiKey))
+    {
+        return new ConfigurationErrorCouncilAgent(
+            AgentId.SynthesisValidation,
+            modelProvider: "openai",
+            errorMessage: "Missing OPENAI_KEY for agent 'synthesis_validation'.",
+            logger: sp.GetRequiredService<ILogger<ConfigurationErrorCouncilAgent>>());
+    }
+
+    return new OpenAiCouncilAgent(
+        sp.GetRequiredService<IHttpClientFactory>().CreateClient(),
+        new OpenAiCouncilAgentOptions(
+            AgentId.SynthesisValidation,
+            openAiApiKey,
+            openAiModel,
+            MaxOutputTokens: 900,
+            Temperature: openAiTemperature),
+        sp.GetRequiredService<ILogger<OpenAiCouncilAgent>>());
+});
 
 var app = builder.Build();
 app.UseMiddleware<GlobalExceptionMiddleware>();
@@ -419,6 +461,82 @@ app.MapPost("/sessions/{sessionId:guid}/start", async (
     }
 });
 
+app.MapPost("/sessions/{sessionId:guid}/messages", async (
+    Guid sessionId,
+    PostSessionMessageRequest request,
+    SessionService sessionService,
+    HttpContext httpContext,
+    ILoggerFactory loggerFactory,
+    CancellationToken cancellationToken) =>
+{
+    var correlationId = ResolveCorrelationId(httpContext);
+    httpContext.Response.Headers[CorrelationHeaderName] = correlationId;
+    var logger = loggerFactory.CreateLogger("SessionsApi");
+
+    logger.LogInformation(
+        "POST /sessions/{SessionId}/messages received. CorrelationId={CorrelationId}",
+        sessionId,
+        correlationId);
+
+    try
+    {
+        var result = await sessionService.PostUserMessageAsync(
+            sessionId,
+            request.Message ?? string.Empty,
+            cancellationToken,
+            correlationId);
+
+        logger.LogInformation(
+            "POST /sessions/{SessionId}/messages completed. Phase={Phase} RoutedAgent={RoutedAgent} CorrelationId={CorrelationId}",
+            sessionId,
+            result.Phase,
+            result.RoutedAgentId,
+            correlationId);
+
+        return Results.Ok(new SessionMessageResponse(
+            result.SessionId,
+            result.Phase,
+            result.RoutedAgentId,
+            result.Reply,
+            result.PatchApplied));
+    }
+    catch (ArgumentException exception)
+    {
+        logger.LogWarning(
+            exception,
+            "POST /sessions/{SessionId}/messages validation failed. CorrelationId={CorrelationId}",
+            sessionId,
+            correlationId);
+        return Results.BadRequest(new { error = exception.Message });
+    }
+    catch (KeyNotFoundException)
+    {
+        logger.LogWarning(
+            "POST /sessions/{SessionId}/messages returned not found. CorrelationId={CorrelationId}",
+            sessionId,
+            correlationId);
+        return Results.NotFound();
+    }
+    catch (InvalidOperationException exception)
+    {
+        logger.LogWarning(
+            exception,
+            "POST /sessions/{SessionId}/messages rejected for current phase. CorrelationId={CorrelationId}",
+            sessionId,
+            correlationId);
+        return Results.Conflict(new { error = exception.Message });
+    }
+    catch (Exception exception)
+    {
+        logger.LogError(
+            exception,
+            "POST /sessions/{SessionId}/messages failed unexpectedly. CorrelationId={CorrelationId}",
+            sessionId,
+            correlationId);
+        throw;
+    }
+});
+
 app.MapGet("/sessions/{sessionId:guid}/truthmap", async (
     Guid sessionId,
     SessionService sessionService,
@@ -492,6 +610,8 @@ static string ResolveCorrelationId(HttpContext context)
 
 public record CreateSessionRequest(string Idea, string Mode, int FrictionLevel);
 
+public record PostSessionMessageRequest(string? Message);
+
 public record SessionResponse(
     Guid SessionId,
     string Status,
@@ -515,5 +635,12 @@ public record TranscriptMessageResponse(
     int Round,
     bool IsStreaming,
     DateTimeOffset CreatedAtUtc);
+
+public record SessionMessageResponse(
+    Guid SessionId,
+    string Phase,
+    string RoutedAgentId,
+    string Reply,
+    bool PatchApplied);
 
 public partial class Program;

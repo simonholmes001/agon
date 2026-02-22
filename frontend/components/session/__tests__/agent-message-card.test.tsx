@@ -89,6 +89,17 @@ describe("AgentMessageCard", () => {
     }
   });
 
+  it("shows moderator summary label when variant is moderatorSummary", () => {
+    render(
+      <AgentMessageCard
+        {...defaultProps}
+        agentId="synthesis-validation"
+        variant="moderatorSummary"
+      />,
+    );
+    expect(screen.getByText(/moderator summary/i)).toBeInTheDocument();
+  });
+
   it("renders Markdown bold text as HTML strong elements", () => {
     const { container } = render(
       <AgentMessageCard

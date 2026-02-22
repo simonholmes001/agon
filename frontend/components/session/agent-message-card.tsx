@@ -18,6 +18,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { AGENTS } from "@/lib/constants";
+import { cn } from "@/lib/utils";
 import type { AgentId } from "@/types";
 
 interface AgentMessageCardProps {
@@ -26,6 +27,7 @@ interface AgentMessageCardProps {
   readonly isStreaming: boolean;
   readonly round: number;
   readonly isContested?: boolean;
+  readonly variant?: "default" | "moderatorSummary";
 }
 
 function AgentMessageCardInner({
@@ -33,11 +35,26 @@ function AgentMessageCardInner({
   content,
   isStreaming,
   isContested,
+  variant = "default",
 }: AgentMessageCardProps) {
   const agent = AGENTS[agentId];
+  const isModeratorSummary = variant === "moderatorSummary";
+  const proseClassName = cn(
+    "prose prose-sm prose-neutral max-w-none text-sm leading-relaxed",
+    "prose-headings:font-semibold prose-strong:text-foreground",
+    isModeratorSummary
+      ? "prose-headings:tracking-tight prose-h2:text-base prose-h3:text-sm prose-p:leading-7"
+      : "prose-h3:text-base prose-h4:text-sm",
+    "dark:prose-invert",
+  );
 
   return (
-    <div className="group relative rounded-2xl border border-border/40 bg-card/60 p-4 backdrop-blur-sm transition-colors hover:border-border/60 sm:p-5">
+    <div
+      className={cn(
+        "group relative rounded-2xl border border-border/40 bg-card/60 p-4 backdrop-blur-sm transition-colors hover:border-border/60 sm:p-5",
+        isModeratorSummary && "border-agent-synthesis/60 bg-agent-synthesis/15 shadow-sm",
+      )}
+    >
       {/* Header */}
       <div className="mb-3 flex items-center gap-3">
         {/* Agent avatar */}
@@ -51,6 +68,11 @@ function AgentMessageCardInner({
         <div className="flex flex-1 flex-col">
           <div className="flex items-center gap-2">
             <span className="text-sm font-semibold">{agent.name}</span>
+            {isModeratorSummary && (
+              <Badge variant="secondary" className="text-[10px]">
+                Moderator summary
+              </Badge>
+            )}
             {isContested && (
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -97,8 +119,48 @@ function AgentMessageCardInner({
       </div>
 
       {/* Content */}
-      <div className="prose prose-sm prose-neutral dark:prose-invert max-w-none text-sm leading-relaxed">
-        <Markdown remarkPlugins={[remarkGfm]}>{content}</Markdown>
+      <div className={proseClassName}>
+        <Markdown
+          remarkPlugins={[remarkGfm]}
+          components={{
+            h2: ({ children }) => (
+              <h2 className="mt-5 border-b border-border/60 pb-1 text-base font-semibold text-foreground">
+                {children}
+              </h2>
+            ),
+            h3: ({ children }) => (
+              <h3 className="mt-4 text-base font-semibold text-foreground">{children}</h3>
+            ),
+            h4: ({ children }) => (
+              <h4 className="mt-3 text-sm font-semibold text-foreground/90">{children}</h4>
+            ),
+            h5: ({ children }) => (
+              <h5 className="mt-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                {children}
+              </h5>
+            ),
+            p: ({ children }) => (
+              <p className="mt-2 leading-relaxed text-foreground/90">{children}</p>
+            ),
+            ul: ({ children }) => (
+              <ul className="mt-2 list-disc space-y-1 pl-5">{children}</ul>
+            ),
+            ol: ({ children }) => (
+              <ol className="mt-2 list-decimal space-y-1 pl-5">{children}</ol>
+            ),
+            li: ({ children }) => (
+              <li className="leading-relaxed">{children}</li>
+            ),
+            hr: () => <hr className="my-4 border-border/60" />,
+            blockquote: ({ children }) => (
+              <blockquote className="mt-3 border-l-2 border-border/60 pl-4 text-muted-foreground">
+                {children}
+              </blockquote>
+            ),
+          }}
+        >
+          {content}
+        </Markdown>
       </div>
 
       {/* Streaming indicator */}

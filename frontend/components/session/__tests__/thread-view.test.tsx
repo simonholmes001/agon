@@ -9,9 +9,10 @@ interface ThreadViewTestProps {
   coreIdea: string;
   realtimeStatus: "connecting" | "connected" | "unavailable";
   roundStartState: "idle" | "starting" | "started" | "failed";
+  pendingFollowUp?: boolean;
   messages: Array<{
     id: string;
-    type: "agent" | "system";
+    type: "agent" | "system" | "user";
     content: string;
     agentId?: "socratic-clarifier";
     round?: number;
@@ -101,11 +102,11 @@ describe("ThreadView", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("shows a clear next-step prompt for moderator interaction after debate messages arrive", () => {
+  it("does not render a separate next-step guidance panel", () => {
     render(
       <ThreadView
         {...defaultProps}
-        phase="DEBATE_ROUND_1"
+        phase="POST_DELIVERY"
         messages={[
           {
             id: "agent-1",
@@ -113,17 +114,47 @@ describe("ThreadView", () => {
             agentId: "socratic-clarifier",
             round: 1,
             isStreaming: false,
-            content: "Here is the council assessment.",
+            content: "Moderator synthesis content.",
           },
         ]}
       />,
     );
 
+    expect(screen.queryByText(/what to do next/i)).not.toBeInTheDocument();
     expect(
-      screen.getByText(/next step:/i),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText(/ask the council moderator one focused follow-up/i),
-    ).toBeInTheDocument();
+      screen.queryByText(/use the council moderator as the single interaction lane/i),
+    ).not.toBeInTheDocument();
+  });
+
+  it("renders a user follow-up bubble when a user message is present", () => {
+    render(
+      <ThreadView
+        {...defaultProps}
+        phase="POST_DELIVERY"
+        messages={[
+          {
+            id: "user-1",
+            type: "user",
+            content: "What tech stack would you recommend?",
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByText(/your follow-up/i)).toBeInTheDocument();
+    expect(screen.getByText(/what tech stack would you recommend/i)).toBeInTheDocument();
+  });
+
+  it("shows a processing indicator while waiting for streaming responses", () => {
+    render(
+      <ThreadView
+        {...defaultProps}
+        phase="DEBATE_ROUND_1"
+        roundStartState="starting"
+        messages={[]}
+      />,
+    );
+
+    expect(screen.getByText(/council is processing/i)).toBeInTheDocument();
   });
 });

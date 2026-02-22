@@ -5,7 +5,7 @@ import {
 } from "@/lib/realtime/debate-hub";
 
 describe("createDebateHubConnection", () => {
-  it("surfaces startup errors so callers can handle them with logging/fallback", async () => {
+  it("returns false on startup errors so callers can handle logging/fallback", async () => {
     const connection = createDebateHubConnection("session-abc");
 
     connection.onRoundProgress(() => {});
@@ -13,7 +13,7 @@ describe("createDebateHubConnection", () => {
     connection.onTranscriptMessage(() => {});
     connection.onReconnected(() => {});
 
-    await expect(connection.start()).rejects.toBeTruthy();
+    await expect(connection.start()).resolves.toBe(false);
     await expect(connection.stop()).resolves.toBeUndefined();
   });
 

@@ -37,6 +37,14 @@ interface BackendTranscriptMessageResponse {
   isStreaming?: boolean;
 }
 
+interface BackendSessionMessageResponse {
+  sessionId?: string;
+  phase?: string;
+  routedAgentId?: string;
+  reply?: string;
+  patchApplied?: boolean;
+}
+
 type RoundStartState = "idle" | "starting" | "started" | "failed";
 
 async function readJsonResponse<T>(
@@ -110,7 +118,12 @@ function mapTranscriptMessage(
   const content = message.content?.trim();
   if (!content) return null;
 
-  const type = message.type?.toLowerCase() === "agent" ? "agent" : "system";
+  const normalizedType = message.type?.toLowerCase();
+  const type = normalizedType === "agent"
+    ? "agent"
+    : normalizedType === "user"
+      ? "user"
+      : "system";
   return {
     id: message.id ?? fallbackId,
     type,
@@ -150,6 +163,8 @@ export default function SessionPage() {
   const [messages, setMessages] = useState<ThreadViewMessage[]>([]);
   const [realtimeStatus, setRealtimeStatus] = useState<"connecting" | "connected" | "unavailable">("connecting");
   const [roundStartState, setRoundStartState] = useState<RoundStartState>("idle");
+  const [followUpPending, setFollowUpPending] = useState(false);
+  const [agentCountAtFollowUp, setAgentCountAtFollowUp] = useState(0);
 
   const loadSessionState = useCallback(async (id: string) => {
     logger.info("loading session state", { sessionId: id });
@@ -206,6 +221,74 @@ export default function SessionPage() {
     }
   }, []);
 
+  const postModeratorMessage = useCallback(async (message: string) => {
+    const targetSessionId = sessionId || routeSessionId;
+    if (!targetSessionId) {
+      throw new Error("Cannot post moderator message without a session id.");
+    }
+
+    const currentAgentCount = messages.filter((entry) => entry.type === "agent").length;
+    setAgentCountAtFollowUp(currentAgentCount);
+    setFollowUpPending(true);
+
+    logger.info("posting moderator message", {
+      sessionId: targetSessionId,
+      phase,
+      messageLength: message.length,
+    });
+
+    const response = await fetch(`${BACKEND_API_PREFIX}/sessions/${targetSessionId}/messages`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message }),
+    });
+
+    if (!response.ok) {
+      let errorDetail = `Post session message failed with status ${response.status}`;
+      try {
+        const errorPayload = await readJsonResponse<{ error?: string }>(
+          response,
+          "Post session message",
+        );
+        if (errorPayload.error) {
+          errorDetail = `Post session message failed (${response.status}): ${errorPayload.error}`;
+        }
+      } catch {
+        // Keep HTTP-status-based detail if payload isn't valid JSON.
+      }
+
+      throw new Error(errorDetail);
+    }
+
+    const payload = await readJsonResponse<BackendSessionMessageResponse>(
+      response,
+      "Post session message",
+    );
+
+    if (payload.phase) {
+      setPhase(mapBackendPhaseToSessionPhase(payload.phase));
+    }
+
+    logger.info("moderator message accepted", {
+      sessionId: targetSessionId,
+      routedAgentId: payload.routedAgentId,
+      patchApplied: payload.patchApplied,
+    });
+
+    // SignalR normally streams the new transcript entries; if unavailable, resync via REST.
+    if (realtimeStatus !== "connected") {
+      await loadSessionState(targetSessionId);
+    }
+  }, [sessionId, routeSessionId, phase, realtimeStatus, loadSessionState, messages]);
+
+  useEffect(() => {
+    if (!followUpPending) return;
+    const currentAgentCount = messages.filter((entry) => entry.type === "agent").length;
+    if (currentAgentCount > agentCountAtFollowUp) {
+      setFollowUpPending(false);
+    }
+  }, [followUpPending, agentCountAtFollowUp, messages]);
+
   useEffect(() => {
     if (!routeSessionId) return;
     void loadSessionState(routeSessionId);
@@ -260,8 +343,17 @@ export default function SessionPage() {
 
     void connection
       .start()
-      .then(() => {
-        setRealtimeStatus("connected");
+      .then((started) => {
+        if (started) {
+          setRealtimeStatus("connected");
+          return;
+        }
+
+        setRealtimeStatus("unavailable");
+        logger.warn(
+          "signalr unavailable, continuing with rest-only session state",
+          { sessionId: routeSessionId },
+        );
       })
       .catch((error) => {
         setRealtimeStatus("unavailable");
@@ -321,14 +413,15 @@ export default function SessionPage() {
 
       <div className="relative flex flex-1 overflow-hidden">
         {/* Thread — always visible */}
-        <ThreadView
-          sessionId={sessionId || routeSessionId || "unknown"}
-          phase={phase}
-          coreIdea={coreIdea}
-          realtimeStatus={realtimeStatus}
-          roundStartState={roundStartState}
-          messages={messages}
-        />
+      <ThreadView
+        sessionId={sessionId || routeSessionId || "unknown"}
+        phase={phase}
+        coreIdea={coreIdea}
+        realtimeStatus={realtimeStatus}
+        roundStartState={roundStartState}
+        messages={messages}
+        pendingFollowUp={followUpPending}
+      />
 
         {/* Truth Map — drawer on mobile, sidebar on desktop */}
         <TruthMapDrawer
@@ -340,6 +433,7 @@ export default function SessionPage() {
       <MessageComposer
         sessionId={sessionId || routeSessionId || "unknown"}
         phase={phase}
+        onSubmitMessage={postModeratorMessage}
       />
     </div>
   );

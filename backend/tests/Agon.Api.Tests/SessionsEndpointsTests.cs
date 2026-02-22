@@ -32,7 +32,7 @@ public class SessionsEndpointsTests : IClassFixture<WebApplicationFactory<Progra
     }
 
     [Fact]
-    public async Task StartSession_TransitionsToDebateRound1()
+    public async Task StartSession_TransitionsToPostDelivery()
     {
         var create = await client.PostAsJsonAsync("/sessions", new
         {
@@ -47,7 +47,7 @@ public class SessionsEndpointsTests : IClassFixture<WebApplicationFactory<Progra
         startResponse.StatusCode.Should().Be(HttpStatusCode.OK);
         var started = await startResponse.Content.ReadFromJsonAsync<SessionResponse>();
         started.Should().NotBeNull();
-        started!.Phase.Should().Be("DebateRound1");
+        started!.Phase.Should().Be("PostDelivery");
     }
 
     [Fact]
@@ -140,6 +140,88 @@ public class SessionsEndpointsTests : IClassFixture<WebApplicationFactory<Progra
         transcript.Should().Contain(message =>
             (message.Type == "agent" && message.AgentId == "product-strategist")
             || (message.Type == "system" && message.Content.Contains("product-strategist")));
+        transcript.Should().Contain(message =>
+            message.Type == "agent"
+            && message.AgentId == "synthesis-validation");
+    }
+
+    [Fact]
+    public async Task PostMessage_ReturnsModeratorReply_InClarification()
+    {
+        var create = await client.PostAsJsonAsync("/sessions", new
+        {
+            idea = "A service that validates startup ideas with an AI council.",
+            mode = "Deep",
+            frictionLevel = 50
+        });
+        var created = await create.Content.ReadFromJsonAsync<SessionResponse>();
+
+        var response = await client.PostAsJsonAsync($"/sessions/{created!.SessionId}/messages", new
+        {
+            message = "My target user is startup founders."
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var payload = await response.Content.ReadFromJsonAsync<MessageResponse>();
+        payload.Should().NotBeNull();
+        payload!.SessionId.Should().Be(created.SessionId);
+        payload.Phase.Should().Be("Clarification");
+        payload.RoutedAgentId.Should().Be("socratic_clarifier");
+        payload.Reply.Should().NotBeNullOrWhiteSpace();
+    }
+
+    [Fact]
+    public async Task PostMessage_AfterStart_RoutesInPostDelivery()
+    {
+        var create = await client.PostAsJsonAsync("/sessions", new
+        {
+            idea = "A service that validates startup ideas with an AI council.",
+            mode = "Deep",
+            frictionLevel = 50
+        });
+        var created = await create.Content.ReadFromJsonAsync<SessionResponse>();
+        await client.PostAsync($"/sessions/{created!.SessionId}/start", content: null);
+
+        var response = await client.PostAsJsonAsync($"/sessions/{created.SessionId}/messages", new
+        {
+            message = "Can you explain the technical architecture trade-offs?"
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var payload = await response.Content.ReadFromJsonAsync<MessageResponse>();
+        payload.Should().NotBeNull();
+        payload!.Phase.Should().Be("PostDelivery");
+        payload.RoutedAgentId.Should().Be("technical_architect");
+    }
+
+    [Fact]
+    public async Task PostMessage_ReturnsBadRequest_ForBlankMessage()
+    {
+        var create = await client.PostAsJsonAsync("/sessions", new
+        {
+            idea = "A service that validates startup ideas with an AI council.",
+            mode = "Deep",
+            frictionLevel = 50
+        });
+        var created = await create.Content.ReadFromJsonAsync<SessionResponse>();
+
+        var response = await client.PostAsJsonAsync($"/sessions/{created!.SessionId}/messages", new
+        {
+            message = "   "
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+    }
+
+    [Fact]
+    public async Task PostMessage_ReturnsNotFound_WhenSessionDoesNotExist()
+    {
+        var response = await client.PostAsJsonAsync($"/sessions/{Guid.NewGuid()}/messages", new
+        {
+            message = "Can we review assumptions?"
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
     }
 
     private sealed class SessionResponse
@@ -158,5 +240,13 @@ public class SessionsEndpointsTests : IClassFixture<WebApplicationFactory<Progra
         public string Type { get; init; } = string.Empty;
         public string AgentId { get; init; } = string.Empty;
         public string Content { get; init; } = string.Empty;
+    }
+
+    private sealed class MessageResponse
+    {
+        public Guid SessionId { get; init; }
+        public string Phase { get; init; } = string.Empty;
+        public string RoutedAgentId { get; init; } = string.Empty;
+        public string Reply { get; init; } = string.Empty;
     }
 }

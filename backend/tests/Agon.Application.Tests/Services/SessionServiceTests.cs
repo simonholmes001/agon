@@ -2,6 +2,7 @@ using Agon.Application.Interfaces;
 using Agon.Application.Orchestration;
 using Agon.Application.Sessions;
 using Agon.Application.Services;
+using Agon.Domain.Agents;
 using Agon.Domain.Sessions;
 using Agon.Domain.TruthMap;
 using FluentAssertions;
@@ -107,7 +108,7 @@ public class SessionServiceTests
     }
 
     [Fact]
-    public async Task StartSessionAsync_TransitionsFromClarificationToDebateRound1()
+    public async Task StartSessionAsync_TransitionsFromClarificationToPostDelivery()
     {
         var sessionId = Guid.NewGuid();
         var session = new SessionState
@@ -146,7 +147,8 @@ public class SessionServiceTests
 
         var updated = await sut.StartSessionAsync(sessionId, CancellationToken.None);
 
-        updated.Phase.Should().Be(SessionPhase.DebateRound1);
+        updated.Phase.Should().Be(SessionPhase.PostDelivery);
+        updated.Status.Should().Be(SessionStatus.CompleteWithGaps);
         updated.RoundNumber.Should().Be(1);
         await sessionRepository.Received(1).UpdateAsync(updated, Arg.Any<CancellationToken>());
         await eventBroadcaster.Received(1)
@@ -158,6 +160,235 @@ public class SessionServiceTests
                 && message.AgentId == null
                 && message.Content.Contains("Round 1 started", StringComparison.Ordinal)),
             Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task PostUserMessageAsync_InClarification_RoutesToSocraticClarifier()
+    {
+        var sessionId = Guid.NewGuid();
+        var session = new SessionState
+        {
+            SessionId = sessionId,
+            Phase = SessionPhase.Clarification,
+            Status = SessionStatus.Active,
+            Mode = SessionMode.Deep,
+            FrictionLevel = 50,
+            RoundPolicy = new RoundPolicy(),
+            RoundNumber = 0
+        };
+        var map = TruthMapState.CreateNew(sessionId);
+        map.CoreIdea = "Core idea";
+
+        var sessionRepository = Substitute.For<ISessionRepository>();
+        sessionRepository.GetAsync(sessionId, Arg.Any<CancellationToken>()).Returns(session);
+        var truthMapRepository = Substitute.For<ITruthMapRepository>();
+        truthMapRepository.GetAsync(sessionId, Arg.Any<CancellationToken>()).Returns(map);
+        var transcriptRepository = Substitute.For<ITranscriptRepository>();
+        var eventBroadcaster = Substitute.For<IEventBroadcaster>();
+        var orchestrator = new Orchestrator();
+        var runnerLogger = Substitute.For<ILogger<AgentRunner>>();
+        var agentRunner = new AgentRunner(truthMapRepository, eventBroadcaster, runnerLogger);
+        var clarifier = new ContextCapturingAgent(AgentId.SocraticClarifier, "Clarifier reply.");
+        var product = new ContextCapturingAgent(AgentId.ProductStrategist, "Product reply.");
+        var logger = Substitute.For<ILogger<SessionService>>();
+        var sut = new SessionService(
+            sessionRepository,
+            truthMapRepository,
+            transcriptRepository,
+            orchestrator,
+            agentRunner,
+            [clarifier, product],
+            eventBroadcaster,
+            logger);
+
+        var result = await sut.PostUserMessageAsync(
+            sessionId,
+            "Here are my answers to your questions.",
+            CancellationToken.None,
+            "corr-msg-1");
+
+        result.Phase.Should().Be("Clarification");
+        result.RoutedAgentId.Should().Be(AgentId.SocraticClarifier);
+        result.Reply.Should().Be("Clarifier reply.");
+        clarifier.LastContext.Should().NotBeNull();
+        clarifier.LastContext!.CorrelationId.Should().Be("corr-msg-1");
+        await transcriptRepository.Received(2).AppendAsync(
+            sessionId,
+            Arg.Any<TranscriptMessage>(),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task PostUserMessageAsync_InPostDelivery_RoutesByKeyword()
+    {
+        var sessionId = Guid.NewGuid();
+        var session = new SessionState
+        {
+            SessionId = sessionId,
+            Phase = SessionPhase.PostDelivery,
+            Status = SessionStatus.CompleteWithGaps,
+            Mode = SessionMode.Deep,
+            FrictionLevel = 50,
+            RoundPolicy = new RoundPolicy(),
+            RoundNumber = 1
+        };
+        var map = TruthMapState.CreateNew(sessionId);
+        map.CoreIdea = "Core idea";
+
+        var sessionRepository = Substitute.For<ISessionRepository>();
+        sessionRepository.GetAsync(sessionId, Arg.Any<CancellationToken>()).Returns(session);
+        var truthMapRepository = Substitute.For<ITruthMapRepository>();
+        truthMapRepository.GetAsync(sessionId, Arg.Any<CancellationToken>()).Returns(map);
+        var transcriptRepository = Substitute.For<ITranscriptRepository>();
+        var eventBroadcaster = Substitute.For<IEventBroadcaster>();
+        var orchestrator = new Orchestrator();
+        var runnerLogger = Substitute.For<ILogger<AgentRunner>>();
+        var agentRunner = new AgentRunner(truthMapRepository, eventBroadcaster, runnerLogger);
+        var technical = new ContextCapturingAgent(AgentId.TechnicalArchitect, "Technical reply.");
+        var contrarian = new ContextCapturingAgent(AgentId.Contrarian, "Contrarian reply.");
+        var product = new ContextCapturingAgent(AgentId.ProductStrategist, "Product reply.");
+        var logger = Substitute.For<ILogger<SessionService>>();
+        var sut = new SessionService(
+            sessionRepository,
+            truthMapRepository,
+            transcriptRepository,
+            orchestrator,
+            agentRunner,
+            [technical, contrarian, product],
+            eventBroadcaster,
+            logger);
+
+        var result = await sut.PostUserMessageAsync(
+            sessionId,
+            "Can you explain architecture scalability trade-offs?",
+            CancellationToken.None);
+
+        result.Phase.Should().Be("PostDelivery");
+        result.RoutedAgentId.Should().Be(AgentId.TechnicalArchitect);
+        result.Reply.Should().Be("Technical reply.");
+        technical.LastContext.Should().NotBeNull();
+        contrarian.LastContext.Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task PostUserMessageAsync_StreamsCompactAgentMessages()
+    {
+        var sessionId = Guid.NewGuid();
+        var session = new SessionState
+        {
+            SessionId = sessionId,
+            Phase = SessionPhase.PostDelivery,
+            Status = SessionStatus.CompleteWithGaps,
+            Mode = SessionMode.Deep,
+            FrictionLevel = 50,
+            RoundPolicy = new RoundPolicy(),
+            RoundNumber = 1
+        };
+        var map = TruthMapState.CreateNew(sessionId);
+        map.CoreIdea = "Core idea";
+
+        var sessionRepository = Substitute.For<ISessionRepository>();
+        sessionRepository.GetAsync(sessionId, Arg.Any<CancellationToken>()).Returns(session);
+        var truthMapRepository = Substitute.For<ITruthMapRepository>();
+        truthMapRepository.GetAsync(sessionId, Arg.Any<CancellationToken>()).Returns(map);
+        var transcriptRepository = Substitute.For<ITranscriptRepository>();
+        var eventBroadcaster = Substitute.For<IEventBroadcaster>();
+        var orchestrator = new Orchestrator();
+        var runnerLogger = Substitute.For<ILogger<AgentRunner>>();
+        var agentRunner = new AgentRunner(truthMapRepository, eventBroadcaster, runnerLogger);
+        const string agentMessage = "Concise response that still spans length.";
+        var technical = new ContextCapturingAgent(AgentId.TechnicalArchitect, agentMessage);
+        var logger = Substitute.For<ILogger<SessionService>>();
+        var sut = new SessionService(
+            sessionRepository,
+            truthMapRepository,
+            transcriptRepository,
+            orchestrator,
+            agentRunner,
+            [technical],
+            eventBroadcaster,
+            logger);
+
+        await sut.PostUserMessageAsync(
+            sessionId,
+            "Need a technical stack recommendation.",
+            CancellationToken.None);
+
+        await eventBroadcaster.Received().TranscriptMessageAppendedAsync(
+            sessionId,
+            Arg.Is<TranscriptMessage>(message =>
+                message.AgentId == "technical-architect"
+                && message.IsStreaming),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task PostUserMessageAsync_Throws_ForBlankMessage()
+    {
+        var sessionId = Guid.NewGuid();
+        var sessionRepository = Substitute.For<ISessionRepository>();
+        var truthMapRepository = Substitute.For<ITruthMapRepository>();
+        var transcriptRepository = Substitute.For<ITranscriptRepository>();
+        var eventBroadcaster = Substitute.For<IEventBroadcaster>();
+        var orchestrator = new Orchestrator();
+        var runnerLogger = Substitute.For<ILogger<AgentRunner>>();
+        var agentRunner = new AgentRunner(truthMapRepository, eventBroadcaster, runnerLogger);
+        var logger = Substitute.For<ILogger<SessionService>>();
+        var sut = new SessionService(
+            sessionRepository,
+            truthMapRepository,
+            transcriptRepository,
+            orchestrator,
+            agentRunner,
+            [],
+            eventBroadcaster,
+            logger);
+
+        var act = () => sut.PostUserMessageAsync(sessionId, "   ", CancellationToken.None);
+
+        await act.Should().ThrowAsync<ArgumentException>();
+    }
+
+    [Fact]
+    public async Task PostUserMessageAsync_Throws_ForUnsupportedPhase()
+    {
+        var sessionId = Guid.NewGuid();
+        var session = new SessionState
+        {
+            SessionId = sessionId,
+            Phase = SessionPhase.DebateRound1,
+            Status = SessionStatus.Active,
+            Mode = SessionMode.Deep,
+            FrictionLevel = 50,
+            RoundPolicy = new RoundPolicy(),
+            RoundNumber = 1
+        };
+        var map = TruthMapState.CreateNew(sessionId);
+        map.CoreIdea = "Core idea";
+
+        var sessionRepository = Substitute.For<ISessionRepository>();
+        sessionRepository.GetAsync(sessionId, Arg.Any<CancellationToken>()).Returns(session);
+        var truthMapRepository = Substitute.For<ITruthMapRepository>();
+        truthMapRepository.GetAsync(sessionId, Arg.Any<CancellationToken>()).Returns(map);
+        var transcriptRepository = Substitute.For<ITranscriptRepository>();
+        var eventBroadcaster = Substitute.For<IEventBroadcaster>();
+        var orchestrator = new Orchestrator();
+        var runnerLogger = Substitute.For<ILogger<AgentRunner>>();
+        var agentRunner = new AgentRunner(truthMapRepository, eventBroadcaster, runnerLogger);
+        var logger = Substitute.For<ILogger<SessionService>>();
+        var sut = new SessionService(
+            sessionRepository,
+            truthMapRepository,
+            transcriptRepository,
+            orchestrator,
+            agentRunner,
+            [],
+            eventBroadcaster,
+            logger);
+
+        var act = () => sut.PostUserMessageAsync(sessionId, "Please continue", CancellationToken.None);
+
+        await act.Should().ThrowAsync<InvalidOperationException>();
     }
 
     [Fact]
@@ -251,9 +482,11 @@ public class SessionServiceTests
         var orchestrator = new Orchestrator();
         var runnerLogger = Substitute.For<ILogger<AgentRunner>>();
         var agentRunner = new AgentRunner(truthMapRepository, eventBroadcaster, runnerLogger);
+        const string agentMessage =
+            "A concise product strategy message with enough detail to demonstrate incremental streaming updates over several chunks and ensure multiple segments are emitted.";
         var councilAgents = new ICouncilAgent[]
         {
-            new StaticAgent("product_strategist", "A concise product strategy message.")
+            new StaticAgent("product_strategist", agentMessage)
         };
         var logger = Substitute.For<ILogger<SessionService>>();
 
@@ -269,7 +502,7 @@ public class SessionServiceTests
 
         await sut.StartSessionAsync(sessionId, CancellationToken.None);
 
-        await transcriptRepository.Received(3).AppendAsync(
+        await transcriptRepository.Received(4).AppendAsync(
             sessionId,
             Arg.Any<TranscriptMessage>(),
             Arg.Any<CancellationToken>());
@@ -284,8 +517,16 @@ public class SessionServiceTests
             sessionId,
             Arg.Is<TranscriptMessage>(message =>
                 message.AgentId == "product-strategist"
-                && message.Content == "A concise product strategy message."
+                && message.Content == agentMessage
                 && message.Round == 1),
+            Arg.Any<CancellationToken>());
+        await transcriptRepository.Received(1).AppendAsync(
+            sessionId,
+            Arg.Is<TranscriptMessage>(message =>
+                message.AgentId == "synthesis-validation"
+                && message.Type == TranscriptMessageType.Agent
+                && message.Content.Contains("Moderator summary", StringComparison.OrdinalIgnoreCase)
+                && message.Content.Contains("Agent summaries", StringComparison.Ordinal)),
             Arg.Any<CancellationToken>());
         await transcriptRepository.Received(1).AppendAsync(
             sessionId,
@@ -370,9 +611,11 @@ public class SessionServiceTests
         var orchestrator = new Orchestrator();
         var runnerLogger = Substitute.For<ILogger<AgentRunner>>();
         var agentRunner = new AgentRunner(truthMapRepository, eventBroadcaster, runnerLogger);
+        const string agentMessage =
+            "A concise product strategy message with enough detail to demonstrate incremental streaming updates over several chunks and ensure multiple segments are emitted.";
         var councilAgents = new ICouncilAgent[]
         {
-            new StaticAgent("product_strategist", "A concise product strategy message.")
+            new StaticAgent("product_strategist", agentMessage)
         };
         var logger = Substitute.For<ILogger<SessionService>>();
 
@@ -399,7 +642,21 @@ public class SessionServiceTests
             sessionId,
             Arg.Is<TranscriptMessage>(message =>
                 message.AgentId == "product-strategist"
-                && message.Content == "A concise product strategy message."),
+                && message.Content == agentMessage),
+            Arg.Any<CancellationToken>());
+
+        await eventBroadcaster.Received().TranscriptMessageAppendedAsync(
+            sessionId,
+            Arg.Is<TranscriptMessage>(message =>
+                message.AgentId == "product-strategist"
+                && message.IsStreaming),
+            Arg.Any<CancellationToken>());
+
+        await eventBroadcaster.Received().TranscriptMessageAppendedAsync(
+            sessionId,
+            Arg.Is<TranscriptMessage>(message =>
+                message.AgentId == "synthesis-validation"
+                && message.Type == TranscriptMessageType.Agent),
             Arg.Any<CancellationToken>());
     }
 

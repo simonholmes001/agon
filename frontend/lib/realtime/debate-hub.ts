@@ -26,7 +26,7 @@ export interface TranscriptMessageEvent {
 }
 
 export interface DebateHubConnection {
-  start: () => Promise<void>;
+  start: () => Promise<boolean>;
   stop: () => Promise<void>;
   onRoundProgress: (handler: (event: RoundProgressEvent) => void) => void;
   onTruthMapPatch: (handler: (event: TruthMapPatchEvent) => void) => void;
@@ -65,22 +65,23 @@ class LazyDebateHubConnection implements DebateHubConnection {
     this.hubUrl = resolveDebateHubUrl();
   }
 
-  async start() {
+  async start(): Promise<boolean> {
     const connection = await this.ensureConnection();
-    if (!connection) return;
+    if (!connection) return false;
 
     try {
       await connection.start();
       logger.info("signalr connected", { sessionId: this.sessionId, hubUrl: this.hubUrl });
       await connection.invoke("JoinSession", this.sessionId);
       logger.info("signalr session subscription registered", { sessionId: this.sessionId });
+      return true;
     } catch (error) {
       logger.warn(
         "failed to start signalr connection",
         { sessionId: this.sessionId, hubUrl: this.hubUrl },
         error,
       );
-      throw error;
+      return false;
     }
   }
 
@@ -130,7 +131,7 @@ class LazyDebateHubConnection implements DebateHubConnection {
         transport: signalR.HttpTransportType.WebSockets | signalR.HttpTransportType.LongPolling,
       })
       .withAutomaticReconnect([0, 2000, 5000, 10000])
-      .configureLogging(signalR.LogLevel.Warning)
+      .configureLogging(signalR.LogLevel.None)
       .build() as HubConnectionLike;
 
     for (const handler of this.roundProgressHandlers) {

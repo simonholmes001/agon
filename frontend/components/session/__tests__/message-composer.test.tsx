@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { render, screen } from "@/lib/test-utils";
+import { describe, it, expect, vi } from "vitest";
+import { render, screen, waitFor } from "@/lib/test-utils";
 import userEvent from "@testing-library/user-event";
 import MessageComposer from "@/components/session/message-composer";
 
@@ -88,5 +88,28 @@ describe("MessageComposer", () => {
     await userEvent.type(textarea, "My budget is $50k");
     await userEvent.keyboard("{Enter}");
     expect(textarea).toHaveValue("");
+  });
+
+  it("submits to moderator callback when provided", async () => {
+    const onSubmitMessage = vi.fn<(...args: [string]) => Promise<void>>()
+      .mockResolvedValue(undefined);
+
+    render(
+      <MessageComposer
+        {...defaultProps}
+        phase="POST_DELIVERY"
+        onSubmitMessage={onSubmitMessage}
+      />,
+    );
+
+    const textarea = screen.getByPlaceholderText(/council moderator/i);
+    await userEvent.type(textarea, "Please challenge the weakest assumption.");
+    await userEvent.keyboard("{Enter}");
+
+    await waitFor(() => {
+      expect(onSubmitMessage).toHaveBeenCalledWith(
+        "Please challenge the weakest assumption.",
+      );
+    });
   });
 });

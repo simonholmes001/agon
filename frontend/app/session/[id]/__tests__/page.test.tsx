@@ -16,7 +16,7 @@ const {
 } = vi.hoisted(() => ({
   useParamsMock: vi.fn(() => ({ id: "session-123" })),
   useSearchParamsMock: vi.fn(() => new URLSearchParams()),
-  startMock: vi.fn(() => Promise.resolve()),
+  startMock: vi.fn(() => Promise.resolve(true)),
   stopMock: vi.fn(() => Promise.resolve()),
   onRoundProgressMock: vi.fn(),
   onTruthMapPatchMock: vi.fn(),
@@ -297,7 +297,7 @@ describe("SessionPage", () => {
   });
 
   it("shows realtime unavailable state when signalr startup fails", async () => {
-    startMock.mockRejectedValueOnce(new Error("Failed to fetch"));
+    startMock.mockResolvedValueOnce(false);
     render(<SessionPage />);
 
     await waitFor(() => {
@@ -394,6 +394,42 @@ describe("SessionPage", () => {
         4,
         "/api/backend/sessions/session-123/start",
         expect.objectContaining({ method: "POST" }),
+      );
+    });
+  });
+
+  it("posts moderator messages through the backend endpoint", async () => {
+    const user = userEvent.setup();
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          sessionId: "session-123",
+          phase: "PostDelivery",
+          routedAgentId: "product_strategist",
+          reply: "Moderator acknowledged your follow-up.",
+          patchApplied: false,
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    );
+
+    render(<SessionPage />);
+
+    const input = await screen.findByPlaceholderText(/message the council moderator/i);
+    await user.type(input, "Challenge the weakest point in this recommendation.");
+    await user.keyboard("{Enter}");
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenNthCalledWith(
+        4,
+        "/api/backend/sessions/session-123/messages",
+        expect.objectContaining({
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            message: "Challenge the weakest point in this recommendation.",
+          }),
+        }),
       );
     });
   });

@@ -11,6 +11,7 @@ const logger = createLogger("MessageComposer");
 interface MessageComposerProps {
   readonly sessionId: string;
   readonly phase: SessionPhase;
+  readonly onSubmitMessage?: (message: string) => Promise<void>;
 }
 
 function getPlaceholder(phase: SessionPhase): string {
@@ -34,28 +35,53 @@ function isInputDisabled(phase: SessionPhase): boolean {
   return phase === "SYNTHESIS" || phase === "TARGETED_LOOP" || phase === "DELIVER" || phase === "DELIVER_WITH_GAPS";
 }
 
-export default function MessageComposer({ sessionId, phase }: MessageComposerProps) {
+export default function MessageComposer({
+  sessionId,
+  phase,
+  onSubmitMessage,
+}: MessageComposerProps) {
   const [message, setMessage] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const disabled = isInputDisabled(phase);
+  const disabled = isInputDisabled(phase) || isSubmitting;
+
+  async function submitCurrentMessage() {
+    const trimmedMessage = message.trim();
+    if (!trimmedMessage || disabled) return;
+
+    try {
+      setIsSubmitting(true);
+      if (onSubmitMessage) {
+        await onSubmitMessage(trimmedMessage);
+      } else {
+        logger.info("message sent", { sessionId, length: trimmedMessage.length });
+      }
+
+      setMessage("");
+
+      if (textareaRef.current) {
+        textareaRef.current.style.height = "auto";
+      }
+    } catch (error) {
+      logger.error(
+        "failed to send moderator message",
+        { sessionId, phase, length: trimmedMessage.length },
+        error,
+      );
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!message.trim() || disabled) return;
-
-    // Placeholder until backend POST /sessions/{sessionId}/messages is available
-    logger.info("message sent", { sessionId, length: message.trim().length });
-    setMessage("");
-
-    if (textareaRef.current) {
-      textareaRef.current.style.height = "auto";
-    }
+    void submitCurrentMessage();
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      handleSubmit(e);
+      void submitCurrentMessage();
     }
   }
 

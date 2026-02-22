@@ -9,7 +9,7 @@ applyTo: '**'
 
 ## In Progress
 
-_(Nothing currently in progress)_
+- [ ] **Moderator chat orchestration (`POST /sessions/{id}/messages`)** — Clarification + post-delivery user message routing through a single moderator lane, with deterministic phase guards and backend tests.
 
 ---
 
