@@ -4,6 +4,13 @@ on:
   push:
     branches: [main]
 
+permissions:
+  contents: write
+
+concurrency:
+  group: update-badges-main
+  cancel-in-progress: false
+
 jobs:
   update-badges:
     name: Update README Badges
@@ -12,6 +19,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -90,5 +99,8 @@ jobs:
             echo "No badge changes to commit."
           else
             git commit -m "chore: update test & coverage badges [skip ci]"
-            git push
+            if ! git push origin HEAD:main; then
+              echo "::error::Failed to push badge update to main. Ensure workflow permissions include contents: write and branch protection allows github-actions[bot] to push."
+              exit 1
+            fi
           fi
