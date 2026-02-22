@@ -14,31 +14,37 @@ public class DeepSeekCouncilAgentTests
     [Fact]
     public async Task RunAsync_ReturnsFirstChoiceMessage_WhenRequestSucceeds()
     {
-        var handler = new StubHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        string? requestBody = null;
+        var handler = new StubHttpMessageHandler(request =>
         {
-            Content = new StringContent(
-                """
-                {
-                  "choices": [
+            requestBody = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    """
                     {
-                      "message": {
-                        "content": "Address technical risk with phased rollout."
-                      }
+                      "choices": [
+                        {
+                          "message": {
+                            "content": "Address technical risk with phased rollout."
+                          }
+                        }
+                      ]
                     }
-                  ]
-                }
-                """,
-                Encoding.UTF8,
-                "application/json")
+                    """,
+                    Encoding.UTF8,
+                    "application/json")
+            };
         });
         var sut = new DeepSeekCouncilAgent(
             new HttpClient(handler),
-            new DeepSeekCouncilAgentOptions("technical_architect", "deepseek-key", "deepseek-chat", 256),
+            new DeepSeekCouncilAgentOptions("technical_architect", "deepseek-key", "deepseek-chat", 256, 0.4),
             NullLogger<DeepSeekCouncilAgent>.Instance);
 
         var response = await sut.RunAsync(CreateContext(), CancellationToken.None);
 
         response.Message.Should().Be("Address technical risk with phased rollout.");
+        requestBody.Should().Contain("\"temperature\":0.4");
     }
 
     [Fact]

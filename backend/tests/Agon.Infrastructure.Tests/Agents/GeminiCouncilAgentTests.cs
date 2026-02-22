@@ -14,33 +14,39 @@ public class GeminiCouncilAgentTests
     [Fact]
     public async Task RunAsync_ReturnsCandidateText_WhenRequestSucceeds()
     {
-        var handler = new StubHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        string? requestBody = null;
+        var handler = new StubHttpMessageHandler(request =>
         {
-            Content = new StringContent(
-                """
-                {
-                  "candidates": [
+            requestBody = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    """
                     {
-                      "content": {
-                        "parts": [
-                          { "text": "Challenge the framing before committing." }
-                        ]
-                      }
+                      "candidates": [
+                        {
+                          "content": {
+                            "parts": [
+                              { "text": "Challenge the framing before committing." }
+                            ]
+                          }
+                        }
+                      ]
                     }
-                  ]
-                }
-                """,
-                Encoding.UTF8,
-                "application/json")
+                    """,
+                    Encoding.UTF8,
+                    "application/json")
+            };
         });
         var sut = new GeminiCouncilAgent(
             new HttpClient(handler),
-            new GeminiCouncilAgentOptions("framing_challenger", "gemini-key", "gemini-3.1-pro-preview", 256),
+            new GeminiCouncilAgentOptions("framing_challenger", "gemini-key", "gemini-3.1-pro-preview", 256, 0.45),
             NullLogger<GeminiCouncilAgent>.Instance);
 
         var response = await sut.RunAsync(CreateContext(), CancellationToken.None);
 
         response.Message.Should().Be("Challenge the framing before committing.");
+        requestBody.Should().Contain("\"temperature\":0.45");
     }
 
     [Fact]

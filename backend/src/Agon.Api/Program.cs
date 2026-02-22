@@ -9,6 +9,7 @@ using Agon.Infrastructure.Agents;
 using Agon.Infrastructure.Persistence.InMemory;
 using Agon.Infrastructure.SignalR;
 using Microsoft.AspNetCore.SignalR;
+using System.Globalization;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -24,6 +25,20 @@ var allowedOrigins = builder.Configuration
     ?? ["http://localhost:3000", "https://localhost:3000"];
 var dotEnvLoadResult = DotEnvLoader.Load(builder.Environment.ContentRootPath);
 
+static (double? Value, bool IsInvalid) ParseTemperatureSetting(string? rawValue)
+{
+    if (string.IsNullOrWhiteSpace(rawValue))
+    {
+        return (null, false);
+    }
+
+    var parsed = double.TryParse(rawValue, NumberStyles.Float, CultureInfo.InvariantCulture, out var temperature)
+        && temperature is >= 0 and <= 2;
+    return parsed
+        ? (temperature, false)
+        : (null, true);
+}
+
 var openAiApiKey = Environment.GetEnvironmentVariable("OPENAI_KEY")
     ?? builder.Configuration["OPENAI_KEY"]
     ?? builder.Configuration["OpenAI:ApiKey"];
@@ -31,6 +46,11 @@ var openAiModel = Environment.GetEnvironmentVariable("OPENAI_MODEL")
     ?? builder.Configuration["OPENAI_MODEL"]
     ?? builder.Configuration["OpenAI:Model"]
     ?? OpenAiDefaultModel;
+var openAiTemperatureRaw = Environment.GetEnvironmentVariable("OPENAI_TEMPERATURE")
+    ?? builder.Configuration["OPENAI_TEMPERATURE"]
+    ?? builder.Configuration["OpenAI:Temperature"];
+var openAiTemperatureSetting = ParseTemperatureSetting(openAiTemperatureRaw);
+var openAiTemperature = openAiTemperatureSetting.Value;
 var geminiApiKey = Environment.GetEnvironmentVariable("GEMINI_KEY")
     ?? builder.Configuration["GEMINI_KEY"]
     ?? builder.Configuration["Gemini:ApiKey"];
@@ -38,6 +58,11 @@ var geminiModel = Environment.GetEnvironmentVariable("GEMINI_MODEL")
     ?? builder.Configuration["GEMINI_MODEL"]
     ?? builder.Configuration["Gemini:Model"]
     ?? GeminiDefaultModel;
+var geminiTemperatureRaw = Environment.GetEnvironmentVariable("GEMINI_TEMPERATURE")
+    ?? builder.Configuration["GEMINI_TEMPERATURE"]
+    ?? builder.Configuration["Gemini:Temperature"];
+var geminiTemperatureSetting = ParseTemperatureSetting(geminiTemperatureRaw);
+var geminiTemperature = geminiTemperatureSetting.Value;
 var anthropicApiKey = Environment.GetEnvironmentVariable("ANTHROPIC_KEY")
     ?? Environment.GetEnvironmentVariable("CLAUDE_KEY")
     ?? builder.Configuration["ANTHROPIC_KEY"]
@@ -47,8 +72,18 @@ var anthropicModel = Environment.GetEnvironmentVariable("ANTHROPIC_MODEL")
     ?? builder.Configuration["ANTHROPIC_MODEL"]
     ?? builder.Configuration["Anthropic:Model"]
     ?? AnthropicDefaultModel;
+var anthropicTemperatureRaw = Environment.GetEnvironmentVariable("ANTHROPIC_TEMPERATURE")
+    ?? builder.Configuration["ANTHROPIC_TEMPERATURE"]
+    ?? builder.Configuration["Anthropic:Temperature"];
+var anthropicTemperatureSetting = ParseTemperatureSetting(anthropicTemperatureRaw);
+var anthropicTemperature = anthropicTemperatureSetting.Value;
 var technicalArchitectModel = Environment.GetEnvironmentVariable("TECHNICAL_ARCHITECT_MODEL")
     ?? TechnicalArchitectTemporaryModelDefault;
+var technicalArchitectTemperatureRaw = Environment.GetEnvironmentVariable("TECHNICAL_ARCHITECT_TEMPERATURE")
+    ?? builder.Configuration["TECHNICAL_ARCHITECT_TEMPERATURE"]
+    ?? builder.Configuration["TechnicalArchitect:Temperature"];
+var technicalArchitectTemperatureSetting = ParseTemperatureSetting(technicalArchitectTemperatureRaw);
+var technicalArchitectTemperature = technicalArchitectTemperatureSetting.Value ?? openAiTemperature;
 
 builder.Logging.AddFilter("Microsoft.AspNetCore.Hosting.Diagnostics", LogLevel.Warning);
 builder.Logging.AddFilter("Microsoft.AspNetCore.Routing.EndpointMiddleware", LogLevel.Warning);
@@ -93,7 +128,8 @@ builder.Services.AddSingleton<ICouncilAgent>(sp =>
         AgentId.ResearchLibrarian,
         ApiKey: openAiApiKey,
         ModelName: openAiModel,
-        MaxOutputTokens: 600);
+        MaxOutputTokens: 600,
+        Temperature: openAiTemperature);
 
     return new OpenAiCouncilAgent(httpClientFactory.CreateClient(), options, logger);
 });
@@ -114,7 +150,8 @@ builder.Services.AddSingleton<ICouncilAgent>(sp =>
             AgentId.FramingChallenger,
             geminiApiKey,
             geminiModel,
-            MaxOutputTokens: 600),
+            MaxOutputTokens: 600,
+            Temperature: geminiTemperature),
         sp.GetRequiredService<ILogger<GeminiCouncilAgent>>());
 });
 builder.Services.AddSingleton<ICouncilAgent>(sp =>
@@ -134,7 +171,8 @@ builder.Services.AddSingleton<ICouncilAgent>(sp =>
             AgentId.Contrarian,
             geminiApiKey,
             geminiModel,
-            MaxOutputTokens: 600),
+            MaxOutputTokens: 600,
+            Temperature: geminiTemperature),
         sp.GetRequiredService<ILogger<GeminiCouncilAgent>>());
 });
 builder.Services.AddSingleton<ICouncilAgent>(sp =>
@@ -154,7 +192,8 @@ builder.Services.AddSingleton<ICouncilAgent>(sp =>
             AgentId.ProductStrategist,
             anthropicApiKey,
             anthropicModel,
-            MaxOutputTokens: 600),
+            MaxOutputTokens: 600,
+            Temperature: anthropicTemperature),
         sp.GetRequiredService<ILogger<AnthropicCouncilAgent>>());
 });
 builder.Services.AddSingleton<ICouncilAgent>(sp =>
@@ -174,7 +213,8 @@ builder.Services.AddSingleton<ICouncilAgent>(sp =>
             AgentId.TechnicalArchitect,
             openAiApiKey,
             technicalArchitectModel,
-            MaxOutputTokens: 600),
+            MaxOutputTokens: 600,
+            Temperature: technicalArchitectTemperature),
         sp.GetRequiredService<ILogger<OpenAiCouncilAgent>>());
 });
 
@@ -198,6 +238,33 @@ app.Logger.LogInformation(
     !string.IsNullOrWhiteSpace(anthropicApiKey),
     "openai-temporary-override",
     technicalArchitectModel);
+
+app.Logger.LogInformation(
+    "Provider temperature configuration. OpenAI={OpenAiTemperature} Gemini={GeminiTemperature} Anthropic={AnthropicTemperature} TechnicalArchitect={TechnicalArchitectTemperature}",
+    openAiTemperature?.ToString(CultureInfo.InvariantCulture) ?? "provider-default",
+    geminiTemperature?.ToString(CultureInfo.InvariantCulture) ?? "provider-default",
+    anthropicTemperature?.ToString(CultureInfo.InvariantCulture) ?? "provider-default",
+    technicalArchitectTemperature?.ToString(CultureInfo.InvariantCulture) ?? "provider-default");
+
+if (openAiTemperatureSetting.IsInvalid)
+{
+    app.Logger.LogWarning("OPENAI_TEMPERATURE is invalid. Expected decimal between 0 and 2. Falling back to provider default.");
+}
+
+if (geminiTemperatureSetting.IsInvalid)
+{
+    app.Logger.LogWarning("GEMINI_TEMPERATURE is invalid. Expected decimal between 0 and 2. Falling back to provider default.");
+}
+
+if (anthropicTemperatureSetting.IsInvalid)
+{
+    app.Logger.LogWarning("ANTHROPIC_TEMPERATURE is invalid. Expected decimal between 0 and 2. Falling back to provider default.");
+}
+
+if (technicalArchitectTemperatureSetting.IsInvalid)
+{
+    app.Logger.LogWarning("TECHNICAL_ARCHITECT_TEMPERATURE is invalid. Expected decimal between 0 and 2. Falling back to OpenAI temperature or provider default.");
+}
 
 if (string.IsNullOrWhiteSpace(openAiApiKey))
 {

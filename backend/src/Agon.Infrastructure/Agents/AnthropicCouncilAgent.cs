@@ -12,7 +12,8 @@ public sealed record AnthropicCouncilAgentOptions(
     string AgentId,
     string ApiKey,
     string ModelName,
-    int MaxOutputTokens);
+    int MaxOutputTokens,
+    double? Temperature = null);
 
 public class AnthropicCouncilAgent(
     HttpClient httpClient,
@@ -114,6 +115,24 @@ public class AnthropicCouncilAgent(
 
             Provide a concise analysis (max 120 words) with actionable recommendations.
             """;
+
+        if (options.Temperature.HasValue)
+        {
+            return new
+            {
+                model = options.ModelName,
+                max_tokens = options.MaxOutputTokens,
+                temperature = options.Temperature.Value,
+                messages = new[]
+                {
+                    new
+                    {
+                        role = "user",
+                        content = prompt
+                    }
+                }
+            };
+        }
 
         return new
         {

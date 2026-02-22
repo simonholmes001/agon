@@ -14,29 +14,36 @@ public class OpenAiCouncilAgentTests
     [Fact]
     public async Task RunAsync_ReturnsOutputText_FromResponsesApi()
     {
-        var handler = new StubHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        string? requestBody = null;
+        var handler = new StubHttpMessageHandler(request =>
         {
-            Content = new StringContent(
-                """
-                {
-                  "output_text": "Use customer interviews to validate demand."
-                }
-                """,
-                Encoding.UTF8,
-                "application/json")
+            requestBody = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    """
+                    {
+                      "output_text": "Use customer interviews to validate demand."
+                    }
+                    """,
+                    Encoding.UTF8,
+                    "application/json")
+            };
         });
         var httpClient = new HttpClient(handler);
         var options = new OpenAiCouncilAgentOptions(
             AgentId: "research_librarian",
             ApiKey: "test-key",
             ModelName: "gpt-5.2",
-            MaxOutputTokens: 256);
+            MaxOutputTokens: 256,
+            Temperature: 0.35);
         var sut = new OpenAiCouncilAgent(httpClient, options, NullLogger<OpenAiCouncilAgent>.Instance);
 
         var response = await sut.RunAsync(CreateContext(), CancellationToken.None);
 
         response.Message.Should().Be("Use customer interviews to validate demand.");
         response.Patch.Should().BeNull();
+        requestBody.Should().Contain("\"temperature\":0.35");
     }
 
     [Fact]

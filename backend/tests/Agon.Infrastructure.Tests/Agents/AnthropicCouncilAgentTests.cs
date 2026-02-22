@@ -14,27 +14,33 @@ public class AnthropicCouncilAgentTests
     [Fact]
     public async Task RunAsync_ReturnsTextContent_WhenRequestSucceeds()
     {
-        var handler = new StubHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        string? requestBody = null;
+        var handler = new StubHttpMessageHandler(request =>
         {
-            Content = new StringContent(
-                """
-                {
-                  "content": [
-                    { "type": "text", "text": "Define success metrics before building." }
-                  ]
-                }
-                """,
-                Encoding.UTF8,
-                "application/json")
+            requestBody = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    """
+                    {
+                      "content": [
+                        { "type": "text", "text": "Define success metrics before building." }
+                      ]
+                    }
+                    """,
+                    Encoding.UTF8,
+                    "application/json")
+            };
         });
         var sut = new AnthropicCouncilAgent(
             new HttpClient(handler),
-            new AnthropicCouncilAgentOptions("product_strategist", "anthropic-key", "claude-opus-4-6", 256),
+            new AnthropicCouncilAgentOptions("product_strategist", "anthropic-key", "claude-opus-4-6", 256, 0.25),
             NullLogger<AnthropicCouncilAgent>.Instance);
 
         var response = await sut.RunAsync(CreateContext(), CancellationToken.None);
 
         response.Message.Should().Be("Define success metrics before building.");
+        requestBody.Should().Contain("\"temperature\":0.25");
     }
 
     [Fact]

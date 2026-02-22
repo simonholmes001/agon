@@ -11,7 +11,8 @@ public sealed record GeminiCouncilAgentOptions(
     string AgentId,
     string ApiKey,
     string ModelName,
-    int MaxOutputTokens);
+    int MaxOutputTokens,
+    double? Temperature = null);
 
 public class GeminiCouncilAgent(
     HttpClient httpClient,
@@ -111,6 +112,28 @@ public class GeminiCouncilAgent(
 
             Provide a concise analysis (max 120 words) with actionable recommendations.
             """;
+
+        if (options.Temperature.HasValue)
+        {
+            return new
+            {
+                contents = new[]
+                {
+                    new
+                    {
+                        parts = new[]
+                        {
+                            new { text = prompt }
+                        }
+                    }
+                },
+                generationConfig = new
+                {
+                    maxOutputTokens = options.MaxOutputTokens,
+                    temperature = options.Temperature.Value
+                }
+            };
+        }
 
         return new
         {

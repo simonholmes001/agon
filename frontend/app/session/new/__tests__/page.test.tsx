@@ -49,6 +49,15 @@ describe("NewSessionPage", () => {
     expect(screen.getByText(/friction level/i)).toBeInTheDocument();
   });
 
+  it("renders the friction controls before the idea textbox", () => {
+    render(<NewSessionPage />);
+    const frictionHeading = screen.getByText(/friction level/i);
+    const textbox = screen.getByRole("textbox");
+
+    const frictionPosition = frictionHeading.compareDocumentPosition(textbox);
+    expect(frictionPosition & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it("shows friction label 'Balanced' at default value 50", () => {
     render(<NewSessionPage />);
     const balancedElements = screen.getAllByText("Balanced");
@@ -165,6 +174,10 @@ describe("NewSessionPage", () => {
     expect(screen.getByText(/starting session/i)).toBeInTheDocument();
     // And the button is disabled to prevent double-submit
     expect(screen.getByRole("button", { name: /starting session/i })).toBeDisabled();
+    // A visible in-page status makes progress obvious without scrolling to the action bar
+    expect(screen.getByRole("status", { name: /session startup status/i })).toHaveTextContent(
+      /analyzing your idea/i,
+    );
   });
 
   it("calls backend create/start endpoints and navigates to the created session", async () => {

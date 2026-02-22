@@ -255,6 +255,12 @@ OPENAI_MODEL=gpt-5.2
 GEMINI_MODEL=gemini-3.1-pro-preview
 ANTHROPIC_MODEL=claude-opus-4-6
 DEEPSEEK_MODEL=deepseek-chat
+# Optional temperature overrides (0.0 - 2.0, provider defaults when omitted)
+OPENAI_TEMPERATURE=0.4
+GEMINI_TEMPERATURE=0.4
+ANTHROPIC_TEMPERATURE=0.4
+# Optional override for temporary openai-backed technical_architect
+TECHNICAL_ARCHITECT_TEMPERATURE=0.3
 ```
 
 `BACKEND_API_BASE_URL` is used by Next.js route handlers under

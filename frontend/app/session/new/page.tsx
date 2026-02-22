@@ -158,35 +158,31 @@ export default function NewSessionPage() {
           onSubmit={handleSubmit}
           className="mt-8 flex flex-1 flex-col gap-7"
         >
-          {/* Idea input */}
-          <motion.div
-            initial={{ opacity: 0, y: 12 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.4, delay: 0.1, ease: "easeOut" as const }}
-          >
-            <textarea
-              value={idea}
-              onChange={(e) => setIdea(e.target.value)}
-              onKeyDown={handleIdeaKeyDown}
-              placeholder="e.g. A mobile app that helps freelancers manage invoices and track payments, targeting solo consultants who currently use spreadsheets..."
-              className="h-40 w-full resize-none rounded-2xl border border-border/70 bg-card/70 px-4 py-3 text-base leading-relaxed text-foreground shadow-sm placeholder:text-muted-foreground/50 focus:border-primary/50 focus:outline-none focus:ring-2 focus:ring-primary/20 sm:h-48"
-              autoFocus
-            />
-            <p className="mt-2 text-xs text-muted-foreground">
-              {idea.trim().length < 10
-                ? `At least 10 characters (${idea.trim().length}/10)`
-                : `${idea.trim().length} characters`}
-            </p>
-            <p className="mt-1 text-xs text-muted-foreground/80">
-              Press Enter to launch. Use Shift+Enter for a new line.
-            </p>
-          </motion.div>
+          {isSubmitting ? (
+            <motion.div
+              role="status"
+              aria-live="polite"
+              aria-label="Session startup status"
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.25, ease: "easeOut" as const }}
+              className="flex items-start gap-3 rounded-xl border border-primary/20 bg-primary/5 px-4 py-3 text-sm"
+            >
+              <span className="mt-0.5 h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+              <div className="space-y-1">
+                <p className="font-medium text-foreground">Analyzing your idea…</p>
+                <p className="text-xs text-muted-foreground">
+                  Session creation started. The council is preparing to run round 1.
+                </p>
+              </div>
+            </motion.div>
+          ) : null}
 
           {/* Friction slider */}
           <motion.div
             initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.4, delay: 0.2, ease: "easeOut" as const }}
+            transition={{ duration: 0.4, delay: 0.1, ease: "easeOut" as const }}
             className="rounded-2xl border border-border/60 bg-card/70 p-6 shadow-sm"
           >
             <div className="flex items-center gap-2">
@@ -230,6 +226,30 @@ export default function NewSessionPage() {
                 {frictionInfo.description}
               </p>
             </div>
+          </motion.div>
+
+          {/* Idea input */}
+          <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4, delay: 0.2, ease: "easeOut" as const }}
+          >
+            <textarea
+              value={idea}
+              onChange={(e) => setIdea(e.target.value)}
+              onKeyDown={handleIdeaKeyDown}
+              placeholder="e.g. A mobile app that helps freelancers manage invoices and track payments, targeting solo consultants who currently use spreadsheets..."
+              className="h-40 w-full resize-none rounded-2xl border border-border/70 bg-card/70 px-4 py-3 text-base leading-relaxed text-foreground shadow-sm placeholder:text-muted-foreground/50 focus:border-primary/50 focus:outline-none focus:ring-2 focus:ring-primary/20 sm:h-48"
+              autoFocus
+            />
+            <p className="mt-2 text-xs text-muted-foreground">
+              {idea.trim().length < 10
+                ? `At least 10 characters (${idea.trim().length}/10)`
+                : `${idea.trim().length} characters`}
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground/80">
+              Press Enter to launch. Use Shift+Enter for a new line.
+            </p>
           </motion.div>
         </form>
       </main>

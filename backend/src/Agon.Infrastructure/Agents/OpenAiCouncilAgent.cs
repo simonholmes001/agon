@@ -12,7 +12,8 @@ public sealed record OpenAiCouncilAgentOptions(
     string AgentId,
     string ApiKey,
     string ModelName,
-    int MaxOutputTokens);
+    int MaxOutputTokens,
+    double? Temperature = null);
 
 public class OpenAiCouncilAgent(
     HttpClient httpClient,
@@ -115,6 +116,17 @@ public class OpenAiCouncilAgent(
 
             Provide a concise analysis (max 120 words) with actionable recommendations.
             """;
+
+        if (options.Temperature.HasValue)
+        {
+            return new
+            {
+                model = options.ModelName,
+                max_output_tokens = options.MaxOutputTokens,
+                temperature = options.Temperature.Value,
+                input
+            };
+        }
 
         return new
         {
