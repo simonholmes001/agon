@@ -15,11 +15,22 @@ export interface TruthMapPatchEvent {
   patch: unknown;
 }
 
+export interface TranscriptMessageEvent {
+  id: string;
+  type: string;
+  agentId?: string;
+  content: string;
+  round: number;
+  isStreaming: boolean;
+  createdAtUtc: string;
+}
+
 export interface DebateHubConnection {
   start: () => Promise<void>;
   stop: () => Promise<void>;
   onRoundProgress: (handler: (event: RoundProgressEvent) => void) => void;
   onTruthMapPatch: (handler: (event: TruthMapPatchEvent) => void) => void;
+  onTranscriptMessage: (handler: (event: TranscriptMessageEvent) => void) => void;
   onReconnected: (handler: () => void) => void;
 }
 
@@ -47,6 +58,7 @@ class LazyDebateHubConnection implements DebateHubConnection {
   private connection: HubConnectionLike | null = null;
   private readonly roundProgressHandlers: Array<(event: RoundProgressEvent) => void> = [];
   private readonly truthMapPatchHandlers: Array<(event: TruthMapPatchEvent) => void> = [];
+  private readonly transcriptMessageHandlers: Array<(event: TranscriptMessageEvent) => void> = [];
   private readonly reconnectedHandlers: Array<() => void> = [];
 
   constructor(private readonly sessionId: string) {
@@ -98,6 +110,11 @@ class LazyDebateHubConnection implements DebateHubConnection {
     this.connection?.on("TruthMapPatch", handler);
   }
 
+  onTranscriptMessage(handler: (event: TranscriptMessageEvent) => void) {
+    this.transcriptMessageHandlers.push(handler);
+    this.connection?.on("TranscriptMessage", handler);
+  }
+
   onReconnected(handler: () => void) {
     this.reconnectedHandlers.push(handler);
   }
@@ -121,6 +138,9 @@ class LazyDebateHubConnection implements DebateHubConnection {
     }
     for (const handler of this.truthMapPatchHandlers) {
       connection.on("TruthMapPatch", handler);
+    }
+    for (const handler of this.transcriptMessageHandlers) {
+      connection.on("TranscriptMessage", handler);
     }
 
     connection.onreconnected(async () => {

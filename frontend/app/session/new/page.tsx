@@ -75,17 +75,7 @@ export default function NewSessionPage() {
         throw new Error("Create session response did not include sessionId");
       }
 
-      const startResponse = await fetch(
-        `${BACKEND_API_PREFIX}/sessions/${sessionId}/start`,
-        {
-          method: "POST",
-        },
-      );
-      if (!startResponse.ok) {
-        throw new Error(`Start session failed with status ${startResponse.status}`);
-      }
-
-      router.push(`/session/${sessionId}`);
+      router.push(`/session/${sessionId}?start=1`);
     } catch (error) {
       logger.error(
         "failed to create or start session",

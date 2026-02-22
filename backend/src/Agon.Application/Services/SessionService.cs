@@ -102,10 +102,9 @@ public class SessionService(
             map.Round = session.RoundNumber;
             await truthMapRepository.UpdateAsync(map, cancellationToken);
             await eventBroadcaster.RoundProgressAsync(sessionId, session.Phase, cancellationToken);
-            await transcriptRepository.AppendAsync(
-                sessionId,
-                CreateRoundKickoffSystemMessage(sessionId, session.RoundNumber),
-                cancellationToken);
+            var kickoffMessage = CreateRoundKickoffSystemMessage(sessionId, session.RoundNumber);
+            await transcriptRepository.AppendAsync(sessionId, kickoffMessage, cancellationToken);
+            await eventBroadcaster.TranscriptMessageAppendedAsync(sessionId, kickoffMessage, cancellationToken);
 
             await RunCouncilRoundAsync(session, map, resolvedCorrelationId, cancellationToken);
         }
@@ -191,17 +190,33 @@ public class SessionService(
             timeout.TotalSeconds,
             correlationId);
 
+        var storedMessages = 0;
         var results = await agentRunner.RunRoundAsync(
             activeAgents,
             context,
             timeout,
+            async (result, token) =>
+            {
+                var transcriptMessage = CreateTranscriptMessageForResult(session.SessionId, session.RoundNumber, result);
+                if (transcriptMessage is null)
+                {
+                    return;
+                }
+
+                await transcriptRepository.AppendAsync(session.SessionId, transcriptMessage, token);
+                await eventBroadcaster.TranscriptMessageAppendedAsync(session.SessionId, transcriptMessage, token);
+                storedMessages++;
+            },
             cancellationToken);
 
-        var storedMessages = await AppendRoundTranscriptMessagesAsync(
+        var completionMessage = CreateRoundCompletionSystemMessage(
             session.SessionId,
             session.RoundNumber,
             results,
-            cancellationToken);
+            storedMessages);
+        await transcriptRepository.AppendAsync(session.SessionId, completionMessage, cancellationToken);
+        await eventBroadcaster.TranscriptMessageAppendedAsync(session.SessionId, completionMessage, cancellationToken);
+        storedMessages++;
 
         await agentRunner.ApplyValidatedPatchesAsync(session.SessionId, results, cancellationToken);
 
@@ -243,64 +258,78 @@ public class SessionService(
         return TimeSpan.FromSeconds(timeoutSeconds);
     }
 
-    private async Task<int> AppendRoundTranscriptMessagesAsync(
+    private static TranscriptMessage? CreateTranscriptMessageForResult(
         Guid sessionId,
         int roundNumber,
-        IEnumerable<AgentExecutionResult> results,
-        CancellationToken cancellationToken)
+        AgentExecutionResult result)
     {
-        var stored = 0;
-        foreach (var result in results)
+        if (!string.IsNullOrWhiteSpace(result.Message))
         {
-            TranscriptMessage? transcriptMessage = null;
-
-            if (!string.IsNullOrWhiteSpace(result.Message))
+            return new TranscriptMessage
             {
-                transcriptMessage = new TranscriptMessage
-                {
-                    Id = Guid.NewGuid(),
-                    SessionId = sessionId,
-                    Type = TranscriptMessageType.Agent,
-                    AgentId = PresentableAgentId(result.AgentId),
-                    Content = result.Message,
-                    Round = roundNumber,
-                    IsStreaming = false,
-                    CreatedAtUtc = DateTimeOffset.UtcNow
-                };
-            }
-            else if (result.TimedOut)
-            {
-                transcriptMessage = new TranscriptMessage
-                {
-                    Id = Guid.NewGuid(),
-                    SessionId = sessionId,
-                    Type = TranscriptMessageType.System,
-                    Content = $"Agent '{PresentableAgentId(result.AgentId)}' timed out in round {roundNumber}.",
-                    Round = roundNumber,
-                    IsStreaming = false,
-                    CreatedAtUtc = DateTimeOffset.UtcNow
-                };
-            }
-            else if (!string.IsNullOrWhiteSpace(result.Error))
-            {
-                transcriptMessage = new TranscriptMessage
-                {
-                    Id = Guid.NewGuid(),
-                    SessionId = sessionId,
-                    Type = TranscriptMessageType.System,
-                    Content = $"Agent '{PresentableAgentId(result.AgentId)}' failed in round {roundNumber}. Reason: {TrimError(result.Error)}",
-                    Round = roundNumber,
-                    IsStreaming = false,
-                    CreatedAtUtc = DateTimeOffset.UtcNow
-                };
-            }
-
-            if (transcriptMessage is null) continue;
-            await transcriptRepository.AppendAsync(sessionId, transcriptMessage, cancellationToken);
-            stored++;
+                Id = Guid.NewGuid(),
+                SessionId = sessionId,
+                Type = TranscriptMessageType.Agent,
+                AgentId = PresentableAgentId(result.AgentId),
+                Content = result.Message,
+                Round = roundNumber,
+                IsStreaming = false,
+                CreatedAtUtc = DateTimeOffset.UtcNow
+            };
         }
 
-        return stored;
+        if (result.TimedOut)
+        {
+            return new TranscriptMessage
+            {
+                Id = Guid.NewGuid(),
+                SessionId = sessionId,
+                Type = TranscriptMessageType.System,
+                Content = $"Agent '{PresentableAgentId(result.AgentId)}' timed out in round {roundNumber}.",
+                Round = roundNumber,
+                IsStreaming = false,
+                CreatedAtUtc = DateTimeOffset.UtcNow
+            };
+        }
+
+        if (!string.IsNullOrWhiteSpace(result.Error))
+        {
+            return new TranscriptMessage
+            {
+                Id = Guid.NewGuid(),
+                SessionId = sessionId,
+                Type = TranscriptMessageType.System,
+                Content = $"Agent '{PresentableAgentId(result.AgentId)}' failed in round {roundNumber}. Reason: {TrimError(result.Error)}",
+                Round = roundNumber,
+                IsStreaming = false,
+                CreatedAtUtc = DateTimeOffset.UtcNow
+            };
+        }
+
+        return null;
+    }
+
+    private static TranscriptMessage CreateRoundCompletionSystemMessage(
+        Guid sessionId,
+        int roundNumber,
+        IReadOnlyList<AgentExecutionResult> results,
+        int streamedMessageCount)
+    {
+        var completedAgents = results.Count(result => !string.IsNullOrWhiteSpace(result.Message));
+        var failedAgents = results.Count(result => result.Error is not null && result.Error != "timeout");
+        var timedOutAgents = results.Count(result => result.TimedOut);
+        var nextStep = "Next step: ask the Council Moderator one focused follow-up question to drive the next council action.";
+
+        return new TranscriptMessage
+        {
+            Id = Guid.NewGuid(),
+            SessionId = sessionId,
+            Type = TranscriptMessageType.System,
+            Content = $"Round {roundNumber} complete. Responses={completedAgents}, Failures={failedAgents}, Timeouts={timedOutAgents}, StreamedMessages={streamedMessageCount}. {nextStep}",
+            Round = roundNumber,
+            IsStreaming = false,
+            CreatedAtUtc = DateTimeOffset.UtcNow
+        };
     }
 
     private static string CanonicalizeAgentId(string agentId) =>

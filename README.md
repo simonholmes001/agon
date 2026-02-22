@@ -387,7 +387,7 @@ orchestration + provider call logs for end-to-end tracing.
 
 The frontend connects to `/hubs/debate` for server-pushed updates. Current baseline events:
 
-`RoundProgress` · `TruthMapPatch`
+`RoundProgress` · `TruthMapPatch` · `TranscriptMessage`
 
 Planned event expansion (next increments):
 

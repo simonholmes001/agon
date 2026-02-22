@@ -151,16 +151,6 @@ describe("NewSessionPage", () => {
           }),
           { status: 201, headers: { "content-type": "application/json" } },
         ),
-      )
-      .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            sessionId: "session-1",
-            phase: "DebateRound1",
-            frictionLevel: 50,
-          }),
-          { status: 200, headers: { "content-type": "application/json" } },
-        ),
       );
 
     render(<NewSessionPage />);
@@ -180,7 +170,7 @@ describe("NewSessionPage", () => {
     );
   });
 
-  it("calls backend create/start endpoints and navigates to the created session", async () => {
+  it("calls backend create endpoint and navigates to the created session with autostart", async () => {
     fetchMock
       .mockResolvedValueOnce(
         new Response(
@@ -190,16 +180,6 @@ describe("NewSessionPage", () => {
             frictionLevel: 50,
           }),
           { status: 201, headers: { "content-type": "application/json" } },
-        ),
-      )
-      .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            sessionId: "session-42",
-            phase: "DebateRound1",
-            frictionLevel: 50,
-          }),
-          { status: 200, headers: { "content-type": "application/json" } },
         ),
       );
 
@@ -221,16 +201,12 @@ describe("NewSessionPage", () => {
           }),
         }),
       );
-      expect(fetchMock).toHaveBeenNthCalledWith(
-        2,
-        "/api/backend/sessions/session-42/start",
-        expect.objectContaining({ method: "POST" }),
-      );
-      expect(pushMock).toHaveBeenCalledWith("/session/session-42");
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(pushMock).toHaveBeenCalledWith("/session/session-42?start=1");
     });
   });
 
-  it("submits and starts session when Enter is pressed in the idea textarea", async () => {
+  it("submits and navigates with autostart when Enter is pressed in the idea textarea", async () => {
     fetchMock
       .mockResolvedValueOnce(
         new Response(
@@ -240,16 +216,6 @@ describe("NewSessionPage", () => {
             frictionLevel: 50,
           }),
           { status: 201, headers: { "content-type": "application/json" } },
-        ),
-      )
-      .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            sessionId: "session-88",
-            phase: "DebateRound1",
-            frictionLevel: 50,
-          }),
-          { status: 200, headers: { "content-type": "application/json" } },
         ),
       );
 
@@ -266,12 +232,8 @@ describe("NewSessionPage", () => {
         "/api/backend/sessions",
         expect.objectContaining({ method: "POST" }),
       );
-      expect(fetchMock).toHaveBeenNthCalledWith(
-        2,
-        "/api/backend/sessions/session-88/start",
-        expect.objectContaining({ method: "POST" }),
-      );
-      expect(pushMock).toHaveBeenCalledWith("/session/session-88");
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(pushMock).toHaveBeenCalledWith("/session/session-88?start=1");
     });
   });
 

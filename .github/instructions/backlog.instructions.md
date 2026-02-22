@@ -34,6 +34,7 @@ _(Nothing currently in progress)_
 ### Frontend
 
 - [ ] **Connect to real backend** — Replace demo/mock data with REST API + SignalR.
+- [ ] **Council Moderator interaction loop** — Implement `POST /sessions/{id}/messages` so user chat goes through one moderator lane that can trigger targeted multi-agent follow-up and return a concise synthesis.
 - [ ] **SignalR sequencing** — Keep SignalR for the following branch (or add after REST wiring is stable).
 - [ ] **SignalR client integration expansion** — Stream agent tokens, patch deltas, convergence, and budget warnings in real time across thread + Truth Map UI.
 - [ ] **Session Timeline Scrubber (Phase 1.5)** — Snapshot access, Pause-and-Replay forks.
@@ -66,7 +67,7 @@ _(Nothing currently in progress)_
 - [x] Domain layer scaffold — `Agon.sln` with `Agon.Domain` (net9.0, zero deps) + `Agon.Domain.Tests` (xUnit + FluentAssertions)
 - [x] Backend scaffold vertical slice — `Agon.Application`, `Agon.Infrastructure`, `Agon.Api` added with clean layer dependencies and in-memory adapters
 - [x] Core backend session endpoints — `POST /sessions`, `GET /sessions/{id}`, `POST /sessions/{id}/start`, `GET /sessions/{id}/truthmap`
-- [x] SignalR baseline — `/hubs/debate` mapped with session group join/leave and baseline events (`RoundProgress`, `TruthMapPatch`)
+- [x] SignalR baseline — `/hubs/debate` mapped with session group join/leave and baseline events (`RoundProgress`, `TruthMapPatch`, `TranscriptMessage`)
 - [x] Frontend SignalR baseline — session route hub connection, round progress updates, reconnect + REST resync
 - [x] Truth Map domain model — `TruthMapState`, `TruthMapPatch`, `PatchValidator` (5 validation rules), all entity types with `derived_from` / `challenged_by`
 - [x] Domain entities — Claim, Assumption, Decision, Risk, Evidence, OpenQuestion, Persona, Constraints, Convergence, ConfidenceTransition + all enums

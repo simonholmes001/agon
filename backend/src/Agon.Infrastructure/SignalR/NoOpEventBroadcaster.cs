@@ -1,4 +1,5 @@
 using Agon.Application.Interfaces;
+using Agon.Application.Sessions;
 using Agon.Domain.Sessions;
 using Agon.Domain.TruthMap;
 
@@ -12,6 +13,11 @@ public class NoOpEventBroadcaster : IEventBroadcaster
     }
 
     public Task TruthMapPatchedAsync(Guid sessionId, TruthMapPatch patch, int version, CancellationToken cancellationToken)
+    {
+        return Task.CompletedTask;
+    }
+
+    public Task TranscriptMessageAppendedAsync(Guid sessionId, TranscriptMessage message, CancellationToken cancellationToken)
     {
         return Task.CompletedTask;
     }

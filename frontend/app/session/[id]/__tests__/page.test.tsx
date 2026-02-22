@@ -5,18 +5,22 @@ import userEvent from "@testing-library/user-event";
 
 const {
   useParamsMock,
+  useSearchParamsMock,
   createDebateHubConnectionMock,
   startMock,
   stopMock,
   onRoundProgressMock,
   onTruthMapPatchMock,
+  onTranscriptMessageMock,
   onReconnectedMock,
 } = vi.hoisted(() => ({
   useParamsMock: vi.fn(() => ({ id: "session-123" })),
+  useSearchParamsMock: vi.fn(() => new URLSearchParams()),
   startMock: vi.fn(() => Promise.resolve()),
   stopMock: vi.fn(() => Promise.resolve()),
   onRoundProgressMock: vi.fn(),
   onTruthMapPatchMock: vi.fn(),
+  onTranscriptMessageMock: vi.fn(),
   onReconnectedMock: vi.fn(),
   createDebateHubConnectionMock: vi.fn(),
 }));
@@ -27,6 +31,7 @@ createDebateHubConnectionMock.mockImplementation(() => ({
   stop: stopMock,
   onRoundProgress: onRoundProgressMock,
   onTruthMapPatch: onTruthMapPatchMock,
+  onTranscriptMessage: onTranscriptMessageMock,
   onReconnected: onReconnectedMock,
 }));
 
@@ -38,6 +43,7 @@ vi.mock("next/navigation", async () => {
   return {
     ...actual,
     useParams: useParamsMock,
+    useSearchParams: useSearchParamsMock,
   };
 });
 
@@ -55,8 +61,10 @@ describe("SessionPage", () => {
     stopMock.mockClear();
     onRoundProgressMock.mockClear();
     onTruthMapPatchMock.mockClear();
+    onTranscriptMessageMock.mockClear();
     onReconnectedMock.mockClear();
     useParamsMock.mockReturnValue({ id: "session-123" });
+    useSearchParamsMock.mockReturnValue(new URLSearchParams());
     vi.stubGlobal("fetch", fetchMock);
 
     fetchMock
@@ -132,7 +140,7 @@ describe("SessionPage", () => {
     render(<SessionPage />);
     await waitFor(() => {
       expect(
-        screen.getByPlaceholderText(/challenge a claim/i),
+        screen.getByPlaceholderText(/message the council moderator/i),
       ).toBeInTheDocument();
     });
   });
@@ -193,6 +201,7 @@ describe("SessionPage", () => {
       expect(startMock).toHaveBeenCalledTimes(1);
       expect(onRoundProgressMock).toHaveBeenCalledTimes(1);
       expect(onTruthMapPatchMock).toHaveBeenCalledTimes(1);
+      expect(onTranscriptMessageMock).toHaveBeenCalledTimes(1);
       expect(onReconnectedMock).toHaveBeenCalledTimes(1);
     });
   });
@@ -295,6 +304,96 @@ describe("SessionPage", () => {
       expect(
         screen.getByText(/real-time updates unavailable/i),
       ).toBeInTheDocument();
+    });
+  });
+
+  it("appends transcript messages pushed from SignalR", async () => {
+    render(<SessionPage />);
+
+    await waitFor(() => {
+      expect(onTranscriptMessageMock).toHaveBeenCalledTimes(1);
+    });
+
+    const transcriptHandler = onTranscriptMessageMock.mock.calls[0]?.[0] as
+      | ((event: {
+        id: string;
+        type: string;
+        content: string;
+        agentId?: string;
+        round?: number;
+        isStreaming?: boolean;
+      }) => void)
+      | undefined;
+    expect(transcriptHandler).toBeTypeOf("function");
+
+    act(() => {
+      transcriptHandler?.({
+        id: "msg-live-1",
+        type: "agent",
+        agentId: "research-librarian",
+        content: "Live streaming update from the backend.",
+        round: 1,
+        isStreaming: true,
+        createdAtUtc: "2026-02-22T00:00:00Z",
+      });
+    });
+
+    expect(
+      screen.getByText(/live streaming update from the backend/i),
+    ).toBeInTheDocument();
+  });
+
+  it("auto-starts the council run when start=1 is present in query params", async () => {
+    useSearchParamsMock.mockReturnValue(new URLSearchParams("start=1"));
+    fetchMock.mockReset();
+
+    fetchMock
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            sessionId: "session-123",
+            phase: "Clarification",
+            frictionLevel: 72,
+            status: "Active",
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            sessionId: "session-123",
+            coreIdea: "Backend-connected session",
+            version: 0,
+            round: 1,
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify([]), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            sessionId: "session-123",
+            phase: "DebateRound1",
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      );
+
+    render(<SessionPage />);
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenNthCalledWith(
+        4,
+        "/api/backend/sessions/session-123/start",
+        expect.objectContaining({ method: "POST" }),
+      );
     });
   });
 });

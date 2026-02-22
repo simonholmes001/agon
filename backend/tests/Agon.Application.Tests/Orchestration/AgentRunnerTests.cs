@@ -115,6 +115,44 @@ public class AgentRunnerTests
         results[0].Error.Should().Contain("missing api key");
     }
 
+    [Fact]
+    public async Task RunRoundAsync_InvokesCompletionCallback_AsEachAgentFinishes()
+    {
+        var repository = Substitute.For<ITruthMapRepository>();
+        var eventBroadcaster = Substitute.For<IEventBroadcaster>();
+        var logger = Substitute.For<ILogger<AgentRunner>>();
+        var sut = new AgentRunner(repository, eventBroadcaster, logger);
+
+        var context = new AgentContext
+        {
+            SessionId = Guid.NewGuid(),
+            Round = 1,
+            Phase = SessionPhase.DebateRound1,
+            TruthMap = TruthMapState.CreateNew(Guid.NewGuid()),
+            FrictionLevel = 50
+        };
+
+        var completedAgentIds = new List<string>();
+        var agents = new ICouncilAgent[]
+        {
+            new DelayedSuccessAgent("slow-agent", TimeSpan.FromMilliseconds(80)),
+            new DelayedSuccessAgent("fast-agent", TimeSpan.FromMilliseconds(10))
+        };
+
+        await sut.RunRoundAsync(
+            agents,
+            context,
+            timeoutPerAgent: TimeSpan.FromSeconds(2),
+            async (result, _) =>
+            {
+                completedAgentIds.Add(result.AgentId);
+                await Task.CompletedTask;
+            },
+            CancellationToken.None);
+
+        completedAgentIds.Should().ContainInOrder("fast-agent", "slow-agent");
+    }
+
     private static TruthMapPatch CreatePatch(string agent)
     {
         return new TruthMapPatch
@@ -165,6 +203,33 @@ public class AgentRunnerTests
 #pragma warning disable CS0162
             yield break;
 #pragma warning restore CS0162
+        }
+    }
+
+    private sealed class DelayedSuccessAgent : ICouncilAgent
+    {
+        private readonly string agentId;
+        private readonly TimeSpan delay;
+
+        public DelayedSuccessAgent(string agentId, TimeSpan delay)
+        {
+            this.agentId = agentId;
+            this.delay = delay;
+        }
+
+        public string AgentId => agentId;
+        public string ModelProvider => "fake";
+
+        public async Task<AgentResponse> RunAsync(AgentContext context, CancellationToken cancellationToken)
+        {
+            await Task.Delay(delay, cancellationToken);
+            return new AgentResponse { Message = $"done-{agentId}" };
+        }
+
+        public async IAsyncEnumerable<string> RunStreamingAsync(AgentContext context, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
+        {
+            await Task.Delay(delay, cancellationToken);
+            yield return $"done-{agentId}";
         }
     }
 }

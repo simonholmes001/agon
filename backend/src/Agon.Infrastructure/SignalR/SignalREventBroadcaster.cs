@@ -1,4 +1,5 @@
 using Agon.Application.Interfaces;
+using Agon.Application.Sessions;
 using Agon.Domain.Sessions;
 using Agon.Domain.TruthMap;
 using Microsoft.AspNetCore.SignalR;
@@ -58,7 +59,51 @@ public class SignalREventBroadcaster(
         }
     }
 
+    public async Task TranscriptMessageAppendedAsync(Guid sessionId, TranscriptMessage message, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await hubContext.Clients
+                .Group(DebateHub.SessionGroupName(sessionId))
+                .SendAsync("TranscriptMessage", new TranscriptMessageEvent(
+                    message.Id,
+                    message.Type.ToString().ToLowerInvariant(),
+                    message.AgentId,
+                    message.Content,
+                    message.Round,
+                    message.IsStreaming,
+                    message.CreatedAtUtc), cancellationToken);
+
+            logger.LogInformation(
+                "Broadcast TranscriptMessage event. SessionId={SessionId} MessageId={MessageId} Type={Type} AgentId={AgentId} Round={Round}",
+                sessionId,
+                message.Id,
+                message.Type,
+                message.AgentId ?? "system",
+                message.Round);
+        }
+        catch (Exception exception)
+        {
+            logger.LogError(
+                exception,
+                "Failed to broadcast TranscriptMessage event. SessionId={SessionId} MessageId={MessageId} Type={Type} AgentId={AgentId}",
+                sessionId,
+                message.Id,
+                message.Type,
+                message.AgentId ?? "system");
+        }
+    }
+
     private sealed record RoundProgressEvent(Guid SessionId, string Phase);
 
     private sealed record TruthMapPatchEvent(Guid SessionId, int Version, TruthMapPatch Patch);
+
+    private sealed record TranscriptMessageEvent(
+        Guid Id,
+        string Type,
+        string? AgentId,
+        string Content,
+        int Round,
+        bool IsStreaming,
+        DateTimeOffset CreatedAtUtc);
 }

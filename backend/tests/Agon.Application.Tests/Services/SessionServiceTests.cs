@@ -128,7 +128,7 @@ public class SessionServiceTests
             Arg.Is<TranscriptMessage>(message =>
                 message.Type == TranscriptMessageType.System
                 && message.AgentId == null
-                && message.Content.Contains("Round 1")),
+                && message.Content.Contains("Round 1 started", StringComparison.Ordinal)),
             Arg.Any<CancellationToken>());
     }
 
@@ -176,7 +176,7 @@ public class SessionServiceTests
 
         await sut.StartSessionAsync(sessionId, CancellationToken.None);
 
-        await transcriptRepository.Received(2).AppendAsync(
+        await transcriptRepository.Received(3).AppendAsync(
             sessionId,
             Arg.Any<TranscriptMessage>(),
             Arg.Any<CancellationToken>());
@@ -185,7 +185,7 @@ public class SessionServiceTests
             Arg.Is<TranscriptMessage>(message =>
                 message.Type == TranscriptMessageType.System
                 && message.AgentId == null
-                && message.Content.Contains("Round 1")),
+                && message.Content.Contains("Round 1 started", StringComparison.Ordinal)),
             Arg.Any<CancellationToken>());
         await transcriptRepository.Received(1).AppendAsync(
             sessionId,
@@ -193,6 +193,71 @@ public class SessionServiceTests
                 message.AgentId == "product-strategist"
                 && message.Content == "A concise product strategy message."
                 && message.Round == 1),
+            Arg.Any<CancellationToken>());
+        await transcriptRepository.Received(1).AppendAsync(
+            sessionId,
+            Arg.Is<TranscriptMessage>(message =>
+                message.Type == TranscriptMessageType.System
+                && message.Content.Contains("Round 1 complete", StringComparison.Ordinal)),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task StartSessionAsync_BroadcastsTranscriptMessages_WhenRoundMessagesAreStored()
+    {
+        var sessionId = Guid.NewGuid();
+        var session = new SessionState
+        {
+            SessionId = sessionId,
+            Phase = SessionPhase.Clarification,
+            Status = SessionStatus.Active,
+            Mode = SessionMode.Deep,
+            FrictionLevel = 50,
+            RoundPolicy = new RoundPolicy()
+        };
+        var map = TruthMapState.CreateNew(sessionId);
+
+        var sessionRepository = Substitute.For<ISessionRepository>();
+        sessionRepository.GetAsync(sessionId, Arg.Any<CancellationToken>()).Returns(session);
+
+        var truthMapRepository = Substitute.For<ITruthMapRepository>();
+        truthMapRepository.GetAsync(sessionId, Arg.Any<CancellationToken>()).Returns(map);
+
+        var transcriptRepository = Substitute.For<ITranscriptRepository>();
+        var eventBroadcaster = Substitute.For<IEventBroadcaster>();
+        var orchestrator = new Orchestrator();
+        var runnerLogger = Substitute.For<ILogger<AgentRunner>>();
+        var agentRunner = new AgentRunner(truthMapRepository, eventBroadcaster, runnerLogger);
+        var councilAgents = new ICouncilAgent[]
+        {
+            new StaticAgent("product_strategist", "A concise product strategy message.")
+        };
+        var logger = Substitute.For<ILogger<SessionService>>();
+
+        var sut = new SessionService(
+            sessionRepository,
+            truthMapRepository,
+            transcriptRepository,
+            orchestrator,
+            agentRunner,
+            councilAgents,
+            eventBroadcaster,
+            logger);
+
+        await sut.StartSessionAsync(sessionId, CancellationToken.None);
+
+        await eventBroadcaster.Received(1).TranscriptMessageAppendedAsync(
+            sessionId,
+            Arg.Is<TranscriptMessage>(message =>
+                message.Type == TranscriptMessageType.System
+                && message.Content.Contains("Round 1 started", StringComparison.Ordinal)),
+            Arg.Any<CancellationToken>());
+
+        await eventBroadcaster.Received().TranscriptMessageAppendedAsync(
+            sessionId,
+            Arg.Is<TranscriptMessage>(message =>
+                message.AgentId == "product-strategist"
+                && message.Content == "A concise product strategy message."),
             Arg.Any<CancellationToken>());
     }
 

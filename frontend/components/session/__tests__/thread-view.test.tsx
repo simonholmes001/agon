@@ -8,6 +8,7 @@ interface ThreadViewTestProps {
   phase: SessionPhase;
   coreIdea: string;
   realtimeStatus: "connecting" | "connected" | "unavailable";
+  roundStartState: "idle" | "starting" | "started" | "failed";
   messages: Array<{
     id: string;
     type: "agent" | "system";
@@ -23,6 +24,7 @@ const defaultProps: ThreadViewTestProps = {
   phase: "CLARIFICATION",
   coreIdea: "Build a SaaS for agile planning.",
   realtimeStatus: "connecting",
+  roundStartState: "idle",
   messages: [],
 };
 
@@ -97,5 +99,31 @@ describe("ThreadView", () => {
     expect(
       screen.queryByText(/no agent transcript has been streamed yet/i),
     ).not.toBeInTheDocument();
+  });
+
+  it("shows a clear next-step prompt for moderator interaction after debate messages arrive", () => {
+    render(
+      <ThreadView
+        {...defaultProps}
+        phase="DEBATE_ROUND_1"
+        messages={[
+          {
+            id: "agent-1",
+            type: "agent",
+            agentId: "socratic-clarifier",
+            round: 1,
+            isStreaming: false,
+            content: "Here is the council assessment.",
+          },
+        ]}
+      />,
+    );
+
+    expect(
+      screen.getByText(/next step:/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/ask the council moderator one focused follow-up/i),
+    ).toBeInTheDocument();
   });
 });

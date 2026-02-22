@@ -10,6 +10,7 @@ describe("createDebateHubConnection", () => {
 
     connection.onRoundProgress(() => {});
     connection.onTruthMapPatch(() => {});
+    connection.onTranscriptMessage(() => {});
     connection.onReconnected(() => {});
 
     await expect(connection.start()).rejects.toBeTruthy();

@@ -9,10 +9,18 @@ public class AgentRunner(
     IEventBroadcaster eventBroadcaster,
     ILogger<AgentRunner> logger)
 {
+    public Task<IReadOnlyList<AgentExecutionResult>> RunRoundAsync(
+        IEnumerable<ICouncilAgent> agents,
+        AgentContext context,
+        TimeSpan timeoutPerAgent,
+        CancellationToken cancellationToken) =>
+        RunRoundAsync(agents, context, timeoutPerAgent, onAgentCompleted: null, cancellationToken);
+
     public async Task<IReadOnlyList<AgentExecutionResult>> RunRoundAsync(
         IEnumerable<ICouncilAgent> agents,
         AgentContext context,
         TimeSpan timeoutPerAgent,
+        Func<AgentExecutionResult, CancellationToken, Task>? onAgentCompleted,
         CancellationToken cancellationToken)
     {
         var agentList = agents.ToList();
@@ -24,8 +32,38 @@ public class AgentRunner(
             agentList.Count,
             context.CorrelationId);
 
-        var tasks = agentList.Select(agent => ExecuteAgentAsync(agent, context, timeoutPerAgent, cancellationToken));
-        var results = await Task.WhenAll(tasks);
+        var pendingTasks = agentList
+            .Select(agent => ExecuteAgentAsync(agent, context, timeoutPerAgent, cancellationToken))
+            .ToList();
+        var results = new List<AgentExecutionResult>(pendingTasks.Count);
+
+        while (pendingTasks.Count > 0)
+        {
+            var completedTask = await Task.WhenAny(pendingTasks);
+            pendingTasks.Remove(completedTask);
+            var result = await completedTask;
+            results.Add(result);
+
+            if (onAgentCompleted is null)
+            {
+                continue;
+            }
+
+            try
+            {
+                await onAgentCompleted(result, cancellationToken);
+            }
+            catch (Exception exception)
+            {
+                logger.LogError(
+                    exception,
+                    "Per-agent completion callback failed. SessionId={SessionId} Round={Round} AgentId={AgentId} CorrelationId={CorrelationId}",
+                    context.SessionId,
+                    context.Round,
+                    result.AgentId,
+                    context.CorrelationId);
+            }
+        }
 
         logger.LogInformation(
             "Completed agent round. SessionId={SessionId} Round={Round} TimedOut={TimedOutCount} Failed={FailedCount} CorrelationId={CorrelationId}",

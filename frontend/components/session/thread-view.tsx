@@ -8,6 +8,7 @@ import { AGENTS, PHASE_LABELS } from "@/lib/constants";
 import type { AgentId, SessionPhase } from "@/types";
 
 type RealtimeStatus = "connecting" | "connected" | "unavailable";
+type RoundStartState = "idle" | "starting" | "started" | "failed";
 
 export interface ThreadViewMessage {
   id: string;
@@ -23,6 +24,7 @@ interface ThreadViewProps {
   phase: SessionPhase;
   coreIdea: string;
   realtimeStatus: RealtimeStatus;
+  roundStartState: RoundStartState;
   messages: ThreadViewMessage[];
 }
 
@@ -39,6 +41,7 @@ export default function ThreadView({
   phase,
   coreIdea,
   realtimeStatus,
+  roundStartState,
   messages,
 }: Readonly<ThreadViewProps>) {
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -56,6 +59,15 @@ export default function ThreadView({
         ? "Real-time updates unavailable. Showing latest backend snapshot."
         : "Connecting to real-time updates…";
   const hasMessages = messages.length > 0;
+  const isDebatePhase = phase === "DEBATE_ROUND_1" || phase === "DEBATE_ROUND_2";
+  const shouldShowRoundProgressHint = isDebatePhase && !hasMessages;
+  const shouldShowNextStepHint = isDebatePhase && hasMessages;
+  const roundStartMessage =
+    roundStartState === "starting"
+      ? "Launching Round 1. Agent responses will stream here as they complete."
+      : roundStartState === "failed"
+        ? "Round start failed. Please retry from this session."
+        : null;
 
   return (
     <ScrollArea className="flex-1">
@@ -97,6 +109,49 @@ export default function ThreadView({
         >
           <SystemMessage content={realtimeMessage} />
         </motion.div>
+
+        {roundStartMessage ? (
+          <motion.div
+            key="round-start-status"
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.18, duration: 0.35, ease: "easeOut" as const }}
+            className="rounded-2xl border border-primary/20 bg-primary/5 p-4 sm:p-5"
+          >
+            <p className="text-sm font-medium">Council launch status</p>
+            <p className="mt-1 text-sm text-muted-foreground">{roundStartMessage}</p>
+          </motion.div>
+        ) : null}
+
+        {shouldShowRoundProgressHint ? (
+          <motion.div
+            key="round-progress-hint"
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.2, duration: 0.35, ease: "easeOut" as const }}
+            className="rounded-2xl border border-border/60 bg-card/40 p-4 sm:p-5"
+          >
+            <p className="text-sm font-medium">Council is analyzing now</p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              You are already in {phaseLabel}. Agent responses will stream into this thread as each call completes.
+            </p>
+          </motion.div>
+        ) : null}
+
+        {shouldShowNextStepHint ? (
+          <motion.div
+            key="next-step-hint"
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.22, duration: 0.35, ease: "easeOut" as const }}
+            className="rounded-2xl border border-agent-synthesis/25 bg-agent-synthesis/5 p-4 sm:p-5"
+          >
+            <p className="text-sm font-semibold">Next step:</p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Ask the Council Moderator one focused follow-up. The moderator channel is the single user interaction lane.
+            </p>
+          </motion.div>
+        ) : null}
 
         {hasMessages
           ? messages.map((message, index) => {
