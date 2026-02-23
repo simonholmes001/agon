@@ -96,10 +96,10 @@ describe("SessionPage", () => {
             {
               id: "msg-1",
               type: "agent",
-              agentId: "socratic-clarifier",
+              agentId: "synthesis-validation",
               round: 1,
               isStreaming: false,
-              content: "I have reviewed your core idea and will challenge assumptions.",
+              content: "Moderator summary content.",
             },
           ]),
           { status: 200, headers: { "content-type": "application/json" } },
@@ -131,7 +131,7 @@ describe("SessionPage", () => {
     render(<SessionPage />);
     await waitFor(() => {
       expect(
-        screen.getByText(/i have reviewed your core idea and will challenge assumptions/i),
+        screen.getByText(/moderator summary content/i),
       ).toBeInTheDocument();
     });
   });
@@ -331,8 +331,8 @@ describe("SessionPage", () => {
       transcriptHandler?.({
         id: "msg-live-1",
         type: "agent",
-        agentId: "research-librarian",
-        content: "Live streaming update from the backend.",
+        agentId: "synthesis-validation",
+        content: "Moderator streaming update from the backend.",
         round: 1,
         isStreaming: true,
         createdAtUtc: "2026-02-22T00:00:00Z",
@@ -340,7 +340,7 @@ describe("SessionPage", () => {
     });
 
     expect(
-      screen.getByText(/live streaming update from the backend/i),
+      screen.getByText(/moderator streaming update from the backend/i),
     ).toBeInTheDocument();
   });
 

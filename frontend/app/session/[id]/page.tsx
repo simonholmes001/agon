@@ -17,6 +17,7 @@ import type { SessionPhase } from "@/types";
 
 const logger = createLogger("SessionPage");
 const BACKEND_API_PREFIX = "/api/backend";
+const MODERATOR_AGENT_ID = "synthesis-validation";
 
 interface BackendSessionResponse {
   sessionId?: string;
@@ -101,6 +102,10 @@ function getRouteSessionId(id: string | string[] | undefined): string | undefine
     return id[0];
   }
   return id;
+}
+
+function normalizeAgentId(agentId: string | undefined): string | undefined {
+  return agentId?.trim().toLowerCase().replace(/_/g, "-");
 }
 
 function mapTranscriptMessages(
@@ -227,8 +232,10 @@ export default function SessionPage() {
       throw new Error("Cannot post moderator message without a session id.");
     }
 
-    const currentAgentCount = messages.filter((entry) => entry.type === "agent").length;
-    setAgentCountAtFollowUp(currentAgentCount);
+    const currentModeratorCount = messages.filter(
+      (entry) => entry.type === "agent" && normalizeAgentId(entry.agentId) === MODERATOR_AGENT_ID,
+    ).length;
+    setAgentCountAtFollowUp(currentModeratorCount);
     setFollowUpPending(true);
 
     logger.info("posting moderator message", {
@@ -283,8 +290,10 @@ export default function SessionPage() {
 
   useEffect(() => {
     if (!followUpPending) return;
-    const currentAgentCount = messages.filter((entry) => entry.type === "agent").length;
-    if (currentAgentCount > agentCountAtFollowUp) {
+    const currentModeratorCount = messages.filter(
+      (entry) => entry.type === "agent" && normalizeAgentId(entry.agentId) === MODERATOR_AGENT_ID,
+    ).length;
+    if (currentModeratorCount > agentCountAtFollowUp) {
       setFollowUpPending(false);
     }
   }, [followUpPending, agentCountAtFollowUp, messages]);

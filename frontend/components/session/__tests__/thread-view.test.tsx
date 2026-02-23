@@ -14,7 +14,7 @@ interface ThreadViewTestProps {
     id: string;
     type: "agent" | "system" | "user";
     content: string;
-    agentId?: "socratic-clarifier";
+    agentId?: string;
     round?: number;
     isStreaming?: boolean;
   }>;
@@ -77,7 +77,7 @@ describe("ThreadView", () => {
     expect(screen.queryByText(/i've reviewed your idea/i)).not.toBeInTheDocument();
   });
 
-  it("renders backend transcript messages when available", () => {
+  it("renders moderator transcript messages when available", () => {
     render(
       <ThreadView
         {...defaultProps}
@@ -85,21 +85,51 @@ describe("ThreadView", () => {
           {
             id: "agent-1",
             type: "agent",
-            agentId: "socratic-clarifier",
+            agentId: "synthesis-validation",
             round: 1,
             isStreaming: false,
-            content: "I have reviewed your core idea and will challenge assumptions.",
+            content: "Moderator summary content.",
           },
         ]}
       />,
     );
 
     expect(
-      screen.getByText(/i have reviewed your core idea/i),
+      screen.getByText(/moderator summary content/i),
     ).toBeInTheDocument();
     expect(
       screen.queryByText(/no agent transcript has been streamed yet/i),
     ).not.toBeInTheDocument();
+  });
+
+  it("hides non-moderator agent output", () => {
+    render(
+      <ThreadView
+        {...defaultProps}
+        phase="POST_DELIVERY"
+        messages={[
+          {
+            id: "agent-1",
+            type: "agent",
+            agentId: "product-strategist",
+            round: 1,
+            isStreaming: false,
+            content: "Product strategy content.",
+          },
+          {
+            id: "agent-2",
+            type: "agent",
+            agentId: "synthesis-validation",
+            round: 1,
+            isStreaming: false,
+            content: "Moderator summary content.",
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.queryByText(/product strategy content/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/moderator summary content/i)).toBeInTheDocument();
   });
 
   it("does not render a separate next-step guidance panel", () => {

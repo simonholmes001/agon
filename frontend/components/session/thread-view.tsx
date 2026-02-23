@@ -21,6 +21,8 @@ export interface ThreadViewMessage {
   isStreaming?: boolean;
 }
 
+const MODERATOR_AGENT_ID = "synthesis-validation";
+
 interface ThreadViewProps {
   sessionId: string;
   phase: SessionPhase;
@@ -37,6 +39,16 @@ function normalizeAgentId(agentId: string | undefined): AgentId | undefined {
   return normalizedAgentId in AGENTS
     ? normalizedAgentId as AgentId
     : undefined;
+}
+
+function isModeratorAgentMessage(message: ThreadViewMessage): boolean {
+  if (message.type !== "agent") return false;
+  return normalizeAgentId(message.agentId) === MODERATOR_AGENT_ID;
+}
+
+function shouldHideSystemMessage(content: string): boolean {
+  const normalized = content.trim().toLowerCase();
+  return normalized.startsWith("moderator routed follow-up");
 }
 
 export default function ThreadView({
@@ -111,15 +123,27 @@ export default function ThreadView({
       : realtimeStatus === "unavailable"
         ? "Real-time updates unavailable. Showing latest backend snapshot."
         : "Connecting to real-time updates…";
-  const hasMessages = messages.length > 0;
+  const visibleMessages = messages.filter((message) => {
+    if (message.type === "agent") {
+      return isModeratorAgentMessage(message);
+    }
+
+    if (message.type === "system") {
+      return !shouldHideSystemMessage(message.content);
+    }
+
+    return true;
+  });
+  const hasVisibleMessages = visibleMessages.length > 0;
+  const hasAnyAgentMessages = messages.some((message) => message.type === "agent");
   const isDebatePhase = phase === "DEBATE_ROUND_1" || phase === "DEBATE_ROUND_2";
-  const shouldShowRoundProgressHint = isDebatePhase && !hasMessages;
+  const shouldShowRoundProgressHint = isDebatePhase && !hasAnyAgentMessages;
   const hasModeratorSummary = messages.some(
-    (message) => normalizeAgentId(message.agentId) === "synthesis-validation",
+    (message) => normalizeAgentId(message.agentId) === MODERATOR_AGENT_ID,
   );
-  const shouldShowSummaryPending = hasMessages && !hasModeratorSummary;
+  const shouldShowSummaryPending = hasAnyAgentMessages && !hasModeratorSummary;
   const shouldShowProcessingIndicator =
-    (roundStartState === "starting" && !hasMessages) || pendingFollowUp;
+    (roundStartState === "starting" && !hasAnyAgentMessages) || pendingFollowUp;
   const roundStartMessage =
     roundStartState === "starting"
       ? "Launching Round 1. Agent responses will stream here as they complete."
@@ -129,7 +153,7 @@ export default function ThreadView({
         ? "Round start failed. Please retry from this session."
         : null;
 
-  const showJumpToLatest = hasMessages && hasUserScrolled && !autoScrollEnabled;
+  const showJumpToLatest = hasVisibleMessages && hasUserScrolled && !autoScrollEnabled;
 
   const handleJumpToLatest = () => {
     setAutoScrollEnabled(true);
@@ -207,8 +231,8 @@ export default function ThreadView({
             </motion.div>
           ) : null}
 
-          {hasMessages
-            ? messages.map((message, index) => {
+          {hasVisibleMessages
+            ? visibleMessages.map((message, index) => {
               const normalizedAgentId = normalizeAgentId(message.agentId);
               const key = `${message.id}-${index}`;
 
@@ -232,7 +256,7 @@ export default function ThreadView({
               }
 
               if (message.type === "agent" && normalizedAgentId) {
-                const isModeratorSummary = normalizedAgentId === "synthesis-validation";
+                const isModeratorSummary = normalizedAgentId === MODERATOR_AGENT_ID;
                 return (
                   <motion.div
                     key={key}
@@ -247,24 +271,6 @@ export default function ThreadView({
                       round={message.round ?? 0}
                       variant={isModeratorSummary ? "moderatorSummary" : "default"}
                     />
-                  </motion.div>
-                );
-              }
-
-              if (isFollowUpSystemMessage(message.content)) {
-                return (
-                  <motion.div
-                    key={key}
-                    initial={{ opacity: 0, y: 8 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: 0.2, duration: 0.35, ease: "easeOut" as const }}
-                  >
-                    <div className="rounded-2xl border border-primary/30 bg-primary/10 px-4 py-3 text-sm text-foreground/90">
-                      <p className="text-xs font-semibold uppercase tracking-wide text-primary/80">
-                        Moderator routing
-                      </p>
-                      <p className="mt-1">{message.content}</p>
-                    </div>
                   </motion.div>
                 );
               }
