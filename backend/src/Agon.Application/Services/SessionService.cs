@@ -19,7 +19,7 @@ public class SessionService(
     IEventBroadcaster eventBroadcaster,
     ILogger<SessionService> logger)
 {
-    private const int StreamingChunkDelayMilliseconds = 120;
+    private const int StreamingChunkDelayMilliseconds = 90;
 
     public async Task<SessionState> CreateSessionAsync(
         string idea,
@@ -495,7 +495,7 @@ public class SessionService(
         }
 
         var messageId = Guid.NewGuid();
-        var segments = BuildStreamingSegments(result.Message);
+        var segments = StreamingChunker.BuildSegments(result.Message);
         var agentId = PresentableAgentId(result.AgentId);
 
         for (var index = 0; index < segments.Count - 1; index++)
@@ -552,7 +552,7 @@ public class SessionService(
         }
 
         var messageId = message.Id == Guid.Empty ? Guid.NewGuid() : message.Id;
-        var segments = BuildStreamingSegments(message.Content);
+        var segments = StreamingChunker.BuildSegments(message.Content);
 
         for (var index = 0; index < segments.Count - 1; index++)
         {
@@ -730,7 +730,6 @@ public class SessionService(
         var lastEmissionLength = 0;
         var emitted = false;
 
-        var chunkCount = 0;
         await foreach (var chunk in summaryAgent.RunStreamingAsync(context, cancellationToken))
         {
             if (string.IsNullOrWhiteSpace(chunk))
@@ -739,59 +738,29 @@ public class SessionService(
             }
 
             buffer.Append(chunk);
-            chunkCount++;
-
-            if (chunkCount == 1)
+            var segments = StreamingChunker.BuildSegments(buffer.ToString());
+            foreach (var segment in segments)
             {
-                continue;
-            }
-            var current = buffer.ToString();
-            if (current.Length < 20)
-            {
-                continue;
-            }
+                if (segment.Length <= lastEmissionLength)
+                {
+                    continue;
+                }
 
-            if (current.Length - lastEmissionLength < 20 && !current.EndsWith('\n'))
-            {
-                continue;
-            }
-
-            lastEmissionLength = current.Length;
-
-            var partialMessage = new TranscriptMessage
-            {
-                Id = messageId,
-                SessionId = session.SessionId,
-                Type = TranscriptMessageType.Agent,
-                AgentId = agentId,
-                Content = current.TrimEnd(),
-                Round = session.RoundNumber,
-                IsStreaming = true,
-                CreatedAtUtc = DateTimeOffset.UtcNow
-            };
-            await eventBroadcaster.TranscriptMessageAppendedAsync(session.SessionId, partialMessage, cancellationToken);
-            emitted = true;
-        }
-
-        if (!emitted && buffer.Length > 0)
-        {
-            var segments = BuildStreamingSegments(buffer.ToString());
-            for (var index = 0; index < segments.Count - 1; index++)
-            {
+                lastEmissionLength = segment.Length;
                 var partialMessage = new TranscriptMessage
                 {
                     Id = messageId,
                     SessionId = session.SessionId,
                     Type = TranscriptMessageType.Agent,
                     AgentId = agentId,
-                    Content = segments[index],
+                    Content = segment.TrimEnd(),
                     Round = session.RoundNumber,
                     IsStreaming = true,
                     CreatedAtUtc = DateTimeOffset.UtcNow
                 };
                 await eventBroadcaster.TranscriptMessageAppendedAsync(session.SessionId, partialMessage, cancellationToken);
-                await Task.Delay(StreamingChunkDelayMilliseconds, cancellationToken);
                 emitted = true;
+                await Task.Delay(StreamingChunkDelayMilliseconds, cancellationToken);
             }
         }
 
@@ -804,7 +773,7 @@ public class SessionService(
         Guid messageId,
         CancellationToken cancellationToken)
     {
-        var segments = BuildStreamingSegments(summary);
+        var segments = StreamingChunker.BuildSegments(summary);
         if (segments.Count <= 1)
         {
             return;
@@ -998,7 +967,7 @@ public class SessionService(
             return "- No summary available.";
         }
 
-        return string.Join("\n", bullets.Select(item => $"- {TruncateForSummary(item, 240)}"));
+        return string.Join("\n", bullets.Select(item => $"- {item.Trim()}"));
     }
 
     private static IReadOnlyList<string> ExtractBulletCandidates(string? message, int maxBullets)
@@ -1008,9 +977,7 @@ public class SessionService(
             return [];
         }
 
-        var normalized = TruncateForDetailedSummary(message, 1200)
-            .Replace("\r", string.Empty)
-            .Trim();
+        var normalized = NormalizeForBulletExtraction(message, 8000);
 
         var lines = normalized
             .Split('\n', StringSplitOptions.RemoveEmptyEntries)
@@ -1061,53 +1028,6 @@ public class SessionService(
             agent => CanonicalizeAgentId(agent.AgentId) == canonicalAgentId);
     }
 
-    private static List<string> BuildStreamingSegments(string message)
-    {
-        var trimmed = message.Trim();
-        if (trimmed.Length == 0)
-        {
-            return [string.Empty];
-        }
-
-        var words = trimmed
-            .Split([' ', '\n', '\r', '\t'], StringSplitOptions.RemoveEmptyEntries);
-        if (words.Length <= 6)
-        {
-            if (trimmed.Length < 40)
-            {
-                return [trimmed];
-            }
-
-            var midpoint = Math.Max(1, words.Length / 2);
-            var partial = string.Join(" ", words.Take(midpoint));
-            return [partial, trimmed];
-        }
-
-        var segmentCount = Math.Clamp(words.Length / 8, 2, 8);
-        var segmentWordCount = Math.Max(4, words.Length / segmentCount);
-        var segments = new List<string>();
-        for (var end = segmentWordCount; end < words.Length; end += segmentWordCount)
-        {
-            segments.Add(string.Join(" ", words.Take(end)));
-        }
-
-        if (segments.Count == 0 || !segments[^1].Equals(trimmed, StringComparison.Ordinal))
-        {
-            segments.Add(trimmed);
-        }
-
-        if (segments.Count == 1 && trimmed.Length >= 60)
-        {
-            var midpoint = Math.Max(1, words.Length / 2);
-            segments =
-            [
-                string.Join(" ", words.Take(midpoint)),
-                trimmed
-            ];
-        }
-
-        return segments;
-    }
 
     private List<ICouncilAgent> SelectActiveAgentsForPhase(SessionPhase phase)
     {
@@ -1241,12 +1161,7 @@ public class SessionService(
             text.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries))
             .Trim();
 
-        if (normalized.Length <= maxLength)
-        {
-            return normalized;
-        }
-
-        return $"{normalized[..maxLength].TrimEnd()}...";
+        return TruncateAtWordBoundary(normalized, maxLength);
     }
 
     private static string TruncateForDetailedSummary(string? text, int maxLength)
@@ -1257,12 +1172,52 @@ public class SessionService(
         }
 
         var normalized = text.Trim();
+        return TruncateAtWordBoundary(normalized, maxLength);
+    }
+
+    private static string NormalizeForBulletExtraction(string message, int maxLength)
+    {
+        var normalized = (message ?? string.Empty)
+            .Replace("\r", string.Empty)
+            .Trim();
+
         if (normalized.Length <= maxLength)
         {
             return normalized;
         }
 
-        return $"{normalized[..maxLength].TrimEnd()}...";
+        var candidate = normalized[..maxLength];
+        var lastLineBreak = candidate.LastIndexOf('\n');
+        if (lastLineBreak > 0)
+        {
+            return candidate[..lastLineBreak].TrimEnd();
+        }
+
+        var lastSpace = candidate.LastIndexOf(' ');
+        if (lastSpace > 0)
+        {
+            return candidate[..lastSpace].TrimEnd();
+        }
+
+        return candidate.TrimEnd();
+    }
+
+    private static string TruncateAtWordBoundary(string text, int maxLength)
+    {
+        if (text.Length <= maxLength)
+        {
+            return text;
+        }
+
+        var safeLength = Math.Min(maxLength, text.Length);
+        var candidate = text[..safeLength].TrimEnd();
+        var lastSpace = candidate.LastIndexOf(' ');
+        if (lastSpace > Math.Max(24, maxLength / 2))
+        {
+            candidate = candidate[..lastSpace].TrimEnd();
+        }
+
+        return $"{candidate}...";
     }
 
     private static string NormalizeCorrelationId(string? correlationId) =>

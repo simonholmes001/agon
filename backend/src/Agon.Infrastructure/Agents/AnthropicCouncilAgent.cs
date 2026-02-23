@@ -65,6 +65,7 @@ public class AnthropicCouncilAgent(
             }
 
             var message = ParseOutputText(responseBody);
+            var parsed = AgentResponseParser.Parse(message);
             logger.LogInformation(
                 "Anthropic call succeeded. SessionId={SessionId} Round={Round} AgentId={AgentId} Model={Model} LatencyMs={LatencyMs} CorrelationId={CorrelationId}",
                 context.SessionId,
@@ -75,8 +76,8 @@ public class AnthropicCouncilAgent(
                 context.CorrelationId);
             return new AgentResponse
             {
-                Message = message,
-                Patch = null,
+                Message = parsed.Message,
+                Patch = parsed.Patch,
                 RawOutput = responseBody
             };
         }
@@ -105,16 +106,7 @@ public class AnthropicCouncilAgent(
 
     private object BuildRequest(AgentContext context)
     {
-        var prompt = $"""
-            You are agent '{AgentId}'.
-            Session: {context.SessionId}
-            Round: {context.Round}
-            Phase: {context.Phase}
-            FrictionLevel: {context.FrictionLevel}
-            CoreIdea: {context.TruthMap.CoreIdea}
-
-            Provide a concise analysis (max 120 words) with actionable recommendations.
-            """;
+        var prompt = AgentPromptComposer.ComposePrompt(options.AgentId, context);
 
         if (options.Temperature.HasValue)
         {

@@ -53,7 +53,7 @@ function AgentMessageCardInner({
       className={cn(
         "group relative rounded-2xl border border-border/40 bg-card/60 p-4 backdrop-blur-sm transition-colors hover:border-border/60 sm:p-5",
         isModeratorSummary
-          && "border-amber-200/70 bg-gradient-to-br from-amber-50/70 via-rose-50/60 to-emerald-50/60 shadow-sm dark:border-amber-400/30 dark:from-amber-500/15 dark:via-slate-950/85 dark:to-emerald-500/15",
+          && "border-agent-socratic/35 bg-gradient-to-br from-agent-socratic/12 via-agent-product/10 to-agent-synthesis/12 shadow-sm dark:border-agent-socratic/35 dark:from-agent-socratic/18 dark:via-slate-950/85 dark:to-agent-synthesis/18",
       )}
     >
       {/* Header */}

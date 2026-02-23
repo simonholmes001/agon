@@ -62,6 +62,7 @@ public class GeminiCouncilAgent(
             }
 
             var message = ParseOutputText(responseBody);
+            var parsed = AgentResponseParser.Parse(message);
             logger.LogInformation(
                 "Gemini call succeeded. SessionId={SessionId} Round={Round} AgentId={AgentId} Model={Model} LatencyMs={LatencyMs} CorrelationId={CorrelationId}",
                 context.SessionId,
@@ -72,8 +73,8 @@ public class GeminiCouncilAgent(
                 context.CorrelationId);
             return new AgentResponse
             {
-                Message = message,
-                Patch = null,
+                Message = parsed.Message,
+                Patch = parsed.Patch,
                 RawOutput = responseBody
             };
         }
@@ -102,16 +103,7 @@ public class GeminiCouncilAgent(
 
     private object BuildRequest(AgentContext context)
     {
-        var prompt = $"""
-            You are agent '{AgentId}'.
-            Session: {context.SessionId}
-            Round: {context.Round}
-            Phase: {context.Phase}
-            FrictionLevel: {context.FrictionLevel}
-            CoreIdea: {context.TruthMap.CoreIdea}
-
-            Provide a concise analysis (max 120 words) with actionable recommendations.
-            """;
+        var prompt = AgentPromptComposer.ComposePrompt(options.AgentId, context);
 
         if (options.Temperature.HasValue)
         {

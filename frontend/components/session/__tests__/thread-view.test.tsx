@@ -59,7 +59,7 @@ describe("ThreadView", () => {
     render(<ThreadView {...defaultProps} phase="DEBATE_ROUND_1" />);
     expect(
       screen.getByText(
-        /moderator response will stream here/i,
+        /awaiting council responses/i,
       ),
     ).toBeInTheDocument();
     expect(screen.queryByText(/i've reviewed your idea/i)).not.toBeInTheDocument();
@@ -181,7 +181,7 @@ describe("ThreadView", () => {
       <ThreadView
         {...defaultProps}
         phase="CLARIFICATION"
-        roundStartState="idle"
+        roundStartState="starting"
         messages={[]}
       />,
     );

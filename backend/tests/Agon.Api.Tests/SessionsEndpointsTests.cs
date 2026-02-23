@@ -1,15 +1,14 @@
 using System.Net;
 using System.Net.Http.Json;
 using FluentAssertions;
-using Microsoft.AspNetCore.Mvc.Testing;
 
 namespace Agon.Api.Tests;
 
-public class SessionsEndpointsTests : IClassFixture<WebApplicationFactory<Program>>
+public class SessionsEndpointsTests : IClassFixture<ApiWebApplicationFactory>
 {
     private readonly HttpClient client;
 
-    public SessionsEndpointsTests(WebApplicationFactory<Program> factory)
+    public SessionsEndpointsTests(ApiWebApplicationFactory factory)
     {
         client = factory.CreateClient();
     }

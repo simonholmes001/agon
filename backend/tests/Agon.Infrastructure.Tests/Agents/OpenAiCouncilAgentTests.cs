@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text;
+using System.Text.Json;
 using Agon.Application.Orchestration;
 using Agon.Domain.Sessions;
 using Agon.Domain.TruthMap;
@@ -44,6 +45,34 @@ public class OpenAiCouncilAgentTests
         response.Message.Should().Be("Use customer interviews to validate demand.");
         response.Patch.Should().BeNull();
         requestBody.Should().Contain("\"temperature\":0.35");
+    }
+
+    [Fact]
+    public async Task RunAsync_ReturnsOnlyMessageSection_WhenResponseContainsPatchSection()
+    {
+        var sessionId = Guid.NewGuid();
+        var outputText =
+            $"## MESSAGE\nShow only this.\n\n## PATCH\n{{\"ops\":[],\"meta\":{{\"agent\":\"synthesis_validation\",\"round\":1,\"reason\":\"test\",\"sessionId\":\"{sessionId}\"}}}}";
+        var payload = JsonSerializer.Serialize(new { output_text = outputText });
+        var handler = new StubHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(
+                payload,
+                Encoding.UTF8,
+                "application/json")
+        });
+        var httpClient = new HttpClient(handler);
+        var options = new OpenAiCouncilAgentOptions(
+            AgentId: "research_librarian",
+            ApiKey: "test-key",
+            ModelName: "gpt-5.2",
+            MaxOutputTokens: 256);
+        var sut = new OpenAiCouncilAgent(httpClient, options, NullLogger<OpenAiCouncilAgent>.Instance);
+
+        var response = await sut.RunAsync(CreateContext(), CancellationToken.None);
+
+        response.Message.Should().Be("Show only this.");
+        response.Patch.Should().NotBeNull();
     }
 
     [Fact]

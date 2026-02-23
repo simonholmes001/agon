@@ -44,6 +44,33 @@ public class AnthropicCouncilAgentTests
     }
 
     [Fact]
+    public async Task RunAsync_ReturnsOnlyMessageSection_WhenContentContainsPatchSection()
+    {
+        var handler = new StubHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(
+                """
+                {
+                  "content": [
+                    { "type": "text", "text": "## MESSAGE\nUser-visible answer.\n\n## PATCH\n{\"ops\":[]}" }
+                  ]
+                }
+                """,
+                Encoding.UTF8,
+                "application/json")
+        });
+        var sut = new AnthropicCouncilAgent(
+            new HttpClient(handler),
+            new AnthropicCouncilAgentOptions("product_strategist", "anthropic-key", "claude-opus-4-6", 256),
+            NullLogger<AnthropicCouncilAgent>.Instance);
+
+        var response = await sut.RunAsync(CreateContext(), CancellationToken.None);
+
+        response.Message.Should().Be("User-visible answer.");
+        response.Patch.Should().BeNull();
+    }
+
+    [Fact]
     public async Task RunAsync_Throws_OnNonSuccessStatus()
     {
         var handler = new StubHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.BadRequest)

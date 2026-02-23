@@ -48,6 +48,37 @@ public class DeepSeekCouncilAgentTests
     }
 
     [Fact]
+    public async Task RunAsync_ReturnsOnlyMessageSection_WhenChoiceContainsPatchSection()
+    {
+        var handler = new StubHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(
+                """
+                {
+                  "choices": [
+                    {
+                      "message": {
+                        "content": "## MESSAGE\nOnly render this.\n\n## PATCH\n{\"assumptions\":[{\"id\":\"a1\"}]}"
+                      }
+                    }
+                  ]
+                }
+                """,
+                Encoding.UTF8,
+                "application/json")
+        });
+        var sut = new DeepSeekCouncilAgent(
+            new HttpClient(handler),
+            new DeepSeekCouncilAgentOptions("technical_architect", "deepseek-key", "deepseek-chat", 256),
+            NullLogger<DeepSeekCouncilAgent>.Instance);
+
+        var response = await sut.RunAsync(CreateContext(), CancellationToken.None);
+
+        response.Message.Should().Be("Only render this.");
+        response.Patch.Should().BeNull();
+    }
+
+    [Fact]
     public async Task RunAsync_Throws_OnNonSuccessStatus()
     {
         var handler = new StubHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.Unauthorized)

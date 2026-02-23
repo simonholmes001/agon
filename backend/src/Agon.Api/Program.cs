@@ -12,6 +12,9 @@ using Microsoft.AspNetCore.SignalR;
 using System.Globalization;
 
 var builder = WebApplication.CreateBuilder(args);
+var isTestingEnvironment =
+    builder.Environment.IsEnvironment("Test")
+    || builder.Environment.IsEnvironment("Testing");
 
 const string FrontendCorsPolicy = "FrontendCorsPolicy";
 const string CorrelationHeaderName = "X-Correlation-ID";
@@ -19,11 +22,15 @@ const string OpenAiDefaultModel = "gpt-5.2";
 const string TechnicalArchitectTemporaryModelDefault = "gpt-5.2";
 const string GeminiDefaultModel = "gemini-3.1-pro-preview";
 const string AnthropicDefaultModel = "claude-opus-4-6";
+const int DefaultMaxOutputTokens = 2400;
+const int DefaultModeratorMaxOutputTokens = 3200;
 var allowedOrigins = builder.Configuration
     .GetSection("Cors:AllowedOrigins")
     .Get<string[]>()
     ?? ["http://localhost:3000", "https://localhost:3000"];
-var dotEnvLoadResult = DotEnvLoader.Load(builder.Environment.ContentRootPath);
+var dotEnvLoadResult = isTestingEnvironment
+    ? new DotEnvLoadResult(null, 0, 0)
+    : DotEnvLoader.Load(builder.Environment.ContentRootPath);
 
 static (double? Value, bool IsInvalid) ParseTemperatureSetting(string? rawValue)
 {
@@ -39,6 +46,20 @@ static (double? Value, bool IsInvalid) ParseTemperatureSetting(string? rawValue)
         : (null, true);
 }
 
+static (int? Value, bool IsInvalid) ParseMaxOutputTokensSetting(string? rawValue)
+{
+    if (string.IsNullOrWhiteSpace(rawValue))
+    {
+        return (null, false);
+    }
+
+    var parsed = int.TryParse(rawValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out var tokens)
+        && tokens is >= 128 and <= 16384;
+    return parsed
+        ? (tokens, false)
+        : (null, true);
+}
+
 var openAiApiKey = Environment.GetEnvironmentVariable("OPENAI_KEY")
     ?? builder.Configuration["OPENAI_KEY"]
     ?? builder.Configuration["OpenAI:ApiKey"];
@@ -51,6 +72,11 @@ var openAiTemperatureRaw = Environment.GetEnvironmentVariable("OPENAI_TEMPERATUR
     ?? builder.Configuration["OpenAI:Temperature"];
 var openAiTemperatureSetting = ParseTemperatureSetting(openAiTemperatureRaw);
 var openAiTemperature = openAiTemperatureSetting.Value;
+var openAiMaxOutputTokensRaw = Environment.GetEnvironmentVariable("OPENAI_MAX_OUTPUT_TOKENS")
+    ?? builder.Configuration["OPENAI_MAX_OUTPUT_TOKENS"]
+    ?? builder.Configuration["OpenAI:MaxOutputTokens"];
+var openAiMaxOutputTokensSetting = ParseMaxOutputTokensSetting(openAiMaxOutputTokensRaw);
+var openAiMaxOutputTokens = openAiMaxOutputTokensSetting.Value ?? DefaultMaxOutputTokens;
 var geminiApiKey = Environment.GetEnvironmentVariable("GEMINI_KEY")
     ?? builder.Configuration["GEMINI_KEY"]
     ?? builder.Configuration["Gemini:ApiKey"];
@@ -63,6 +89,11 @@ var geminiTemperatureRaw = Environment.GetEnvironmentVariable("GEMINI_TEMPERATUR
     ?? builder.Configuration["Gemini:Temperature"];
 var geminiTemperatureSetting = ParseTemperatureSetting(geminiTemperatureRaw);
 var geminiTemperature = geminiTemperatureSetting.Value;
+var geminiMaxOutputTokensRaw = Environment.GetEnvironmentVariable("GEMINI_MAX_OUTPUT_TOKENS")
+    ?? builder.Configuration["GEMINI_MAX_OUTPUT_TOKENS"]
+    ?? builder.Configuration["Gemini:MaxOutputTokens"];
+var geminiMaxOutputTokensSetting = ParseMaxOutputTokensSetting(geminiMaxOutputTokensRaw);
+var geminiMaxOutputTokens = geminiMaxOutputTokensSetting.Value ?? DefaultMaxOutputTokens;
 var anthropicApiKey = Environment.GetEnvironmentVariable("ANTHROPIC_KEY")
     ?? Environment.GetEnvironmentVariable("CLAUDE_KEY")
     ?? builder.Configuration["ANTHROPIC_KEY"]
@@ -77,6 +108,11 @@ var anthropicTemperatureRaw = Environment.GetEnvironmentVariable("ANTHROPIC_TEMP
     ?? builder.Configuration["Anthropic:Temperature"];
 var anthropicTemperatureSetting = ParseTemperatureSetting(anthropicTemperatureRaw);
 var anthropicTemperature = anthropicTemperatureSetting.Value;
+var anthropicMaxOutputTokensRaw = Environment.GetEnvironmentVariable("ANTHROPIC_MAX_OUTPUT_TOKENS")
+    ?? builder.Configuration["ANTHROPIC_MAX_OUTPUT_TOKENS"]
+    ?? builder.Configuration["Anthropic:MaxOutputTokens"];
+var anthropicMaxOutputTokensSetting = ParseMaxOutputTokensSetting(anthropicMaxOutputTokensRaw);
+var anthropicMaxOutputTokens = anthropicMaxOutputTokensSetting.Value ?? DefaultMaxOutputTokens;
 var technicalArchitectModel = Environment.GetEnvironmentVariable("TECHNICAL_ARCHITECT_MODEL")
     ?? TechnicalArchitectTemporaryModelDefault;
 var technicalArchitectTemperatureRaw = Environment.GetEnvironmentVariable("TECHNICAL_ARCHITECT_TEMPERATURE")
@@ -84,6 +120,17 @@ var technicalArchitectTemperatureRaw = Environment.GetEnvironmentVariable("TECHN
     ?? builder.Configuration["TechnicalArchitect:Temperature"];
 var technicalArchitectTemperatureSetting = ParseTemperatureSetting(technicalArchitectTemperatureRaw);
 var technicalArchitectTemperature = technicalArchitectTemperatureSetting.Value ?? openAiTemperature;
+var technicalArchitectMaxOutputTokensRaw = Environment.GetEnvironmentVariable("TECHNICAL_ARCHITECT_MAX_OUTPUT_TOKENS")
+    ?? builder.Configuration["TECHNICAL_ARCHITECT_MAX_OUTPUT_TOKENS"]
+    ?? builder.Configuration["TechnicalArchitect:MaxOutputTokens"];
+var technicalArchitectMaxOutputTokensSetting = ParseMaxOutputTokensSetting(technicalArchitectMaxOutputTokensRaw);
+var technicalArchitectMaxOutputTokens = technicalArchitectMaxOutputTokensSetting.Value ?? openAiMaxOutputTokens;
+var synthesisMaxOutputTokensRaw = Environment.GetEnvironmentVariable("SYNTHESIS_MAX_OUTPUT_TOKENS")
+    ?? builder.Configuration["SYNTHESIS_MAX_OUTPUT_TOKENS"]
+    ?? builder.Configuration["Synthesis:MaxOutputTokens"];
+var synthesisMaxOutputTokensSetting = ParseMaxOutputTokensSetting(synthesisMaxOutputTokensRaw);
+var synthesisMaxOutputTokens = synthesisMaxOutputTokensSetting.Value
+    ?? Math.Max(openAiMaxOutputTokens, DefaultModeratorMaxOutputTokens);
 
 builder.Logging.AddFilter("Microsoft.AspNetCore.Hosting.Diagnostics", LogLevel.Warning);
 builder.Logging.AddFilter("Microsoft.AspNetCore.Routing.EndpointMiddleware", LogLevel.Warning);
@@ -128,7 +175,7 @@ builder.Services.AddSingleton<ICouncilAgent>(sp =>
         AgentId.ResearchLibrarian,
         ApiKey: openAiApiKey,
         ModelName: openAiModel,
-        MaxOutputTokens: 600,
+        MaxOutputTokens: openAiMaxOutputTokens,
         Temperature: openAiTemperature);
 
     return new OpenAiCouncilAgent(httpClientFactory.CreateClient(), options, logger);
@@ -150,7 +197,7 @@ builder.Services.AddSingleton<ICouncilAgent>(sp =>
             AgentId.FramingChallenger,
             geminiApiKey,
             geminiModel,
-            MaxOutputTokens: 600,
+            MaxOutputTokens: geminiMaxOutputTokens,
             Temperature: geminiTemperature),
         sp.GetRequiredService<ILogger<GeminiCouncilAgent>>());
 });
@@ -171,7 +218,7 @@ builder.Services.AddSingleton<ICouncilAgent>(sp =>
             AgentId.Contrarian,
             geminiApiKey,
             geminiModel,
-            MaxOutputTokens: 600,
+            MaxOutputTokens: geminiMaxOutputTokens,
             Temperature: geminiTemperature),
         sp.GetRequiredService<ILogger<GeminiCouncilAgent>>());
 });
@@ -192,7 +239,7 @@ builder.Services.AddSingleton<ICouncilAgent>(sp =>
             AgentId.ProductStrategist,
             anthropicApiKey,
             anthropicModel,
-            MaxOutputTokens: 600,
+            MaxOutputTokens: anthropicMaxOutputTokens,
             Temperature: anthropicTemperature),
         sp.GetRequiredService<ILogger<AnthropicCouncilAgent>>());
 });
@@ -213,7 +260,7 @@ builder.Services.AddSingleton<ICouncilAgent>(sp =>
             AgentId.TechnicalArchitect,
             openAiApiKey,
             technicalArchitectModel,
-            MaxOutputTokens: 600,
+            MaxOutputTokens: technicalArchitectMaxOutputTokens,
             Temperature: technicalArchitectTemperature),
         sp.GetRequiredService<ILogger<OpenAiCouncilAgent>>());
 });
@@ -234,7 +281,7 @@ builder.Services.AddSingleton<ICouncilAgent>(sp =>
             AgentId.SocraticClarifier,
             openAiApiKey,
             openAiModel,
-            MaxOutputTokens: 600,
+            MaxOutputTokens: openAiMaxOutputTokens,
             Temperature: openAiTemperature),
         sp.GetRequiredService<ILogger<OpenAiCouncilAgent>>());
 });
@@ -255,7 +302,7 @@ builder.Services.AddSingleton<ICouncilAgent>(sp =>
             AgentId.SynthesisValidation,
             openAiApiKey,
             openAiModel,
-            MaxOutputTokens: 900,
+            MaxOutputTokens: synthesisMaxOutputTokens,
             Temperature: openAiTemperature),
         sp.GetRequiredService<ILogger<OpenAiCouncilAgent>>());
 });
@@ -288,6 +335,14 @@ app.Logger.LogInformation(
     anthropicTemperature?.ToString(CultureInfo.InvariantCulture) ?? "provider-default",
     technicalArchitectTemperature?.ToString(CultureInfo.InvariantCulture) ?? "provider-default");
 
+app.Logger.LogInformation(
+    "Provider max output tokens configuration. OpenAI={OpenAiTokens} Gemini={GeminiTokens} Anthropic={AnthropicTokens} TechnicalArchitect={TechnicalArchitectTokens} Synthesis={SynthesisTokens}",
+    openAiMaxOutputTokens,
+    geminiMaxOutputTokens,
+    anthropicMaxOutputTokens,
+    technicalArchitectMaxOutputTokens,
+    synthesisMaxOutputTokens);
+
 if (openAiTemperatureSetting.IsInvalid)
 {
     app.Logger.LogWarning("OPENAI_TEMPERATURE is invalid. Expected decimal between 0 and 2. Falling back to provider default.");
@@ -306,6 +361,31 @@ if (anthropicTemperatureSetting.IsInvalid)
 if (technicalArchitectTemperatureSetting.IsInvalid)
 {
     app.Logger.LogWarning("TECHNICAL_ARCHITECT_TEMPERATURE is invalid. Expected decimal between 0 and 2. Falling back to OpenAI temperature or provider default.");
+}
+
+if (openAiMaxOutputTokensSetting.IsInvalid)
+{
+    app.Logger.LogWarning("OPENAI_MAX_OUTPUT_TOKENS is invalid. Expected integer between 128 and 16384.");
+}
+
+if (geminiMaxOutputTokensSetting.IsInvalid)
+{
+    app.Logger.LogWarning("GEMINI_MAX_OUTPUT_TOKENS is invalid. Expected integer between 128 and 16384.");
+}
+
+if (anthropicMaxOutputTokensSetting.IsInvalid)
+{
+    app.Logger.LogWarning("ANTHROPIC_MAX_OUTPUT_TOKENS is invalid. Expected integer between 128 and 16384.");
+}
+
+if (technicalArchitectMaxOutputTokensSetting.IsInvalid)
+{
+    app.Logger.LogWarning("TECHNICAL_ARCHITECT_MAX_OUTPUT_TOKENS is invalid. Expected integer between 128 and 16384.");
+}
+
+if (synthesisMaxOutputTokensSetting.IsInvalid)
+{
+    app.Logger.LogWarning("SYNTHESIS_MAX_OUTPUT_TOKENS is invalid. Expected integer between 128 and 16384.");
 }
 
 if (string.IsNullOrWhiteSpace(openAiApiKey))

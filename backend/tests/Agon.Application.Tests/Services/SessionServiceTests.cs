@@ -1,3 +1,5 @@
+using System.Linq;
+using System.Reflection;
 using Agon.Application.Interfaces;
 using Agon.Application.Orchestration;
 using Agon.Application.Sessions;
@@ -355,7 +357,7 @@ public class SessionServiceTests
         var orchestrator = new Orchestrator();
         var runnerLogger = Substitute.For<ILogger<AgentRunner>>();
         var agentRunner = new AgentRunner(truthMapRepository, eventBroadcaster, runnerLogger);
-        const string agentMessage = "Concise response that still spans length.";
+        var agentMessage = string.Join(" ", Enumerable.Repeat("Expanded technical response", 40));
         var technical = new ContextCapturingAgent(AgentId.TechnicalArchitect, agentMessage);
         var logger = Substitute.For<ILogger<SessionService>>();
         var sut = new SessionService(
@@ -541,8 +543,8 @@ public class SessionServiceTests
         var orchestrator = new Orchestrator();
         var runnerLogger = Substitute.For<ILogger<AgentRunner>>();
         var agentRunner = new AgentRunner(truthMapRepository, eventBroadcaster, runnerLogger);
-        const string agentMessage =
-            "A concise product strategy message with enough detail to demonstrate incremental streaming updates over several chunks and ensure multiple segments are emitted.";
+        const string marker = "END_MARKER_FULL_BULLET";
+        var agentMessage = $"- {string.Join(" ", Enumerable.Repeat("Extended analysis content", 30))} {marker}";
         var councilAgents = new ICouncilAgent[]
         {
             new StaticAgent("product_strategist", agentMessage)
@@ -585,7 +587,8 @@ public class SessionServiceTests
                 message.AgentId == "synthesis-validation"
                 && message.Type == TranscriptMessageType.Agent
                 && message.Content.Contains("Moderator summary", StringComparison.OrdinalIgnoreCase)
-                && message.Content.Contains("Agent summaries", StringComparison.Ordinal)),
+                && message.Content.Contains("Agent summaries", StringComparison.Ordinal)
+                && message.Content.Contains(marker, StringComparison.Ordinal)),
             Arg.Any<CancellationToken>());
         await eventBroadcaster.Received().TranscriptMessageAppendedAsync(
             sessionId,
@@ -676,8 +679,11 @@ public class SessionServiceTests
         var orchestrator = new Orchestrator();
         var runnerLogger = Substitute.For<ILogger<AgentRunner>>();
         var agentRunner = new AgentRunner(truthMapRepository, eventBroadcaster, runnerLogger);
-        const string agentMessage =
-            "A concise product strategy message with enough detail to demonstrate incremental streaming updates over several chunks and ensure multiple segments are emitted.";
+        var agentMessage = string.Join(
+            " ",
+            Enumerable.Repeat(
+                "A product strategy message with enough detail to ensure multiple streaming segments are emitted",
+                20));
         var councilAgents = new ICouncilAgent[]
         {
             new StaticAgent("product_strategist", agentMessage)
@@ -957,6 +963,22 @@ public class SessionServiceTests
         var transcript = await sut.GetTranscriptAsync(sessionId, CancellationToken.None);
 
         transcript.Should().BeEquivalentTo(expected);
+    }
+
+    [Fact]
+    public void ExtractBulletCandidates_IncludesBulletsBeyondLegacyTruncation()
+    {
+        var filler = new string('a', 1300);
+        var message = $"{filler}\n- The market is already hyper-competitive and saturated.\n- Second bullet.";
+
+        var method = typeof(SessionService).GetMethod(
+            "ExtractBulletCandidates",
+            BindingFlags.NonPublic | BindingFlags.Static);
+
+        method.Should().NotBeNull();
+        var result = (IReadOnlyList<string>)method!.Invoke(null, new object?[] { message, 5 })!;
+
+        result.Should().Contain(item => item.Contains("hyper-competitive"));
     }
 
     private sealed class StaticAgent(string agentId, string message) : ICouncilAgent

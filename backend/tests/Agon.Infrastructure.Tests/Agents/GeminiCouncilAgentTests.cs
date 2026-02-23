@@ -50,6 +50,39 @@ public class GeminiCouncilAgentTests
     }
 
     [Fact]
+    public async Task RunAsync_ReturnsOnlyMessageSection_WhenCandidateContainsPatchSection()
+    {
+        var handler = new StubHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(
+                """
+                {
+                  "candidates": [
+                    {
+                      "content": {
+                        "parts": [
+                          { "text": "## MESSAGE\nKeep this.\n\n## PATCH\n{\"decisions\":[{\"id\":\"d1\"}]}" }
+                        ]
+                      }
+                    }
+                  ]
+                }
+                """,
+                Encoding.UTF8,
+                "application/json")
+        });
+        var sut = new GeminiCouncilAgent(
+            new HttpClient(handler),
+            new GeminiCouncilAgentOptions("framing_challenger", "gemini-key", "gemini-3.1-pro-preview", 256),
+            NullLogger<GeminiCouncilAgent>.Instance);
+
+        var response = await sut.RunAsync(CreateContext(), CancellationToken.None);
+
+        response.Message.Should().Be("Keep this.");
+        response.Patch.Should().BeNull();
+    }
+
+    [Fact]
     public async Task RunAsync_Throws_OnNonSuccessStatus()
     {
         var handler = new StubHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.Forbidden)

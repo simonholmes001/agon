@@ -111,22 +111,46 @@ function normalizeAgentId(agentId: string | undefined): string | undefined {
 function buildStreamingSegments(message: string): string[] {
   const trimmed = message.trim();
   if (!trimmed) return [];
-  const words = trimmed.split(/\s+/);
-  if (words.length <= 6) {
-    if (trimmed.length < 40) return [trimmed];
-    const midpoint = Math.max(1, Math.floor(words.length / 2));
-    return [words.slice(0, midpoint).join(" "), trimmed];
+  const targetChunkSize = 120;
+  const maxSegments = 40;
+  if (trimmed.length <= targetChunkSize) return [trimmed];
+
+  const estimatedSegments = Math.min(
+    maxSegments,
+    Math.max(2, Math.ceil(trimmed.length / targetChunkSize)),
+  );
+  const step = Math.max(1, Math.floor(trimmed.length / estimatedSegments));
+  const segments: string[] = [];
+
+  const adjustToWordBoundary = (index: number) => {
+    if (index <= 0) return 0;
+    if (index >= trimmed.length) return trimmed.length;
+    const window = 24;
+    const start = Math.max(0, index - window);
+    const end = Math.min(trimmed.length - 1, index + window);
+    for (let i = index; i >= start; i -= 1) {
+      if (/\s/.test(trimmed[i])) return i;
+    }
+    for (let i = index; i <= end; i += 1) {
+      if (/\s/.test(trimmed[i])) return i;
+    }
+    return index;
+  };
+
+  for (let end = step; end < trimmed.length; end += step) {
+    const adjustedEnd = adjustToWordBoundary(end);
+    const segment = trimmed.slice(0, adjustedEnd).trimEnd();
+    if (!segment) continue;
+    if (segments.length > 0 && segment.length <= segments[segments.length - 1].length) {
+      continue;
+    }
+    segments.push(segment);
   }
 
-  const segmentCount = Math.min(8, Math.max(2, Math.floor(words.length / 8)));
-  const segmentWordCount = Math.max(4, Math.floor(words.length / segmentCount));
-  const segments: string[] = [];
-  for (let end = segmentWordCount; end < words.length; end += segmentWordCount) {
-    segments.push(words.slice(0, end).join(" "));
-  }
   if (!segments.length || segments[segments.length - 1] !== trimmed) {
     segments.push(trimmed);
   }
+
   return segments;
 }
 
@@ -275,7 +299,7 @@ export default function SessionPage() {
           content: segment,
           isStreaming: !isFinal,
         }));
-      }, index * 140);
+      }, index * 90);
     });
   }, [messages, realtimeStatus]);
 
@@ -440,7 +464,6 @@ export default function SessionPage() {
   useEffect(() => {
     if (!routeSessionId || !shouldAutoStart) return;
     if (hasTriggeredAutoStartRef.current) return;
-    if (realtimeStatus !== "connected") return;
 
     hasTriggeredAutoStartRef.current = true;
     setRoundStartState("starting");
@@ -455,12 +478,15 @@ export default function SessionPage() {
 
         setRoundStartState("started");
         logger.info("auto-start request accepted", { sessionId: routeSessionId });
+        if (realtimeStatus !== "connected") {
+          await loadSessionState(routeSessionId);
+        }
       })
       .catch((error) => {
         setRoundStartState("failed");
         logger.error("failed to auto-start session from route", { sessionId: routeSessionId }, error);
       });
-  }, [routeSessionId, shouldAutoStart, realtimeStatus]);
+  }, [routeSessionId, shouldAutoStart, realtimeStatus, loadSessionState]);
 
   return (
     <div className="flex h-[100dvh] flex-col bg-background">
