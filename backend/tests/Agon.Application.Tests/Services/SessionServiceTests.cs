@@ -271,6 +271,65 @@ public class SessionServiceTests
     }
 
     [Fact]
+    public async Task PostUserMessageAsync_CreatesModeratorSummary_ForSingleAgentResponse()
+    {
+        var sessionId = Guid.NewGuid();
+        var session = new SessionState
+        {
+            SessionId = sessionId,
+            Phase = SessionPhase.PostDelivery,
+            Status = SessionStatus.CompleteWithGaps,
+            Mode = SessionMode.Deep,
+            FrictionLevel = 50,
+            RoundPolicy = new RoundPolicy(),
+            RoundNumber = 1
+        };
+        var map = TruthMapState.CreateNew(sessionId);
+        map.CoreIdea = "Core idea";
+
+        var sessionRepository = Substitute.For<ISessionRepository>();
+        sessionRepository.GetAsync(sessionId, Arg.Any<CancellationToken>()).Returns(session);
+        var truthMapRepository = Substitute.For<ITruthMapRepository>();
+        truthMapRepository.GetAsync(sessionId, Arg.Any<CancellationToken>()).Returns(map);
+        var transcriptRepository = Substitute.For<ITranscriptRepository>();
+        var eventBroadcaster = Substitute.For<IEventBroadcaster>();
+        var orchestrator = new Orchestrator();
+        var runnerLogger = Substitute.For<ILogger<AgentRunner>>();
+        var agentRunner = new AgentRunner(truthMapRepository, eventBroadcaster, runnerLogger);
+        var technical = new StaticAgent(AgentId.TechnicalArchitect, "Technical reply.");
+        var synthesis = new StaticAgent(AgentId.SynthesisValidation, "Moderator summary content.");
+        var logger = Substitute.For<ILogger<SessionService>>();
+        var sut = new SessionService(
+            sessionRepository,
+            truthMapRepository,
+            transcriptRepository,
+            orchestrator,
+            agentRunner,
+            [technical, synthesis],
+            eventBroadcaster,
+            logger);
+
+        await sut.PostUserMessageAsync(
+            sessionId,
+            "Can you outline the technical approach?",
+            CancellationToken.None);
+
+        await transcriptRepository.Received().AppendAsync(
+            sessionId,
+            Arg.Is<TranscriptMessage>(message =>
+                message.AgentId == "synthesis-validation"
+                && message.Type == TranscriptMessageType.Agent),
+            Arg.Any<CancellationToken>());
+
+        await eventBroadcaster.Received().TranscriptMessageAppendedAsync(
+            sessionId,
+            Arg.Is<TranscriptMessage>(message =>
+                message.AgentId == "synthesis-validation"
+                && message.IsStreaming),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task PostUserMessageAsync_StreamsCompactAgentMessages()
     {
         var sessionId = Guid.NewGuid();
@@ -527,6 +586,12 @@ public class SessionServiceTests
                 && message.Type == TranscriptMessageType.Agent
                 && message.Content.Contains("Moderator summary", StringComparison.OrdinalIgnoreCase)
                 && message.Content.Contains("Agent summaries", StringComparison.Ordinal)),
+            Arg.Any<CancellationToken>());
+        await eventBroadcaster.Received().TranscriptMessageAppendedAsync(
+            sessionId,
+            Arg.Is<TranscriptMessage>(message =>
+                message.AgentId == "synthesis-validation"
+                && message.IsStreaming),
             Arg.Any<CancellationToken>());
         await transcriptRepository.Received(1).AppendAsync(
             sessionId,

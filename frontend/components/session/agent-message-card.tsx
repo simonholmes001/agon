@@ -52,7 +52,8 @@ function AgentMessageCardInner({
     <div
       className={cn(
         "group relative rounded-2xl border border-border/40 bg-card/60 p-4 backdrop-blur-sm transition-colors hover:border-border/60 sm:p-5",
-        isModeratorSummary && "border-agent-synthesis/60 bg-agent-synthesis/15 shadow-sm",
+        isModeratorSummary
+          && "border-amber-200/70 bg-gradient-to-br from-amber-50/70 via-rose-50/60 to-emerald-50/60 shadow-sm dark:border-amber-400/30 dark:from-amber-500/15 dark:via-slate-950/85 dark:to-emerald-500/15",
       )}
     >
       {/* Header */}

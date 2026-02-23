@@ -302,9 +302,13 @@ describe("SessionPage", () => {
 
     await waitFor(() => {
       expect(
-        screen.getByText(/real-time updates unavailable/i),
+        screen.getByText(/moderator summary content/i),
       ).toBeInTheDocument();
     });
+
+    expect(
+      screen.queryByText(/real-time updates unavailable/i),
+    ).not.toBeInTheDocument();
   });
 
   it("appends transcript messages pushed from SignalR", async () => {

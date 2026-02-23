@@ -40,38 +40,26 @@ describe("ThreadView", () => {
   it("renders the core idea from backend truth map", () => {
     render(<ThreadView {...defaultProps} />);
     expect(
-      screen.getByText(
-        /core idea from backend/i,
-      ),
+      screen.getByText(/^your question$/i),
     ).toBeInTheDocument();
     expect(screen.getByText(/build a saas for agile planning/i)).toBeInTheDocument();
   });
 
-  it("renders realtime unavailable status when connection fails", () => {
-    render(<ThreadView {...defaultProps} realtimeStatus="unavailable" />);
+  it("does not render realtime status badges", () => {
+    render(<ThreadView {...defaultProps} realtimeStatus="connected" />);
     expect(
-      screen.getByText(/real-time updates unavailable/i),
-    ).toBeInTheDocument();
-  });
-
-  it("renders realtime connected status", () => {
-    render(
-      <ThreadView
-        {...defaultProps}
-        phase="DEBATE_ROUND_1"
-        realtimeStatus="connected"
-      />,
-    );
+      screen.queryByText(/real-time updates unavailable/i),
+    ).not.toBeInTheDocument();
     expect(
-      screen.getByText(/live council updates connected/i),
-    ).toBeInTheDocument();
+      screen.queryByText(/live council updates connected/i),
+    ).not.toBeInTheDocument();
   });
 
   it("renders a backend waiting-state message instead of demo transcript", () => {
     render(<ThreadView {...defaultProps} phase="DEBATE_ROUND_1" />);
     expect(
       screen.getByText(
-        /no agent transcript has been streamed yet/i,
+        /moderator response will stream here/i,
       ),
     ).toBeInTheDocument();
     expect(screen.queryByText(/i've reviewed your idea/i)).not.toBeInTheDocument();
@@ -181,6 +169,19 @@ describe("ThreadView", () => {
         {...defaultProps}
         phase="DEBATE_ROUND_1"
         roundStartState="starting"
+        messages={[]}
+      />,
+    );
+
+    expect(screen.getByText(/council is processing/i)).toBeInTheDocument();
+  });
+
+  it("shows a processing indicator during clarification when no moderator response is present", () => {
+    render(
+      <ThreadView
+        {...defaultProps}
+        phase="CLARIFICATION"
+        roundStartState="idle"
         messages={[]}
       />,
     );

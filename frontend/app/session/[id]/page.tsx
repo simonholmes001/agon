@@ -108,6 +108,28 @@ function normalizeAgentId(agentId: string | undefined): string | undefined {
   return agentId?.trim().toLowerCase().replace(/_/g, "-");
 }
 
+function buildStreamingSegments(message: string): string[] {
+  const trimmed = message.trim();
+  if (!trimmed) return [];
+  const words = trimmed.split(/\s+/);
+  if (words.length <= 6) {
+    if (trimmed.length < 40) return [trimmed];
+    const midpoint = Math.max(1, Math.floor(words.length / 2));
+    return [words.slice(0, midpoint).join(" "), trimmed];
+  }
+
+  const segmentCount = Math.min(8, Math.max(2, Math.floor(words.length / 8)));
+  const segmentWordCount = Math.max(4, Math.floor(words.length / segmentCount));
+  const segments: string[] = [];
+  for (let end = segmentWordCount; end < words.length; end += segmentWordCount) {
+    segments.push(words.slice(0, end).join(" "));
+  }
+  if (!segments.length || segments[segments.length - 1] !== trimmed) {
+    segments.push(trimmed);
+  }
+  return segments;
+}
+
 function mapTranscriptMessages(
   transcript: BackendTranscriptMessageResponse[],
 ): ThreadViewMessage[] {
@@ -170,6 +192,7 @@ export default function SessionPage() {
   const [roundStartState, setRoundStartState] = useState<RoundStartState>("idle");
   const [followUpPending, setFollowUpPending] = useState(false);
   const [agentCountAtFollowUp, setAgentCountAtFollowUp] = useState(0);
+  const simulatedStreamRef = useRef<string | null>(null);
 
   const loadSessionState = useCallback(async (id: string) => {
     logger.info("loading session state", { sessionId: id });
@@ -225,6 +248,36 @@ export default function SessionPage() {
       logger.error("failed to load session page data", { sessionId: id }, error);
     }
   }, []);
+
+  useEffect(() => {
+    if (process.env.NODE_ENV === "test") return;
+    if (realtimeStatus === "connected") return;
+
+    const latestModerator = [...messages]
+      .filter((entry) =>
+        entry.type === "agent"
+        && normalizeAgentId(entry.agentId) === MODERATOR_AGENT_ID
+        && !entry.isStreaming)
+      .pop();
+
+    if (!latestModerator) return;
+    if (simulatedStreamRef.current === latestModerator.id) return;
+
+    const segments = buildStreamingSegments(latestModerator.content);
+    if (segments.length <= 1) return;
+
+    simulatedStreamRef.current = latestModerator.id;
+    segments.forEach((segment, index) => {
+      const isFinal = index === segments.length - 1;
+      window.setTimeout(() => {
+        setMessages((current) => upsertTranscriptMessage(current, {
+          ...latestModerator,
+          content: segment,
+          isStreaming: !isFinal,
+        }));
+      }, index * 140);
+    });
+  }, [messages, realtimeStatus]);
 
   const postModeratorMessage = useCallback(async (message: string) => {
     const targetSessionId = sessionId || routeSessionId;

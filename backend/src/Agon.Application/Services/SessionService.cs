@@ -244,7 +244,10 @@ public class SessionService(
                 },
                 cancellationToken);
 
-            if (results.Count > 1)
+            var shouldSummarize = session.Phase == SessionPhase.PostDelivery
+                && results.Any(result =>
+                    CanonicalizeAgentId(result.AgentId) != CanonicalizeAgentId(AgentId.SynthesisValidation));
+            if (shouldSummarize)
             {
                 var summaryMessage = await CreateModeratorSummaryMessageAsync(
                     session,
@@ -254,9 +257,15 @@ public class SessionService(
                     cancellationToken);
                 if (summaryMessage is not null)
                 {
-                    await transcriptRepository.AppendAsync(sessionId, summaryMessage, cancellationToken);
-                    await eventBroadcaster.TranscriptMessageAppendedAsync(sessionId, summaryMessage, cancellationToken);
-                    storedMessages++;
+                    if (summaryMessage.WasStreamed)
+                    {
+                        await StoreFinalTranscriptMessageAsync(sessionId, summaryMessage.Message, cancellationToken);
+                        storedMessages++;
+                    }
+                    else if (await StreamAndStoreTranscriptMessageAsync(sessionId, session.RoundNumber, summaryMessage.Message, cancellationToken))
+                    {
+                        storedMessages++;
+                    }
                 }
             }
 
@@ -441,9 +450,15 @@ public class SessionService(
             cancellationToken);
         if (summaryMessage is not null)
         {
-            await transcriptRepository.AppendAsync(session.SessionId, summaryMessage, cancellationToken);
-            await eventBroadcaster.TranscriptMessageAppendedAsync(session.SessionId, summaryMessage, cancellationToken);
-            storedMessages++;
+            if (summaryMessage.WasStreamed)
+            {
+                await StoreFinalTranscriptMessageAsync(session.SessionId, summaryMessage.Message, cancellationToken);
+                storedMessages++;
+            }
+            else if (await StreamAndStoreTranscriptMessageAsync(session.SessionId, session.RoundNumber, summaryMessage.Message, cancellationToken))
+            {
+                storedMessages++;
+            }
         }
 
         var completionMessage = CreateRoundCompletionSystemMessage(
@@ -518,7 +533,74 @@ public class SessionService(
         return true;
     }
 
-    private async Task<TranscriptMessage?> CreateModeratorSummaryMessageAsync(
+    private async Task<bool> StreamAndStoreTranscriptMessageAsync(
+        Guid sessionId,
+        int roundNumber,
+        TranscriptMessage message,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(message.Content))
+        {
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(message.AgentId))
+        {
+            await transcriptRepository.AppendAsync(sessionId, message, cancellationToken);
+            await eventBroadcaster.TranscriptMessageAppendedAsync(sessionId, message, cancellationToken);
+            return true;
+        }
+
+        var messageId = message.Id == Guid.Empty ? Guid.NewGuid() : message.Id;
+        var segments = BuildStreamingSegments(message.Content);
+
+        for (var index = 0; index < segments.Count - 1; index++)
+        {
+            var partialMessage = new TranscriptMessage
+            {
+                Id = messageId,
+                SessionId = sessionId,
+                Type = message.Type,
+                AgentId = message.AgentId,
+                Content = segments[index],
+                Round = roundNumber,
+                IsStreaming = true,
+                CreatedAtUtc = DateTimeOffset.UtcNow
+            };
+            await eventBroadcaster.TranscriptMessageAppendedAsync(sessionId, partialMessage, cancellationToken);
+            await Task.Delay(StreamingChunkDelayMilliseconds, cancellationToken);
+        }
+
+        var finalMessage = new TranscriptMessage
+        {
+            Id = messageId,
+            SessionId = sessionId,
+            Type = message.Type,
+            AgentId = message.AgentId,
+            Content = segments[^1],
+            Round = roundNumber,
+            IsStreaming = false,
+            CreatedAtUtc = DateTimeOffset.UtcNow
+        };
+        await transcriptRepository.AppendAsync(sessionId, finalMessage, cancellationToken);
+        await eventBroadcaster.TranscriptMessageAppendedAsync(sessionId, finalMessage, cancellationToken);
+        return true;
+    }
+
+    private async Task StoreFinalTranscriptMessageAsync(
+        Guid sessionId,
+        TranscriptMessage message,
+        CancellationToken cancellationToken)
+    {
+        await transcriptRepository.AppendAsync(sessionId, message, cancellationToken);
+        await eventBroadcaster.TranscriptMessageAppendedAsync(sessionId, message, cancellationToken);
+    }
+
+    private sealed record ModeratorSummaryResult(TranscriptMessage Message, bool WasStreamed);
+    private sealed record ModeratorSummaryRunResult(string Summary, bool WasStreamed, Guid MessageId);
+    private sealed record StreamedSummaryResult(string Summary, bool WasStreamed, Guid MessageId);
+
+    private async Task<ModeratorSummaryResult?> CreateModeratorSummaryMessageAsync(
         SessionState session,
         TruthMapState map,
         IReadOnlyList<AgentExecutionResult> results,
@@ -530,8 +612,8 @@ public class SessionService(
             .ToList();
 
         var summaryAgent = ResolveOptionalAgent(AgentId.SynthesisValidation);
-        var summary = summaryAgent is null
-            ? BuildFallbackModeratorSummary(successful)
+        var summaryResult = summaryAgent is null
+            ? new ModeratorSummaryRunResult(BuildFallbackModeratorSummary(successful), false, Guid.NewGuid())
             : await TryBuildAgentModeratorSummaryAsync(
                 summaryAgent,
                 session,
@@ -540,17 +622,17 @@ public class SessionService(
                 correlationId,
                 cancellationToken);
 
-        if (string.IsNullOrWhiteSpace(summary))
+        if (string.IsNullOrWhiteSpace(summaryResult.Summary))
         {
             return null;
         }
 
-        var structuredSummary = EnsureModeratorSummaryStructure(summary, successful);
+        var structuredSummary = EnsureModeratorSummaryStructure(summaryResult.Summary, successful);
         var enrichedSummary = EnsureAgentSummaries(structuredSummary, successful);
 
-        return new TranscriptMessage
+        return new ModeratorSummaryResult(new TranscriptMessage
         {
-            Id = Guid.NewGuid(),
+            Id = summaryResult.MessageId,
             SessionId = session.SessionId,
             Type = TranscriptMessageType.Agent,
             AgentId = PresentableAgentId(AgentId.SynthesisValidation),
@@ -558,10 +640,10 @@ public class SessionService(
             Round = session.RoundNumber,
             IsStreaming = false,
             CreatedAtUtc = DateTimeOffset.UtcNow
-        };
+        }, summaryResult.WasStreamed);
     }
 
-    private async Task<string> TryBuildAgentModeratorSummaryAsync(
+    private async Task<ModeratorSummaryRunResult> TryBuildAgentModeratorSummaryAsync(
         ICouncilAgent summaryAgent,
         SessionState session,
         TruthMapState map,
@@ -601,10 +683,26 @@ public class SessionService(
 
         try
         {
+            var streamed = await StreamModeratorSummaryAsync(
+                session,
+                summaryAgent,
+                context,
+                cancellationToken);
+            if (!string.IsNullOrWhiteSpace(streamed.Summary))
+            {
+                return new ModeratorSummaryRunResult(streamed.Summary.Trim(), streamed.WasStreamed, streamed.MessageId);
+            }
+
             var response = await summaryAgent.RunAsync(context, cancellationToken);
             if (!string.IsNullOrWhiteSpace(response.Message))
             {
-                return response.Message.Trim();
+                var fallbackId = Guid.NewGuid();
+                await StreamSummaryFromTextAsync(
+                    session,
+                    response.Message.Trim(),
+                    fallbackId,
+                    cancellationToken);
+                return new ModeratorSummaryRunResult(response.Message.Trim(), true, fallbackId);
             }
         }
         catch (Exception exception)
@@ -617,7 +715,117 @@ public class SessionService(
                 correlationId);
         }
 
-        return BuildFallbackModeratorSummary(successful);
+        return new ModeratorSummaryRunResult(BuildFallbackModeratorSummary(successful), false, Guid.NewGuid());
+    }
+
+    private async Task<StreamedSummaryResult> StreamModeratorSummaryAsync(
+        SessionState session,
+        ICouncilAgent summaryAgent,
+        AgentContext context,
+        CancellationToken cancellationToken)
+    {
+        var buffer = new System.Text.StringBuilder();
+        var messageId = Guid.NewGuid();
+        var agentId = PresentableAgentId(AgentId.SynthesisValidation);
+        var lastEmissionLength = 0;
+        var emitted = false;
+
+        var chunkCount = 0;
+        await foreach (var chunk in summaryAgent.RunStreamingAsync(context, cancellationToken))
+        {
+            if (string.IsNullOrWhiteSpace(chunk))
+            {
+                continue;
+            }
+
+            buffer.Append(chunk);
+            chunkCount++;
+
+            if (chunkCount == 1)
+            {
+                continue;
+            }
+            var current = buffer.ToString();
+            if (current.Length < 20)
+            {
+                continue;
+            }
+
+            if (current.Length - lastEmissionLength < 20 && !current.EndsWith('\n'))
+            {
+                continue;
+            }
+
+            lastEmissionLength = current.Length;
+
+            var partialMessage = new TranscriptMessage
+            {
+                Id = messageId,
+                SessionId = session.SessionId,
+                Type = TranscriptMessageType.Agent,
+                AgentId = agentId,
+                Content = current.TrimEnd(),
+                Round = session.RoundNumber,
+                IsStreaming = true,
+                CreatedAtUtc = DateTimeOffset.UtcNow
+            };
+            await eventBroadcaster.TranscriptMessageAppendedAsync(session.SessionId, partialMessage, cancellationToken);
+            emitted = true;
+        }
+
+        if (!emitted && buffer.Length > 0)
+        {
+            var segments = BuildStreamingSegments(buffer.ToString());
+            for (var index = 0; index < segments.Count - 1; index++)
+            {
+                var partialMessage = new TranscriptMessage
+                {
+                    Id = messageId,
+                    SessionId = session.SessionId,
+                    Type = TranscriptMessageType.Agent,
+                    AgentId = agentId,
+                    Content = segments[index],
+                    Round = session.RoundNumber,
+                    IsStreaming = true,
+                    CreatedAtUtc = DateTimeOffset.UtcNow
+                };
+                await eventBroadcaster.TranscriptMessageAppendedAsync(session.SessionId, partialMessage, cancellationToken);
+                await Task.Delay(StreamingChunkDelayMilliseconds, cancellationToken);
+                emitted = true;
+            }
+        }
+
+        return new StreamedSummaryResult(buffer.ToString(), emitted, messageId);
+    }
+
+    private async Task StreamSummaryFromTextAsync(
+        SessionState session,
+        string summary,
+        Guid messageId,
+        CancellationToken cancellationToken)
+    {
+        var segments = BuildStreamingSegments(summary);
+        if (segments.Count <= 1)
+        {
+            return;
+        }
+
+        for (var index = 0; index < segments.Count - 1; index++)
+        {
+            var partialMessage = new TranscriptMessage
+            {
+                Id = messageId,
+                SessionId = session.SessionId,
+                Type = TranscriptMessageType.Agent,
+                AgentId = PresentableAgentId(AgentId.SynthesisValidation),
+                Content = segments[index],
+                Round = session.RoundNumber,
+                IsStreaming = true,
+                CreatedAtUtc = DateTimeOffset.UtcNow
+            };
+            await eventBroadcaster.TranscriptMessageAppendedAsync(session.SessionId, partialMessage, cancellationToken);
+            await Task.Delay(StreamingChunkDelayMilliseconds, cancellationToken);
+        }
     }
 
     private static string BuildFallbackModeratorSummary(IReadOnlyList<AgentExecutionResult> successful)

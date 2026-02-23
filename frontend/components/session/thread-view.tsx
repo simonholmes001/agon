@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { ArrowDown, Loader2 } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -41,14 +41,21 @@ function normalizeAgentId(agentId: string | undefined): AgentId | undefined {
     : undefined;
 }
 
-function isModeratorAgentMessage(message: ThreadViewMessage): boolean {
+function isModeratorAgentMessage(message: ThreadViewMessage, phase: SessionPhase): boolean {
   if (message.type !== "agent") return false;
-  return normalizeAgentId(message.agentId) === MODERATOR_AGENT_ID;
+  const normalized = normalizeAgentId(message.agentId);
+  if (normalized === MODERATOR_AGENT_ID) return true;
+  if (phase === "CLARIFICATION" && normalized === "socratic-clarifier") return true;
+  return false;
 }
 
 function shouldHideSystemMessage(content: string): boolean {
   const normalized = content.trim().toLowerCase();
-  return normalized.startsWith("moderator routed follow-up");
+  return normalized.startsWith("moderator routed follow-up")
+    || normalized.startsWith("round 1 started")
+    || normalized.startsWith("round 2 started")
+    || normalized.startsWith("round 1 complete")
+    || normalized.startsWith("round 2 complete");
 }
 
 export default function ThreadView({
@@ -65,7 +72,7 @@ export default function ThreadView({
   const bottomRef = useRef<HTMLDivElement>(null);
   const [autoScrollEnabled, setAutoScrollEnabled] = useState(true);
   const [hasUserScrolled, setHasUserScrolled] = useState(false);
-  const lastScrollTopRef = useRef(0);
+  const [processingStepIndex, setProcessingStepIndex] = useState(0);
 
   useEffect(() => {
     if (!autoScrollEnabled) return;
@@ -76,11 +83,19 @@ export default function ThreadView({
     const viewport = viewportRef.current;
     if (!viewport) return;
 
-    const currentTop = viewport.scrollTop;
-    const scrolledUp = currentTop < lastScrollTopRef.current;
-    lastScrollTopRef.current = currentTop;
+    const distanceFromBottom = viewport.scrollHeight - (viewport.scrollTop + viewport.clientHeight);
+    const isAtBottom = distanceFromBottom <= 24;
+    const userBreakThreshold = 120;
 
-    if (scrolledUp && autoScrollEnabled) {
+    if (isAtBottom) {
+      if (!autoScrollEnabled) {
+        setAutoScrollEnabled(true);
+        setHasUserScrolled(false);
+      }
+      return;
+    }
+
+    if (autoScrollEnabled && distanceFromBottom > userBreakThreshold) {
       setAutoScrollEnabled(false);
       setHasUserScrolled(true);
     }
@@ -117,15 +132,9 @@ export default function ThreadView({
 
   const phaseLabel = PHASE_LABELS[phase] ?? "In progress";
 
-  const realtimeMessage =
-    realtimeStatus === "connected"
-      ? "Live council updates connected."
-      : realtimeStatus === "unavailable"
-        ? "Real-time updates unavailable. Showing latest backend snapshot."
-        : "Connecting to real-time updates…";
   const visibleMessages = messages.filter((message) => {
     if (message.type === "agent") {
-      return isModeratorAgentMessage(message);
+      return isModeratorAgentMessage(message, phase);
     }
 
     if (message.type === "system") {
@@ -141,18 +150,11 @@ export default function ThreadView({
   const hasModeratorSummary = messages.some(
     (message) => normalizeAgentId(message.agentId) === MODERATOR_AGENT_ID,
   );
-  const shouldShowSummaryPending = hasAnyAgentMessages && !hasModeratorSummary;
   const shouldShowProcessingIndicator =
-    (roundStartState === "starting" && !hasAnyAgentMessages) || pendingFollowUp;
-  const roundStartMessage =
-    roundStartState === "starting"
-      ? "Launching Round 1. Agent responses will stream here as they complete."
-      : roundStartState === "started"
-        ? "Round complete. Review the moderator synthesis below, then challenge one point in the moderator channel."
-      : roundStartState === "failed"
-        ? "Round start failed. Please retry from this session."
-        : null;
-
+    (roundStartState === "starting" && !hasAnyAgentMessages)
+    || pendingFollowUp
+    || (!hasAnyAgentMessages && (phase === "POST_DELIVERY" || phase === "CLARIFICATION"))
+    || (hasAnyAgentMessages && !hasModeratorSummary);
   const showJumpToLatest = hasVisibleMessages && hasUserScrolled && !autoScrollEnabled;
 
   const handleJumpToLatest = () => {
@@ -160,6 +162,52 @@ export default function ThreadView({
     setHasUserScrolled(false);
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   };
+
+  const processingSteps = useMemo(() => {
+    if (pendingFollowUp) {
+      return [
+        "Moderator is reviewing your follow-up question…",
+        "Moderator is drafting the response…",
+        "Moderator is preparing the streamed summary…",
+      ];
+    }
+
+    if (phase === "CLARIFICATION") {
+      return [
+        "Socratic Clarifier is reviewing your question…",
+        "Socratic Clarifier is drafting clarifying questions…",
+      ];
+    }
+
+    if (phase === "POST_DELIVERY") {
+      return [
+        "Moderator is reviewing your proposal…",
+        "Moderator is synthesizing the council output…",
+        "Moderator is refining recommendations…",
+      ];
+    }
+
+    return [
+      "Agent 1 (Framing Challenger) is stress-testing your proposal…",
+      "Agent 2 (Product Strategist) is shaping the MVP scope…",
+      "Agent 3 (Technical Architect) is outlining the system design…",
+      "Agent 4 (Contrarian) is probing risks and failure modes…",
+      "Agent 5 (Research Librarian) is gathering evidence…",
+      "Moderator is synthesizing the council output…",
+    ];
+  }, [pendingFollowUp, phase]);
+
+  useEffect(() => {
+    if (!shouldShowProcessingIndicator) return;
+    setProcessingStepIndex(0);
+    if (processingSteps.length <= 1) return;
+
+    const interval = setInterval(() => {
+      setProcessingStepIndex((current) => (current + 1) % processingSteps.length);
+    }, 1600);
+
+    return () => clearInterval(interval);
+  }, [shouldShowProcessingIndicator, processingSteps]);
 
   return (
     <div className="relative flex h-full min-h-0 flex-1">
@@ -179,40 +227,28 @@ export default function ThreadView({
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.08, duration: 0.35, ease: "easeOut" as const }}
-            className="rounded-2xl border border-border/50 bg-card/60 p-4 backdrop-blur-sm sm:p-5"
+            className="rounded-2xl border border-border/40 bg-card/60 p-4 backdrop-blur-sm sm:p-5"
           >
             <p className="text-xs uppercase tracking-wide text-muted-foreground">
               Current Phase
             </p>
             <p className="mt-1 text-sm font-medium">{phaseLabel}</p>
-
-            <p className="mt-4 text-xs uppercase tracking-wide text-muted-foreground">
-              Core Idea From Backend
-            </p>
-            <p className="mt-1 text-sm leading-relaxed text-foreground/90">
-              {coreIdea || "No core idea has been returned yet."}
-            </p>
           </motion.div>
 
-          <motion.div
-            key="realtime-status"
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.14, duration: 0.35, ease: "easeOut" as const }}
-          >
-            <SystemMessage content={realtimeMessage} />
-          </motion.div>
-
-          {roundStartMessage ? (
+          {coreIdea ? (
             <motion.div
-              key="round-start-status"
+              key="core-question"
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.18, duration: 0.35, ease: "easeOut" as const }}
-              className="rounded-2xl border border-primary/20 bg-primary/5 p-4 sm:p-5"
+              transition={{ delay: 0.12, duration: 0.35, ease: "easeOut" as const }}
+              className="flex justify-end"
             >
-              <p className="text-sm font-medium">Council launch status</p>
-              <p className="mt-1 text-sm text-muted-foreground">{roundStartMessage}</p>
+              <div className="max-w-[85%] rounded-2xl border border-amber-200/70 bg-gradient-to-br from-amber-50 via-rose-50 to-emerald-50 px-4 py-3 text-sm text-foreground shadow-sm dark:border-amber-400/30 dark:from-amber-500/15 dark:via-slate-950/70 dark:to-emerald-500/15">
+                <p className="text-xs font-semibold uppercase tracking-wide text-amber-700/80 dark:text-amber-200/80">
+                  Your question
+                </p>
+                <p className="mt-1 text-sm leading-relaxed">{coreIdea}</p>
+              </div>
             </motion.div>
           ) : null}
 
@@ -256,7 +292,9 @@ export default function ThreadView({
               }
 
               if (message.type === "agent" && normalizedAgentId) {
-                const isModeratorSummary = normalizedAgentId === MODERATOR_AGENT_ID;
+                const isModeratorSummary =
+                  normalizedAgentId === MODERATOR_AGENT_ID
+                  || (phase === "CLARIFICATION" && normalizedAgentId === "socratic-clarifier");
                 return (
                   <motion.div
                     key={key}
@@ -294,10 +332,9 @@ export default function ThreadView({
                 transition={{ delay: 0.2, duration: 0.35, ease: "easeOut" as const }}
                 className="rounded-2xl border border-dashed border-border/60 bg-card/40 p-4 sm:p-5"
               >
-                <p className="text-sm font-medium">Awaiting agent transcript</p>
+                <p className="text-sm font-medium">Awaiting moderator response</p>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  No agent transcript has been streamed yet. This view now reflects
-                  live backend state and no longer uses frontend mock responses.
+                  The moderator response will stream here as soon as it is available.
                 </p>
               </motion.div>
             )}
@@ -308,37 +345,25 @@ export default function ThreadView({
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.22, duration: 0.35, ease: "easeOut" as const }}
-              className="rounded-2xl border border-primary/20 bg-primary/5 p-4 sm:p-5"
+              className="rounded-2xl border border-emerald-200/60 bg-gradient-to-br from-emerald-50 via-amber-50/70 to-rose-50/60 p-4 sm:p-5 dark:border-emerald-400/20 dark:from-emerald-500/10 dark:via-slate-950/60 dark:to-amber-500/10"
             >
               <div className="flex items-center gap-3">
-                <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/10">
-                  <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                <div className="flex h-9 w-9 items-center justify-center rounded-full bg-emerald-100/80 dark:bg-emerald-500/10">
+                  <Loader2 className="h-4 w-4 animate-spin text-emerald-700 dark:text-emerald-200" />
                 </div>
                 <div>
-                  <p className="text-sm font-medium">Council is processing</p>
+                  <p className="text-sm font-medium text-foreground">Council is processing</p>
                   <p className="text-sm text-muted-foreground">
-                    Waiting for the first streaming response to arrive.
+                    Streaming starts as soon as the moderator begins responding.
                   </p>
                 </div>
               </div>
-              <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-primary/10">
-                <div className="h-full w-1/3 animate-pulse rounded-full bg-primary/40" />
+              <div className="mt-3 rounded-xl border border-emerald-200/50 bg-background/70 px-3 py-2 text-sm text-foreground/80 dark:border-emerald-500/20">
+                {processingSteps[processingStepIndex] ?? "Council is preparing a response…"}
               </div>
-            </motion.div>
-          ) : null}
-
-          {shouldShowSummaryPending ? (
-            <motion.div
-              key="summary-pending"
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.22, duration: 0.35, ease: "easeOut" as const }}
-              className="rounded-2xl border border-agent-synthesis/25 bg-agent-synthesis/5 p-4 sm:p-5"
-            >
-              <p className="text-sm font-semibold">Moderator synthesis pending</p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                The moderator is consolidating the council responses into a single summary.
-              </p>
+              <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-emerald-200/50 dark:bg-emerald-500/10">
+                <div className="h-full w-1/3 animate-pulse rounded-full bg-emerald-400/70 dark:bg-emerald-300/40" />
+              </div>
             </motion.div>
           ) : null}
 
