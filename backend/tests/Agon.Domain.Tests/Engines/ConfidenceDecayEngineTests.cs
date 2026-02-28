@@ -177,7 +177,7 @@ public class ConfidenceDecayEngineTests
         return new Claim
         {
             Id = id,
-            Agent = "product_strategist",
+            Agent = "gpt_agent",
             Round = round,
             Text = "Test claim.",
             Confidence = confidence

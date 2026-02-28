@@ -6,15 +6,13 @@ namespace Agon.Domain.Tests.Agents;
 public class AgentIdTests
 {
     [Fact]
-    public void AgentId_ContainsAllSevenCouncilAgents()
+    public void AgentId_ContainsAllFiveCouncilAgents()
     {
-        AgentId.SocraticClarifier.Should().Be("socratic_clarifier");
-        AgentId.FramingChallenger.Should().Be("framing_challenger");
-        AgentId.ProductStrategist.Should().Be("product_strategist");
-        AgentId.TechnicalArchitect.Should().Be("technical_architect");
-        AgentId.Contrarian.Should().Be("contrarian");
-        AgentId.ResearchLibrarian.Should().Be("research_librarian");
-        AgentId.SynthesisValidation.Should().Be("synthesis_validation");
+        AgentId.Moderator.Should().Be("moderator");
+        AgentId.GptAgent.Should().Be("gpt_agent");
+        AgentId.GeminiAgent.Should().Be("gemini_agent");
+        AgentId.ClaudeAgent.Should().Be("claude_agent");
+        AgentId.Synthesizer.Should().Be("synthesizer");
     }
 
     [Fact]
@@ -30,23 +28,35 @@ public class AgentIdTests
     }
 
     [Fact]
-    public void AgentId_All_ReturnsAllSevenCouncilAgents()
+    public void AgentId_All_ReturnsAllFiveCouncilAgents()
     {
         var all = AgentId.AllCouncil;
 
-        all.Should().HaveCount(7);
-        all.Should().Contain(AgentId.SocraticClarifier);
-        all.Should().Contain(AgentId.FramingChallenger);
-        all.Should().Contain(AgentId.ProductStrategist);
-        all.Should().Contain(AgentId.TechnicalArchitect);
-        all.Should().Contain(AgentId.Contrarian);
-        all.Should().Contain(AgentId.ResearchLibrarian);
-        all.Should().Contain(AgentId.SynthesisValidation);
+        all.Should().HaveCount(5);
+        all.Should().Contain(AgentId.Moderator);
+        all.Should().Contain(AgentId.GptAgent);
+        all.Should().Contain(AgentId.GeminiAgent);
+        all.Should().Contain(AgentId.ClaudeAgent);
+        all.Should().Contain(AgentId.Synthesizer);
+    }
+
+    [Fact]
+    public void AgentId_WorkingAgents_ReturnsThreeWorkingAgents()
+    {
+        var working = AgentId.WorkingAgents;
+
+        working.Should().HaveCount(3);
+        working.Should().Contain(AgentId.GptAgent);
+        working.Should().Contain(AgentId.GeminiAgent);
+        working.Should().Contain(AgentId.ClaudeAgent);
     }
 
     [Theory]
-    [InlineData("socratic_clarifier", true)]
-    [InlineData("contrarian", true)]
+    [InlineData("moderator", true)]
+    [InlineData("gpt_agent", true)]
+    [InlineData("gemini_agent", true)]
+    [InlineData("claude_agent", true)]
+    [InlineData("synthesizer", true)]
     [InlineData("orchestrator", false)]
     [InlineData("user", false)]
     [InlineData("unknown_agent", false)]

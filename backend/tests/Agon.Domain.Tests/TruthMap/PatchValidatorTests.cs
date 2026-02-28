@@ -6,7 +6,7 @@ namespace Agon.Domain.Tests.TruthMap;
 
 public class PatchValidatorTests
 {
-    private static TruthMapState CreateMapWithClaim(string claimId = "c1", string agent = "product_strategist")
+    private static TruthMapState CreateMapWithClaim(string claimId = "c1", string agent = "gpt_agent")
     {
         var map = TruthMapState.CreateNew(Guid.NewGuid());
         map.Claims.Add(new Claim
@@ -41,7 +41,7 @@ public class PatchValidatorTests
     public void Validate_RejectsReplace_OnNonExistentEntity()
     {
         var map = TruthMapState.CreateNew(Guid.NewGuid());
-        var patch = CreatePatch("contrarian", 1,
+        var patch = CreatePatch("claude_agent", 1,
             new PatchOperation
             {
                 Op = PatchOperationType.Replace,
@@ -59,7 +59,7 @@ public class PatchValidatorTests
     public void Validate_RejectsRemove_OnNonExistentEntity()
     {
         var map = TruthMapState.CreateNew(Guid.NewGuid());
-        var patch = CreatePatch("contrarian", 1,
+        var patch = CreatePatch("claude_agent", 1,
             new PatchOperation
             {
                 Op = PatchOperationType.Remove,
@@ -76,7 +76,7 @@ public class PatchValidatorTests
     public void Validate_AllowsAdd_ForNewEntity()
     {
         var map = TruthMapState.CreateNew(Guid.NewGuid());
-        var patch = CreatePatch("product_strategist", 1,
+        var patch = CreatePatch("gpt_agent", 1,
             new PatchOperation
             {
                 Op = PatchOperationType.Add,
@@ -84,7 +84,7 @@ public class PatchValidatorTests
                 Value = new Claim
                 {
                     Id = "c_new",
-                    Agent = "product_strategist",
+                    Agent = "gpt_agent",
                     Round = 1,
                     Text = "New claim.",
                     Confidence = 0.7f
@@ -102,7 +102,7 @@ public class PatchValidatorTests
     public void Validate_RejectsReplace_WhenPathEntityIdDoesNotMatchValueId()
     {
         var map = CreateMapWithClaim("c1");
-        var patch = CreatePatch("product_strategist", 1,
+        var patch = CreatePatch("gpt_agent", 1,
             new PatchOperation
             {
                 Op = PatchOperationType.Replace,
@@ -110,7 +110,7 @@ public class PatchValidatorTests
                 Value = new Claim
                 {
                     Id = "c_wrong",
-                    Agent = "product_strategist",
+                    Agent = "gpt_agent",
                     Round = 1,
                     Text = "Updated text.",
                     Confidence = 0.9f
@@ -127,7 +127,7 @@ public class PatchValidatorTests
     public void Validate_RejectsReplace_WhenIndexTargetDoesNotMatchValueId()
     {
         var map = CreateMapWithClaim("c1");
-        var patch = CreatePatch("product_strategist", 1,
+        var patch = CreatePatch("gpt_agent", 1,
             new PatchOperation
             {
                 Op = PatchOperationType.Replace,
@@ -135,7 +135,7 @@ public class PatchValidatorTests
                 Value = new Claim
                 {
                     Id = "c_wrong",
-                    Agent = "product_strategist",
+                    Agent = "gpt_agent",
                     Round = 1,
                     Text = "Updated text.",
                     Confidence = 0.9f
@@ -153,8 +153,8 @@ public class PatchValidatorTests
     [Fact]
     public void Validate_RejectsTextModification_ByDifferentAgent()
     {
-        var map = CreateMapWithClaim("c1", "product_strategist");
-        var patch = CreatePatch("contrarian", 1,
+        var map = CreateMapWithClaim("c1", "gpt_agent");
+        var patch = CreatePatch("claude_agent", 1,
             new PatchOperation
             {
                 Op = PatchOperationType.Replace,
@@ -171,8 +171,8 @@ public class PatchValidatorTests
     [Fact]
     public void Validate_AllowsTextModification_BySameAgent()
     {
-        var map = CreateMapWithClaim("c1", "product_strategist");
-        var patch = CreatePatch("product_strategist", 2,
+        var map = CreateMapWithClaim("c1", "gpt_agent");
+        var patch = CreatePatch("gpt_agent", 2,
             new PatchOperation
             {
                 Op = PatchOperationType.Replace,
@@ -188,8 +188,8 @@ public class PatchValidatorTests
     [Fact]
     public void Validate_AllowsChallengedByAddition_ByDifferentAgent()
     {
-        var map = CreateMapWithClaim("c1", "product_strategist");
-        var patch = CreatePatch("contrarian", 1,
+        var map = CreateMapWithClaim("c1", "gpt_agent");
+        var patch = CreatePatch("claude_agent", 1,
             new PatchOperation
             {
                 Op = PatchOperationType.Add,
@@ -205,8 +205,8 @@ public class PatchValidatorTests
     [Fact]
     public void Validate_AllowsStatusChange_ByDifferentAgent()
     {
-        var map = CreateMapWithClaim("c1", "product_strategist");
-        var patch = CreatePatch("contrarian", 1,
+        var map = CreateMapWithClaim("c1", "gpt_agent");
+        var patch = CreatePatch("claude_agent", 1,
             new PatchOperation
             {
                 Op = PatchOperationType.Replace,
@@ -222,8 +222,8 @@ public class PatchValidatorTests
     [Fact]
     public void Validate_AllowsIndexBasedPath_ForExistingEntity()
     {
-        var map = CreateMapWithClaim("c1", "product_strategist");
-        var patch = CreatePatch("contrarian", 1,
+        var map = CreateMapWithClaim("c1", "gpt_agent");
+        var patch = CreatePatch("claude_agent", 1,
             new PatchOperation
             {
                 Op = PatchOperationType.Replace,
@@ -239,8 +239,8 @@ public class PatchValidatorTests
     [Fact]
     public void Validate_RejectsIndexBasedPath_WhenOutOfRange()
     {
-        var map = CreateMapWithClaim("c1", "product_strategist");
-        var patch = CreatePatch("contrarian", 1,
+        var map = CreateMapWithClaim("c1", "gpt_agent");
+        var patch = CreatePatch("claude_agent", 1,
             new PatchOperation
             {
                 Op = PatchOperationType.Replace,
@@ -257,8 +257,8 @@ public class PatchValidatorTests
     [Fact]
     public void Validate_RejectsCrossAgentTextModification_ForIndexBasedPath()
     {
-        var map = CreateMapWithClaim("c1", "product_strategist");
-        var patch = CreatePatch("contrarian", 1,
+        var map = CreateMapWithClaim("c1", "gpt_agent");
+        var patch = CreatePatch("claude_agent", 1,
             new PatchOperation
             {
                 Op = PatchOperationType.Replace,
@@ -276,7 +276,7 @@ public class PatchValidatorTests
     public void Validate_AllowsSingletonPath_WithoutEntityLookup()
     {
         var map = TruthMapState.CreateNew(Guid.NewGuid());
-        var patch = CreatePatch("socratic_clarifier", 1,
+        var patch = CreatePatch("moderator", 1,
             new PatchOperation
             {
                 Op = PatchOperationType.Replace,
@@ -301,9 +301,9 @@ public class PatchValidatorTests
             Id = "d1",
             Text = "Use Postgres.",
             Rationale = "",
-            Owner = "technical_architect"
+            Owner = "gpt_agent"
         };
-        var patch = CreatePatch("technical_architect", 1,
+        var patch = CreatePatch("gpt_agent", 1,
             new PatchOperation
             {
                 Op = PatchOperationType.Add,
@@ -326,9 +326,9 @@ public class PatchValidatorTests
             Id = "d1",
             Text = "Use Postgres.",
             Rationale = "Supports JSONB for Truth Map storage.",
-            Owner = "technical_architect"
+            Owner = "gpt_agent"
         };
-        var patch = CreatePatch("technical_architect", 1,
+        var patch = CreatePatch("gpt_agent", 1,
             new PatchOperation
             {
                 Op = PatchOperationType.Add,
@@ -354,7 +354,7 @@ public class PatchValidatorTests
             Text = "Users want this.",
             ValidationStep = null
         };
-        var patch = CreatePatch("product_strategist", 3,
+        var patch = CreatePatch("gpt_agent", 3,
             new PatchOperation
             {
                 Op = PatchOperationType.Add,
@@ -379,7 +379,7 @@ public class PatchValidatorTests
             Text = "Users want this.",
             ValidationStep = null
         };
-        var patch = CreatePatch("product_strategist", 1,
+        var patch = CreatePatch("gpt_agent", 1,
             new PatchOperation
             {
                 Op = PatchOperationType.Add,
@@ -403,7 +403,7 @@ public class PatchValidatorTests
             Text = "Users want this.",
             ValidationStep = "Run a survey."
         };
-        var patch = CreatePatch("product_strategist", 3,
+        var patch = CreatePatch("gpt_agent", 3,
             new PatchOperation
             {
                 Op = PatchOperationType.Add,
@@ -422,7 +422,7 @@ public class PatchValidatorTests
     public void Validate_AcceptsEmptyPatch()
     {
         var map = TruthMapState.CreateNew(Guid.NewGuid());
-        var patch = CreatePatch("product_strategist", 1);
+        var patch = CreatePatch("gpt_agent", 1);
 
         var result = PatchValidator.Validate(patch, map);
 
@@ -437,7 +437,7 @@ public class PatchValidatorTests
     {
         var map = TruthMapState.CreateNew(Guid.NewGuid());
         map.Round = 3;
-        var patch = CreatePatch("contrarian", 3,
+        var patch = CreatePatch("claude_agent", 3,
             new PatchOperation
             {
                 Op = PatchOperationType.Remove,
@@ -453,7 +453,7 @@ public class PatchValidatorTests
                     Id = "d1",
                     Text = "Bad decision.",
                     Rationale = "",
-                    Owner = "contrarian"
+                    Owner = "claude_agent"
                 }
             });
 

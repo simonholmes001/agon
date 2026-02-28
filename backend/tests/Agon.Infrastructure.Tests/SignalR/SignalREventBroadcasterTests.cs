@@ -24,14 +24,14 @@ public class SignalREventBroadcasterTests
         hubClients.Group(DebateHub.SessionGroupName(sessionId)).Returns(proxy);
         var sut = new SignalREventBroadcaster(hubContext, NullLogger<SignalREventBroadcaster>.Instance);
 
-        await sut.RoundProgressAsync(sessionId, SessionPhase.DebateRound1, cancellationToken);
+        await sut.RoundProgressAsync(sessionId, SessionPhase.DraftRound1, cancellationToken);
 
         await proxy.Received(1).SendCoreAsync(
             "RoundProgress",
             Arg.Is<object?[]>(args =>
                 args.Length == 1
                 && HasProperty(args[0], "SessionId", sessionId)
-                && HasProperty(args[0], "Phase", SessionPhase.DebateRound1.ToString())),
+                && HasProperty(args[0], "Phase", SessionPhase.DraftRound1.ToString())),
             cancellationToken);
     }
 
@@ -43,7 +43,7 @@ public class SignalREventBroadcasterTests
         {
             Meta = new PatchMeta
             {
-                Agent = "socratic_clarifier",
+                Agent = "moderator",
                 Round = 1,
                 Reason = "add question",
                 SessionId = sessionId
@@ -88,7 +88,7 @@ public class SignalREventBroadcasterTests
             Id = Guid.NewGuid(),
             SessionId = sessionId,
             Type = TranscriptMessageType.Agent,
-            AgentId = "research-librarian",
+            AgentId = "moderator",
             Content = "Use customer discovery interviews.",
             Round = 1,
             IsStreaming = false,
@@ -111,7 +111,7 @@ public class SignalREventBroadcasterTests
                 args.Length == 1
                 && HasProperty(args[0], "Id", message.Id)
                 && HasProperty(args[0], "Type", "agent")
-                && HasProperty(args[0], "AgentId", "research-librarian")
+                && HasProperty(args[0], "AgentId", "moderator")
                 && HasProperty(args[0], "Content", message.Content)
                 && HasProperty(args[0], "Round", 1)
                 && HasProperty(args[0], "IsStreaming", false)),
@@ -131,7 +131,7 @@ public class SignalREventBroadcasterTests
             .Returns(_ => throw new InvalidOperationException("transport down"));
         var sut = new SignalREventBroadcaster(hubContext, NullLogger<SignalREventBroadcaster>.Instance);
 
-        var act = () => sut.RoundProgressAsync(sessionId, SessionPhase.DebateRound1, CancellationToken.None);
+        var act = () => sut.RoundProgressAsync(sessionId, SessionPhase.DraftRound1, CancellationToken.None);
 
         await act.Should().NotThrowAsync();
     }
@@ -144,7 +144,7 @@ public class SignalREventBroadcasterTests
         {
             Meta = new PatchMeta
             {
-                Agent = "contrarian",
+                Agent = "claude_agent",
                 SessionId = sessionId
             }
         };

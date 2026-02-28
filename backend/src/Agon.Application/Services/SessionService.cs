@@ -101,7 +101,7 @@ public class SessionService(
 
         if (session.Phase == SessionPhase.Clarification)
         {
-            orchestrator.StartDebateRound1(session);
+            orchestrator.StartDraftRound1(session);
             map.Round = session.RoundNumber;
             await truthMapRepository.UpdateAsync(map, cancellationToken);
             await eventBroadcaster.RoundProgressAsync(sessionId, session.Phase, cancellationToken);
@@ -246,7 +246,7 @@ public class SessionService(
 
             var shouldSummarize = session.Phase == SessionPhase.PostDelivery
                 && results.Any(result =>
-                    CanonicalizeAgentId(result.AgentId) != CanonicalizeAgentId(AgentId.SynthesisValidation));
+                    CanonicalizeAgentId(result.AgentId) != CanonicalizeAgentId(AgentId.Synthesizer));
             if (shouldSummarize)
             {
                 var summaryMessage = await CreateModeratorSummaryMessageAsync(
@@ -611,7 +611,7 @@ public class SessionService(
             .Where(result => !string.IsNullOrWhiteSpace(result.Message))
             .ToList();
 
-        var summaryAgent = ResolveOptionalAgent(AgentId.SynthesisValidation);
+        var summaryAgent = ResolveOptionalAgent(AgentId.Synthesizer);
         var summaryResult = summaryAgent is null
             ? new ModeratorSummaryRunResult(BuildFallbackModeratorSummary(successful), false, Guid.NewGuid())
             : await TryBuildAgentModeratorSummaryAsync(
@@ -635,7 +635,7 @@ public class SessionService(
             Id = summaryResult.MessageId,
             SessionId = session.SessionId,
             Type = TranscriptMessageType.Agent,
-            AgentId = PresentableAgentId(AgentId.SynthesisValidation),
+            AgentId = PresentableAgentId(AgentId.Synthesizer),
             Content = enrichedSummary,
             Round = session.RoundNumber,
             IsStreaming = false,
@@ -726,7 +726,7 @@ public class SessionService(
     {
         var buffer = new System.Text.StringBuilder();
         var messageId = Guid.NewGuid();
-        var agentId = PresentableAgentId(AgentId.SynthesisValidation);
+        var agentId = PresentableAgentId(AgentId.Synthesizer);
         var lastEmissionLength = 0;
         var emitted = false;
 
@@ -786,7 +786,7 @@ public class SessionService(
                 Id = messageId,
                 SessionId = session.SessionId,
                 Type = TranscriptMessageType.Agent,
-                AgentId = PresentableAgentId(AgentId.SynthesisValidation),
+                AgentId = PresentableAgentId(AgentId.Synthesizer),
                 Content = segments[index],
                 Round = session.RoundNumber,
                 IsStreaming = true,
@@ -1227,7 +1227,7 @@ public class SessionService(
     {
         return phase switch
         {
-            SessionPhase.Clarification => [AgentId.SocraticClarifier],
+            SessionPhase.Clarification => [AgentId.Moderator],
             SessionPhase.PostDelivery => RoutePostDeliveryMessage(message),
             _ => throw new InvalidOperationException(
                 $"Messages are not accepted during phase '{phase}'. Allowed phases: Clarification, PostDelivery.")
@@ -1238,32 +1238,40 @@ public class SessionService(
     {
         var normalized = message.Trim().ToLowerInvariant();
 
+        // In the simplified architecture, we route to the most appropriate working agent
+        // based on the message content. All three agents can handle any topic but have
+        // different perspectives (GPT = initial analysis, Gemini = improvement, Claude = refinement).
+        
         if (ContainsAny(normalized, "architecture", "technical", "stack", "infra", "latency", "performance", "scalability"))
         {
-            return [AgentId.TechnicalArchitect, AgentId.Contrarian];
+            // Technical questions → GPT (broad analysis) + Claude (nuanced refinement)
+            return [AgentId.GptAgent, AgentId.ClaudeAgent];
         }
 
         if (ContainsAny(normalized, "risk", "threat", "failure", "concern", "red team"))
         {
-            return [AgentId.Contrarian, AgentId.TechnicalArchitect];
+            // Risk questions → Gemini (critical perspective) + Claude (balanced view)
+            return [AgentId.GeminiAgent, AgentId.ClaudeAgent];
         }
 
         if (ContainsAny(normalized, "research", "evidence", "source", "citation", "data"))
         {
-            return [AgentId.ResearchLibrarian, AgentId.ProductStrategist];
+            // Research questions → GPT (comprehensive) + Gemini (alternative perspectives)
+            return [AgentId.GptAgent, AgentId.GeminiAgent];
         }
 
         if (ContainsAny(normalized, "summar", "synthes", "recap"))
         {
-            return [AgentId.SynthesisValidation];
+            return [AgentId.Synthesizer];
         }
 
         if (ContainsAny(normalized, "clarify", "assumption", "question", "unclear"))
         {
-            return [AgentId.SocraticClarifier, AgentId.ProductStrategist];
+            return [AgentId.Moderator, AgentId.GptAgent];
         }
 
-        return [AgentId.ProductStrategist, AgentId.Contrarian];
+        // Default: GPT for comprehensive analysis, Gemini for alternative perspective
+        return [AgentId.GptAgent, AgentId.GeminiAgent];
     }
 
     private static bool ContainsAny(string text, params string[] terms) =>
@@ -1290,7 +1298,8 @@ public class SessionService(
     {
         var normalized = message.Trim().ToLowerInvariant();
         if (routedAgentIds.Any(agentId =>
-                CanonicalizeAgentId(agentId) == CanonicalizeAgentId(AgentId.TechnicalArchitect)))
+                CanonicalizeAgentId(agentId) == CanonicalizeAgentId(AgentId.GptAgent) ||
+                CanonicalizeAgentId(agentId) == CanonicalizeAgentId(AgentId.ClaudeAgent)))
         {
             return true;
         }

@@ -1,4 +1,5 @@
 using Agon.Domain.Agents;
+using Agon.Domain.Sessions;
 using FluentAssertions;
 
 namespace Agon.Domain.Tests.Agents;
@@ -6,85 +7,101 @@ namespace Agon.Domain.Tests.Agents;
 public class AgentSystemPromptsTests
 {
     [Fact]
-    public void SocraticClarifier_PromptContainsRoleAndGoldenTriangle()
+    public void Moderator_PromptContainsRoleAndGoldenTriangle()
     {
-        AgentSystemPrompts.SocraticClarifier.Should().Contain("Socratic Clarifier");
-        AgentSystemPrompts.SocraticClarifier.Should().Contain("Golden Triangle");
-        AgentSystemPrompts.SocraticClarifier.Should().Contain("Debate Brief");
+        AgentSystemPrompts.Moderator.Should().Contain("Moderator");
+        AgentSystemPrompts.Moderator.Should().Contain("Golden Triangle");
+        AgentSystemPrompts.Moderator.Should().Contain("Debate Brief");
     }
 
     [Fact]
-    public void FramingChallenger_PromptContainsRoleAndReframe()
+    public void GptAgentDraft_PromptContainsRoleAndAnalysis()
     {
-        AgentSystemPrompts.FramingChallenger.Should().Contain("Framing Challenger");
-        AgentSystemPrompts.FramingChallenger.Should().Contain("reframe");
-        AgentSystemPrompts.FramingChallenger.Should().Contain("problem definition");
+        AgentSystemPrompts.GptAgentDraft.Should().Contain("Initial Analyst");
+        AgentSystemPrompts.GptAgentDraft.Should().Contain("comprehensive analysis");
+        AgentSystemPrompts.GptAgentDraft.Should().Contain("foundation");
     }
 
     [Fact]
-    public void ProductStrategist_PromptContainsRoleAndMvp()
+    public void GeminiAgentImprove_PromptContainsRoleAndImprovement()
     {
-        AgentSystemPrompts.ProductStrategist.Should().Contain("Product Strategist");
-        AgentSystemPrompts.ProductStrategist.Should().Contain("MVP");
+        AgentSystemPrompts.GeminiAgentImprove.Should().Contain("Draft Improver");
+        AgentSystemPrompts.GeminiAgentImprove.Should().Contain("Improve");
+        AgentSystemPrompts.GeminiAgentImprove.Should().Contain("DELTA");
     }
 
     [Fact]
-    public void TechnicalArchitect_PromptContainsRoleAndArchitecture()
+    public void ClaudeAgentRefine_PromptContainsRoleAndRefinement()
     {
-        AgentSystemPrompts.TechnicalArchitect.Should().Contain("Technical Architect");
-        AgentSystemPrompts.TechnicalArchitect.Should().Contain("architecture");
+        AgentSystemPrompts.ClaudeAgentRefine.Should().Contain("Draft Refiner");
+        AgentSystemPrompts.ClaudeAgentRefine.Should().Contain("polished");
+        AgentSystemPrompts.ClaudeAgentRefine.Should().Contain("harmonise");
     }
 
     [Fact]
-    public void Contrarian_PromptContainsRoleAndFailureModes()
+    public void CritiqueMode_PromptContainsRoleAndCritique()
     {
-        AgentSystemPrompts.Contrarian.Should().Contain("Contrarian");
-        AgentSystemPrompts.Contrarian.Should().Contain("fail");
+        AgentSystemPrompts.CritiqueMode.Should().Contain("Critic");
+        AgentSystemPrompts.CritiqueMode.Should().Contain("critique");
+        AgentSystemPrompts.CritiqueMode.Should().Contain("weaknesses");
     }
 
     [Fact]
-    public void ResearchLibrarian_PromptContainsRoleAndEvidence()
+    public void Synthesizer_PromptContainsRoleAndConvergence()
     {
-        AgentSystemPrompts.ResearchLibrarian.Should().Contain("Research Librarian");
-        AgentSystemPrompts.ResearchLibrarian.Should().Contain("evidence");
-    }
-
-    [Fact]
-    public void SynthesisValidation_PromptContainsRoleAndConvergence()
-    {
-        AgentSystemPrompts.SynthesisValidation.Should().Contain("Synthesis");
-        AgentSystemPrompts.SynthesisValidation.Should().Contain("convergence");
+        AgentSystemPrompts.Synthesizer.Should().Contain("Synthesizer");
+        AgentSystemPrompts.Synthesizer.Should().Contain("convergence");
     }
 
     [Fact]
     public void AllPrompts_AreNonEmptyStrings()
     {
-        AgentSystemPrompts.SocraticClarifier.Should().NotBeNullOrWhiteSpace();
-        AgentSystemPrompts.FramingChallenger.Should().NotBeNullOrWhiteSpace();
-        AgentSystemPrompts.ProductStrategist.Should().NotBeNullOrWhiteSpace();
-        AgentSystemPrompts.TechnicalArchitect.Should().NotBeNullOrWhiteSpace();
-        AgentSystemPrompts.Contrarian.Should().NotBeNullOrWhiteSpace();
-        AgentSystemPrompts.ResearchLibrarian.Should().NotBeNullOrWhiteSpace();
-        AgentSystemPrompts.SynthesisValidation.Should().NotBeNullOrWhiteSpace();
+        AgentSystemPrompts.Moderator.Should().NotBeNullOrWhiteSpace();
+        AgentSystemPrompts.GptAgentDraft.Should().NotBeNullOrWhiteSpace();
+        AgentSystemPrompts.GeminiAgentImprove.Should().NotBeNullOrWhiteSpace();
+        AgentSystemPrompts.ClaudeAgentRefine.Should().NotBeNullOrWhiteSpace();
+        AgentSystemPrompts.CritiqueMode.Should().NotBeNullOrWhiteSpace();
+        AgentSystemPrompts.Synthesizer.Should().NotBeNullOrWhiteSpace();
     }
 
     [Fact]
     public void AllPrompts_ContainPatchRules()
     {
-        AgentSystemPrompts.SocraticClarifier.Should().Contain("PATCH");
-        AgentSystemPrompts.FramingChallenger.Should().Contain("PATCH");
-        AgentSystemPrompts.ProductStrategist.Should().Contain("PATCH");
-        AgentSystemPrompts.TechnicalArchitect.Should().Contain("PATCH");
-        AgentSystemPrompts.Contrarian.Should().Contain("PATCH");
-        AgentSystemPrompts.ResearchLibrarian.Should().Contain("PATCH");
-        AgentSystemPrompts.SynthesisValidation.Should().Contain("PATCH");
+        AgentSystemPrompts.Moderator.Should().Contain("PATCH");
+        AgentSystemPrompts.GptAgentDraft.Should().Contain("PATCH");
+        AgentSystemPrompts.GeminiAgentImprove.Should().Contain("PATCH");
+        AgentSystemPrompts.ClaudeAgentRefine.Should().Contain("PATCH");
+        AgentSystemPrompts.CritiqueMode.Should().Contain("PATCH");
+        AgentSystemPrompts.Synthesizer.Should().Contain("PATCH");
+    }
+
+    [Fact]
+    public void GetPrompt_WithPhase_ReturnsCorrectPromptForAgentId()
+    {
+        AgentSystemPrompts.GetPrompt(AgentId.Moderator, SessionPhase.Clarification).Should().Be(AgentSystemPrompts.Moderator);
+        AgentSystemPrompts.GetPrompt(AgentId.GptAgent, SessionPhase.DraftRound1).Should().Be(AgentSystemPrompts.GptAgentDraft);
+        AgentSystemPrompts.GetPrompt(AgentId.GeminiAgent, SessionPhase.DraftRound2).Should().Be(AgentSystemPrompts.GeminiAgentImprove);
+        AgentSystemPrompts.GetPrompt(AgentId.ClaudeAgent, SessionPhase.DraftRound3).Should().Be(AgentSystemPrompts.ClaudeAgentRefine);
+        AgentSystemPrompts.GetPrompt(AgentId.Synthesizer, SessionPhase.Synthesis).Should().Be(AgentSystemPrompts.Synthesizer);
+    }
+
+    [Fact]
+    public void GetPrompt_InCritiquePhase_ReturnsCritiquePromptWithModelName()
+    {
+        var gptCritique = AgentSystemPrompts.GetPrompt(AgentId.GptAgent, SessionPhase.Critique);
+        var geminiCritique = AgentSystemPrompts.GetPrompt(AgentId.GeminiAgent, SessionPhase.Critique);
+        var claudeCritique = AgentSystemPrompts.GetPrompt(AgentId.ClaudeAgent, SessionPhase.Critique);
+
+        gptCritique.Should().Contain("GPT-5.2");
+        geminiCritique.Should().Contain("Gemini 3");
+        claudeCritique.Should().Contain("Claude Opus 4.6");
     }
 
     [Fact]
     public void GetPrompt_ReturnsCorrectPromptForAgentId()
     {
-        AgentSystemPrompts.GetPrompt(AgentId.SocraticClarifier).Should().Be(AgentSystemPrompts.SocraticClarifier);
-        AgentSystemPrompts.GetPrompt(AgentId.Contrarian).Should().Be(AgentSystemPrompts.Contrarian);
+        AgentSystemPrompts.GetPrompt(AgentId.Moderator).Should().Be(AgentSystemPrompts.Moderator);
+        AgentSystemPrompts.GetPrompt(AgentId.Synthesizer).Should().Be(AgentSystemPrompts.Synthesizer);
     }
 
     [Fact]

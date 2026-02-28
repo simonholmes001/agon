@@ -17,7 +17,7 @@ public class AgentResponseParserTests
             {
               "ops": [],
               "meta": {
-                "agent": "synthesis_validation",
+                "agent": "synthesizer",
                 "round": 1,
                 "reason": "test",
                 "sessionId": "{{sessionId}}"
@@ -30,7 +30,7 @@ public class AgentResponseParserTests
         parsed.Message.Should().Be("This is the user-visible summary.");
         parsed.Patch.Should().NotBeNull();
         parsed.Patch!.Ops.Should().BeEmpty();
-        parsed.Patch.Meta.Agent.Should().Be("synthesis_validation");
+        parsed.Patch.Meta.Agent.Should().Be("synthesizer");
     }
 
     [Fact]
@@ -74,7 +74,7 @@ public class AgentResponseParserTests
             {
               "ops": [],
               "meta": {
-                "agent": "synthesis_validation",
+                "agent": "synthesizer",
                 "round": 2,
                 "reason": "fenced",
                 "sessionId": "{{sessionId}}"

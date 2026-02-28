@@ -3,7 +3,7 @@ applyTo: '**'
 ---
 # Agon Architecture (Living Strategy Room)
 
-**Version:** 2.0
+**Version:** 3.0
 
 ---
 
@@ -126,37 +126,30 @@ graph TD
   Orch --> Tools
 
   subgraph Agents[Council Agents]
-    Socratic[Socratic Clarifier]
-    Framing[Framing Challenger]
-    Product[Product Strategist]
-    Tech[Technical Architect]
-    Contra[Contrarian / Red Team]
-    Synth[Synthesis + Validation]
-    Lib[Research Librarian - optional]
+    Mod[Moderator / Clarifier]
+    GPT[GPT Agent - OpenAI GPT-5.2]
+    GEM[Gemini Agent - Google Gemini 3]
+    CLD[Claude Agent - Anthropic Claude Opus 4.6]
+    Synth[Synthesizer / Final Report]
   end
 
-  Orch --> Socratic
-  Orch --> Framing
-  Orch --> Product
-  Orch --> Tech
-  Orch --> Contra
+  Orch --> Mod
+  Orch --> GPT
+  Orch --> GEM
+  Orch --> CLD
   Orch --> Synth
-  Orch --> Lib
 
-  subgraph Models[Thinking Model Providers via IChatModelClient]
+  subgraph Models[Thinking Model Providers via IChatClient]
     OAI[GPT-5.2 Thinking]
     GGL[Gemini 3 - thinking high]
     ANT[Claude Opus 4.6]
-    DSK[DeepSeek-V3.2 - thinking]
   end
 
-  Socratic --> OAI
-  Framing --> GGL
-  Contra --> GGL
-  Product --> ANT
-  Tech --> DSK
+  Mod --> OAI
+  GPT --> OAI
+  GEM --> GGL
+  CLD --> ANT
   Synth --> OAI
-  Lib --> OAI
 
   subgraph Data[Persistence]
     PG[(PostgreSQL - Truth Map + Sessions + Artifacts)]

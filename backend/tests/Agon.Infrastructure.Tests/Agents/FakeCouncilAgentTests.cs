@@ -17,19 +17,19 @@ public class FakeCouncilAgentTests
             Ops = [],
             Meta = new PatchMeta
             {
-                Agent = "contrarian",
+                Agent = "claude_agent",
                 Round = 1,
                 Reason = "fake",
                 SessionId = sessionId
             }
         };
 
-        var agent = new FakeCouncilAgent("contrarian", "fake-provider", "MESSAGE", patch);
+        var agent = new FakeCouncilAgent("claude_agent", "fake-provider", "MESSAGE", patch);
         var context = new AgentContext
         {
             SessionId = sessionId,
             Round = 1,
-            Phase = SessionPhase.DebateRound1,
+            Phase = SessionPhase.DraftRound1,
             FrictionLevel = 50,
             TruthMap = TruthMapState.CreateNew(sessionId)
         };
@@ -38,6 +38,6 @@ public class FakeCouncilAgentTests
 
         response.Message.Should().Be("MESSAGE");
         response.Patch.Should().NotBeNull();
-        response.Patch!.Meta.Agent.Should().Be("contrarian");
+        response.Patch!.Meta.Agent.Should().Be("claude_agent");
     }
 }

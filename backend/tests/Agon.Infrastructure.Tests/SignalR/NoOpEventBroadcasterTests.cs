@@ -13,7 +13,7 @@ public class NoOpEventBroadcasterTests
     {
         var sut = new NoOpEventBroadcaster();
 
-        var act = () => sut.RoundProgressAsync(Guid.NewGuid(), SessionPhase.DebateRound1, CancellationToken.None);
+        var act = () => sut.RoundProgressAsync(Guid.NewGuid(), SessionPhase.DraftRound1, CancellationToken.None);
 
         await act.Should().NotThrowAsync();
     }
@@ -26,7 +26,7 @@ public class NoOpEventBroadcasterTests
         {
             Meta = new PatchMeta
             {
-                Agent = "contrarian",
+                Agent = "claude_agent",
                 Round = 1,
                 SessionId = Guid.NewGuid()
             }

@@ -38,7 +38,7 @@ public class DeepSeekCouncilAgentTests
         });
         var sut = new DeepSeekCouncilAgent(
             new HttpClient(handler),
-            new DeepSeekCouncilAgentOptions("technical_architect", "deepseek-key", "deepseek-chat", 256, 0.4),
+            new DeepSeekCouncilAgentOptions("gpt_agent", "deepseek-key", "deepseek-chat", 256, 0.4),
             NullLogger<DeepSeekCouncilAgent>.Instance);
 
         var response = await sut.RunAsync(CreateContext(), CancellationToken.None);
@@ -69,7 +69,7 @@ public class DeepSeekCouncilAgentTests
         });
         var sut = new DeepSeekCouncilAgent(
             new HttpClient(handler),
-            new DeepSeekCouncilAgentOptions("technical_architect", "deepseek-key", "deepseek-chat", 256),
+            new DeepSeekCouncilAgentOptions("gpt_agent", "deepseek-key", "deepseek-chat", 256),
             NullLogger<DeepSeekCouncilAgent>.Instance);
 
         var response = await sut.RunAsync(CreateContext(), CancellationToken.None);
@@ -96,7 +96,7 @@ public class DeepSeekCouncilAgentTests
         });
         var sut = new DeepSeekCouncilAgent(
             new HttpClient(handler),
-            new DeepSeekCouncilAgentOptions("technical_architect", "bad", "deepseek-chat", 256),
+            new DeepSeekCouncilAgentOptions("gpt_agent", "bad", "deepseek-chat", 256),
             NullLogger<DeepSeekCouncilAgent>.Instance);
 
         var act = () => sut.RunAsync(CreateContext(), CancellationToken.None);
@@ -114,7 +114,7 @@ public class DeepSeekCouncilAgentTests
         {
             SessionId = sessionId,
             Round = 1,
-            Phase = SessionPhase.DebateRound1,
+            Phase = SessionPhase.DraftRound1,
             FrictionLevel = 50,
             TruthMap = map
         };

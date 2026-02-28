@@ -66,7 +66,7 @@ public class SnapshotTests
         map1.Claims.Add(new Claim
         {
             Id = "c1",
-            Agent = "product_strategist",
+            Agent = "gpt_agent",
             Round = 1,
             Text = "Claim",
             Confidence = 0.8f,
@@ -113,8 +113,8 @@ public class SnapshotTests
         ]);
         mapA.Claims.AddRange(
         [
-            new Claim { Id = "c2", Agent = "contrarian", Round = 1, Text = "Second claim", Confidence = 0.4f },
-            new Claim { Id = "c1", Agent = "product_strategist", Round = 1, Text = "First claim", Confidence = 0.7f }
+            new Claim { Id = "c2", Agent = "claude_agent", Round = 1, Text = "Second claim", Confidence = 0.4f },
+            new Claim { Id = "c1", Agent = "gpt_agent", Round = 1, Text = "First claim", Confidence = 0.7f }
         ]);
         mapA.Assumptions.AddRange(
         [
@@ -128,13 +128,13 @@ public class SnapshotTests
         ]);
         mapA.Risks.AddRange(
         [
-            new Risk { Id = "r2", Agent = "contrarian", Text = "Risk B" },
-            new Risk { Id = "r1", Agent = "contrarian", Text = "Risk A" }
+            new Risk { Id = "r2", Agent = "claude_agent", Text = "Risk B" },
+            new Risk { Id = "r1", Agent = "claude_agent", Text = "Risk A" }
         ]);
         mapA.OpenQuestions.AddRange(
         [
-            new OpenQuestion { Id = "q2", Text = "Question B", RaisedBy = "socratic_clarifier" },
-            new OpenQuestion { Id = "q1", Text = "Question A", RaisedBy = "socratic_clarifier" }
+            new OpenQuestion { Id = "q2", Text = "Question B", RaisedBy = "moderator" },
+            new OpenQuestion { Id = "q1", Text = "Question A", RaisedBy = "moderator" }
         ]);
         mapA.Evidence.AddRange(
         [

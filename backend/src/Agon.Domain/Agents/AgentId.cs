@@ -6,27 +6,34 @@ namespace Agon.Domain.Agents;
 /// </summary>
 public static class AgentId
 {
-    public const string SocraticClarifier = "socratic_clarifier";
-    public const string FramingChallenger = "framing_challenger";
-    public const string ProductStrategist = "product_strategist";
-    public const string TechnicalArchitect = "technical_architect";
-    public const string Contrarian = "contrarian";
-    public const string ResearchLibrarian = "research_librarian";
-    public const string SynthesisValidation = "synthesis_validation";
+    // Intake / Clarification
+    public const string Moderator = "moderator";
+    
+    // Working agents (one per model provider)
+    public const string GptAgent = "gpt_agent";
+    public const string GeminiAgent = "gemini_agent";
+    public const string ClaudeAgent = "claude_agent";
+    
+    // Synthesis
+    public const string Synthesizer = "synthesizer";
 
+    // System roles
     public const string Orchestrator = "orchestrator";
     public const string User = "user";
 
     private static readonly HashSet<string> CouncilAgents = new(StringComparer.Ordinal)
     {
-        SocraticClarifier,
-        FramingChallenger,
-        ProductStrategist,
-        TechnicalArchitect,
-        Contrarian,
-        ResearchLibrarian,
-        SynthesisValidation
+        Moderator,
+        GptAgent,
+        GeminiAgent,
+        ClaudeAgent,
+        Synthesizer
     };
+
+    /// <summary>
+    /// Working agents that participate in drafting and critique phases.
+    /// </summary>
+    public static IReadOnlyList<string> WorkingAgents { get; } = new[] { GptAgent, GeminiAgent, ClaudeAgent };
 
     public static IReadOnlyList<string> AllCouncil { get; } = CouncilAgents.ToList().AsReadOnly();
 

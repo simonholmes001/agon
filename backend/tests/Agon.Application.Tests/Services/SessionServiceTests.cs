@@ -154,7 +154,7 @@ public class SessionServiceTests
         updated.RoundNumber.Should().Be(1);
         await sessionRepository.Received(1).UpdateAsync(updated, Arg.Any<CancellationToken>());
         await eventBroadcaster.Received(1)
-            .RoundProgressAsync(sessionId, SessionPhase.DebateRound1, Arg.Any<CancellationToken>());
+            .RoundProgressAsync(sessionId, SessionPhase.DraftRound1, Arg.Any<CancellationToken>());
         await transcriptRepository.Received(1).AppendAsync(
             sessionId,
             Arg.Is<TranscriptMessage>(message =>
@@ -190,8 +190,8 @@ public class SessionServiceTests
         var orchestrator = new Orchestrator();
         var runnerLogger = Substitute.For<ILogger<AgentRunner>>();
         var agentRunner = new AgentRunner(truthMapRepository, eventBroadcaster, runnerLogger);
-        var clarifier = new ContextCapturingAgent(AgentId.SocraticClarifier, "Clarifier reply.");
-        var product = new ContextCapturingAgent(AgentId.ProductStrategist, "Product reply.");
+        var clarifier = new ContextCapturingAgent(AgentId.Moderator, "Clarifier reply.");
+        var product = new ContextCapturingAgent(AgentId.GptAgent, "Product reply.");
         var logger = Substitute.For<ILogger<SessionService>>();
         var sut = new SessionService(
             sessionRepository,
@@ -210,7 +210,7 @@ public class SessionServiceTests
             "corr-msg-1");
 
         result.Phase.Should().Be("Clarification");
-        result.RoutedAgentId.Should().Be(AgentId.SocraticClarifier);
+        result.RoutedAgentId.Should().Be(AgentId.Moderator);
         result.Reply.Should().Be("Clarifier reply.");
         clarifier.LastContext.Should().NotBeNull();
         clarifier.LastContext!.CorrelationId.Should().Be("corr-msg-1");
@@ -246,9 +246,9 @@ public class SessionServiceTests
         var orchestrator = new Orchestrator();
         var runnerLogger = Substitute.For<ILogger<AgentRunner>>();
         var agentRunner = new AgentRunner(truthMapRepository, eventBroadcaster, runnerLogger);
-        var technical = new ContextCapturingAgent(AgentId.TechnicalArchitect, "Technical reply.");
-        var contrarian = new ContextCapturingAgent(AgentId.Contrarian, "Contrarian reply.");
-        var product = new ContextCapturingAgent(AgentId.ProductStrategist, "Product reply.");
+        var technical = new ContextCapturingAgent(AgentId.GptAgent, "Technical reply.");
+        var contrarian = new ContextCapturingAgent(AgentId.ClaudeAgent, "Contrarian reply.");
+        var product = new ContextCapturingAgent(AgentId.GptAgent, "Product reply.");
         var logger = Substitute.For<ILogger<SessionService>>();
         var sut = new SessionService(
             sessionRepository,
@@ -266,7 +266,7 @@ public class SessionServiceTests
             CancellationToken.None);
 
         result.Phase.Should().Be("PostDelivery");
-        result.RoutedAgentId.Should().Be(AgentId.TechnicalArchitect);
+        result.RoutedAgentId.Should().Be(AgentId.GptAgent);
         result.Reply.Should().Be("Technical reply.");
         technical.LastContext.Should().NotBeNull();
         contrarian.LastContext.Should().NotBeNull();
@@ -298,8 +298,8 @@ public class SessionServiceTests
         var orchestrator = new Orchestrator();
         var runnerLogger = Substitute.For<ILogger<AgentRunner>>();
         var agentRunner = new AgentRunner(truthMapRepository, eventBroadcaster, runnerLogger);
-        var technical = new StaticAgent(AgentId.TechnicalArchitect, "Technical reply.");
-        var synthesis = new StaticAgent(AgentId.SynthesisValidation, "Moderator summary content.");
+        var technical = new StaticAgent(AgentId.GptAgent, "Technical reply.");
+        var synthesis = new StaticAgent(AgentId.Synthesizer, "Moderator summary content.");
         var logger = Substitute.For<ILogger<SessionService>>();
         var sut = new SessionService(
             sessionRepository,
@@ -319,14 +319,14 @@ public class SessionServiceTests
         await transcriptRepository.Received().AppendAsync(
             sessionId,
             Arg.Is<TranscriptMessage>(message =>
-                message.AgentId == "synthesis-validation"
+                message.AgentId == "synthesizer"
                 && message.Type == TranscriptMessageType.Agent),
             Arg.Any<CancellationToken>());
 
         await eventBroadcaster.Received().TranscriptMessageAppendedAsync(
             sessionId,
             Arg.Is<TranscriptMessage>(message =>
-                message.AgentId == "synthesis-validation"
+                message.AgentId == "synthesizer"
                 && message.IsStreaming),
             Arg.Any<CancellationToken>());
     }
@@ -358,7 +358,7 @@ public class SessionServiceTests
         var runnerLogger = Substitute.For<ILogger<AgentRunner>>();
         var agentRunner = new AgentRunner(truthMapRepository, eventBroadcaster, runnerLogger);
         var agentMessage = string.Join(" ", Enumerable.Repeat("Expanded technical response", 40));
-        var technical = new ContextCapturingAgent(AgentId.TechnicalArchitect, agentMessage);
+        var technical = new ContextCapturingAgent(AgentId.GptAgent, agentMessage);
         var logger = Substitute.For<ILogger<SessionService>>();
         var sut = new SessionService(
             sessionRepository,
@@ -378,7 +378,7 @@ public class SessionServiceTests
         await eventBroadcaster.Received().TranscriptMessageAppendedAsync(
             sessionId,
             Arg.Is<TranscriptMessage>(message =>
-                message.AgentId == "technical-architect"
+                message.AgentId == "gpt-agent"
                 && message.IsStreaming),
             Arg.Any<CancellationToken>());
     }
@@ -417,7 +417,7 @@ public class SessionServiceTests
         var session = new SessionState
         {
             SessionId = sessionId,
-            Phase = SessionPhase.DebateRound1,
+            Phase = SessionPhase.DraftRound1,
             Status = SessionStatus.Active,
             Mode = SessionMode.Deep,
             FrictionLevel = 50,
@@ -547,7 +547,7 @@ public class SessionServiceTests
         var agentMessage = $"- {string.Join(" ", Enumerable.Repeat("Extended analysis content", 30))} {marker}";
         var councilAgents = new ICouncilAgent[]
         {
-            new StaticAgent("product_strategist", agentMessage)
+            new StaticAgent("gpt_agent", agentMessage)
         };
         var logger = Substitute.For<ILogger<SessionService>>();
 
@@ -577,14 +577,14 @@ public class SessionServiceTests
         await transcriptRepository.Received(1).AppendAsync(
             sessionId,
             Arg.Is<TranscriptMessage>(message =>
-                message.AgentId == "product-strategist"
+                message.AgentId == "gpt-agent"
                 && message.Content == agentMessage
                 && message.Round == 1),
             Arg.Any<CancellationToken>());
         await transcriptRepository.Received(1).AppendAsync(
             sessionId,
             Arg.Is<TranscriptMessage>(message =>
-                message.AgentId == "synthesis-validation"
+                message.AgentId == "synthesizer"
                 && message.Type == TranscriptMessageType.Agent
                 && message.Content.Contains("Moderator summary", StringComparison.OrdinalIgnoreCase)
                 && message.Content.Contains("Agent summaries", StringComparison.Ordinal)
@@ -593,7 +593,7 @@ public class SessionServiceTests
         await eventBroadcaster.Received().TranscriptMessageAppendedAsync(
             sessionId,
             Arg.Is<TranscriptMessage>(message =>
-                message.AgentId == "synthesis-validation"
+                message.AgentId == "synthesizer"
                 && message.IsStreaming),
             Arg.Any<CancellationToken>());
         await transcriptRepository.Received(1).AppendAsync(
@@ -611,7 +611,7 @@ public class SessionServiceTests
         var session = new SessionState
         {
             SessionId = sessionId,
-            Phase = SessionPhase.DebateRound1,
+            Phase = SessionPhase.DraftRound1,
             Status = SessionStatus.Active,
             Mode = SessionMode.Deep,
             FrictionLevel = 50,
@@ -635,13 +635,13 @@ public class SessionServiceTests
             transcriptRepository,
             orchestrator,
             agentRunner,
-            [new StaticAgent("product_strategist", "message")],
+            [new StaticAgent("gpt_agent", "message")],
             eventBroadcaster,
             logger);
 
         var updated = await sut.StartSessionAsync(sessionId, CancellationToken.None);
 
-        updated.Phase.Should().Be(SessionPhase.DebateRound1);
+        updated.Phase.Should().Be(SessionPhase.DraftRound1);
         await eventBroadcaster.DidNotReceive().RoundProgressAsync(
             Arg.Any<Guid>(),
             Arg.Any<SessionPhase>(),
@@ -686,7 +686,7 @@ public class SessionServiceTests
                 20));
         var councilAgents = new ICouncilAgent[]
         {
-            new StaticAgent("product_strategist", agentMessage)
+            new StaticAgent("gpt_agent", agentMessage)
         };
         var logger = Substitute.For<ILogger<SessionService>>();
 
@@ -712,21 +712,21 @@ public class SessionServiceTests
         await eventBroadcaster.Received().TranscriptMessageAppendedAsync(
             sessionId,
             Arg.Is<TranscriptMessage>(message =>
-                message.AgentId == "product-strategist"
+                message.AgentId == "gpt-agent"
                 && message.Content == agentMessage),
             Arg.Any<CancellationToken>());
 
         await eventBroadcaster.Received().TranscriptMessageAppendedAsync(
             sessionId,
             Arg.Is<TranscriptMessage>(message =>
-                message.AgentId == "product-strategist"
+                message.AgentId == "gpt-agent"
                 && message.IsStreaming),
             Arg.Any<CancellationToken>());
 
         await eventBroadcaster.Received().TranscriptMessageAppendedAsync(
             sessionId,
             Arg.Is<TranscriptMessage>(message =>
-                message.AgentId == "synthesis-validation"
+                message.AgentId == "synthesizer"
                 && message.Type == TranscriptMessageType.Agent),
             Arg.Any<CancellationToken>());
     }
@@ -759,7 +759,7 @@ public class SessionServiceTests
         var agentRunner = new AgentRunner(truthMapRepository, eventBroadcaster, runnerLogger);
         var councilAgents = new ICouncilAgent[]
         {
-            new FailingAgent("product_strategist", "missing api key")
+            new FailingAgent("gpt_agent", "missing api key")
         };
         var logger = Substitute.For<ILogger<SessionService>>();
 
@@ -779,7 +779,7 @@ public class SessionServiceTests
             sessionId,
             Arg.Is<TranscriptMessage>(message =>
                 message.Type == TranscriptMessageType.System
-                && message.Content.Contains("product-strategist")
+                && message.Content.Contains("gpt-agent")
                 && message.Content.Contains("missing api key")),
             Arg.Any<CancellationToken>());
     }
@@ -810,7 +810,7 @@ public class SessionServiceTests
         var orchestrator = new Orchestrator();
         var runnerLogger = Substitute.For<ILogger<AgentRunner>>();
         var agentRunner = new AgentRunner(truthMapRepository, eventBroadcaster, runnerLogger);
-        var capturingAgent = new ContextCapturingAgent("product_strategist", "message");
+        var capturingAgent = new ContextCapturingAgent("gpt_agent", "message");
         var logger = Substitute.For<ILogger<SessionService>>();
 
         var sut = new SessionService(
@@ -853,7 +853,7 @@ public class SessionServiceTests
         var orchestrator = new Orchestrator();
         var runnerLogger = Substitute.For<ILogger<AgentRunner>>();
         var agentRunner = new AgentRunner(truthMapRepository, eventBroadcaster, runnerLogger);
-        var capturingAgent = new ContextCapturingAgent("product_strategist", "message");
+        var capturingAgent = new ContextCapturingAgent("gpt_agent", "message");
         var logger = Substitute.For<ILogger<SessionService>>();
         var sut = new SessionService(
             sessionRepository,
@@ -904,7 +904,7 @@ public class SessionServiceTests
             transcriptRepository,
             orchestrator,
             agentRunner,
-            [new FailingAgent("product_strategist", longError)],
+            [new FailingAgent("gpt_agent", longError)],
             eventBroadcaster,
             logger);
 
@@ -914,7 +914,7 @@ public class SessionServiceTests
             sessionId,
             Arg.Is<TranscriptMessage>(message =>
                 message.Type == TranscriptMessageType.System
-                && message.Content.Contains("product-strategist")
+                && message.Content.Contains("gpt-agent")
                 && message.Content.Contains(trimmedError)
                 && !message.Content.Contains(longError)),
             Arg.Any<CancellationToken>());
@@ -931,7 +931,7 @@ public class SessionServiceTests
                 Id = Guid.NewGuid(),
                 SessionId = sessionId,
                 Type = TranscriptMessageType.Agent,
-                AgentId = "socratic-clarifier",
+                AgentId = "moderator",
                 Content = "Kickoff transcript",
                 Round = 1,
                 IsStreaming = false,

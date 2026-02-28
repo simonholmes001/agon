@@ -10,7 +10,7 @@ public class AgentConfigTests
     public void Create_SetsAllProperties()
     {
         var config = new AgentConfig(
-            AgentId: Domain.Agents.AgentId.SocraticClarifier,
+            AgentId: Domain.Agents.AgentId.Moderator,
             ModelProvider: "openai",
             ModelName: "gpt-5.2",
             MaxOutputTokens: 8192,
@@ -18,7 +18,7 @@ public class AgentConfigTests
             TimeoutSeconds: 90,
             ActivePhases: [SessionPhase.Clarification]);
 
-        config.AgentId.Should().Be(AgentId.SocraticClarifier);
+        config.AgentId.Should().Be(AgentId.Moderator);
         config.ModelProvider.Should().Be("openai");
         config.ModelName.Should().Be("gpt-5.2");
         config.MaxOutputTokens.Should().Be(8192);
@@ -32,7 +32,7 @@ public class AgentConfigTests
     public void Defaults_HaveReasonableValues()
     {
         var config = new AgentConfig(
-            AgentId: Domain.Agents.AgentId.Contrarian,
+            AgentId: Domain.Agents.AgentId.GeminiAgent,
             ModelProvider: "gemini",
             ModelName: "gemini-3.1-pro-preview");
 
@@ -46,7 +46,7 @@ public class AgentConfigTests
     public void Create_WithNullActivePhases_DefaultsToEmpty()
     {
         var config = new AgentConfig(
-            AgentId: Domain.Agents.AgentId.Contrarian,
+            AgentId: Domain.Agents.AgentId.GeminiAgent,
             ModelProvider: "gemini",
             ModelName: "gemini-3.1-pro-preview",
             ActivePhases: null);
@@ -56,19 +56,19 @@ public class AgentConfigTests
     }
 
     [Fact]
-    public void DefaultCouncilConfigs_ContainsAllSevenAgents()
+    public void DefaultCouncilConfigs_ContainsAllFiveAgents()
     {
         var configs = AgentConfig.DefaultCouncil;
 
-        configs.Should().HaveCount(7);
+        configs.Should().HaveCount(5);
         configs.Select(c => c.AgentId).Should().BeEquivalentTo(AgentId.AllCouncil);
     }
 
     [Fact]
-    public void DefaultCouncilConfigs_SocraticClarifier_UsesOpenAi()
+    public void DefaultCouncilConfigs_Moderator_UsesOpenAi()
     {
         var config = AgentConfig.DefaultCouncil
-            .Single(c => c.AgentId == AgentId.SocraticClarifier);
+            .Single(c => c.AgentId == AgentId.Moderator);
 
         config.ModelProvider.Should().Be("openai");
         config.ModelName.Should().Be("gpt-5.2");
@@ -76,65 +76,51 @@ public class AgentConfigTests
     }
 
     [Fact]
-    public void DefaultCouncilConfigs_FramingChallenger_UsesGemini()
+    public void DefaultCouncilConfigs_GptAgent_UsesOpenAi()
     {
         var config = AgentConfig.DefaultCouncil
-            .Single(c => c.AgentId == AgentId.FramingChallenger);
+            .Single(c => c.AgentId == AgentId.GptAgent);
 
-        config.ModelProvider.Should().Be("gemini");
-        config.ModelName.Should().Be("gemini-3.1-pro-preview");
-        config.ActivePhases.Should().Contain(SessionPhase.DebateRound1);
+        config.ModelProvider.Should().Be("openai");
+        config.ModelName.Should().Be("gpt-5.2");
+        config.ActivePhases.Should().Contain(SessionPhase.DraftRound1);
+        config.ActivePhases.Should().Contain(SessionPhase.Critique);
     }
 
     [Fact]
-    public void DefaultCouncilConfigs_ProductStrategist_UsesAnthropic()
+    public void DefaultCouncilConfigs_GeminiAgent_UsesGemini()
     {
         var config = AgentConfig.DefaultCouncil
-            .Single(c => c.AgentId == AgentId.ProductStrategist);
+            .Single(c => c.AgentId == AgentId.GeminiAgent);
+
+        config.ModelProvider.Should().Be("gemini");
+        config.ModelName.Should().Be("gemini-3.1-pro-preview");
+        config.ActivePhases.Should().Contain(SessionPhase.DraftRound2);
+        config.ActivePhases.Should().Contain(SessionPhase.Critique);
+    }
+
+    [Fact]
+    public void DefaultCouncilConfigs_ClaudeAgent_UsesAnthropic()
+    {
+        var config = AgentConfig.DefaultCouncil
+            .Single(c => c.AgentId == AgentId.ClaudeAgent);
 
         config.ModelProvider.Should().Be("anthropic");
         config.ModelName.Should().Be("claude-opus-4-6");
+        config.ActivePhases.Should().Contain(SessionPhase.DraftRound3);
+        config.ActivePhases.Should().Contain(SessionPhase.Critique);
     }
 
     [Fact]
-    public void DefaultCouncilConfigs_TechnicalArchitect_UsesOpenAiTemporarily()
+    public void DefaultCouncilConfigs_Synthesizer_UsesOpenAi()
     {
         var config = AgentConfig.DefaultCouncil
-            .Single(c => c.AgentId == AgentId.TechnicalArchitect);
-
-        config.ModelProvider.Should().Be("openai");
-        config.ModelName.Should().Be("gpt-5.2");
-    }
-
-    [Fact]
-    public void DefaultCouncilConfigs_Contrarian_UsesGemini()
-    {
-        var config = AgentConfig.DefaultCouncil
-            .Single(c => c.AgentId == AgentId.Contrarian);
-
-        config.ModelProvider.Should().Be("gemini");
-        config.ModelName.Should().Be("gemini-3.1-pro-preview");
-    }
-
-    [Fact]
-    public void DefaultCouncilConfigs_ResearchLibrarian_UsesOpenAi()
-    {
-        var config = AgentConfig.DefaultCouncil
-            .Single(c => c.AgentId == AgentId.ResearchLibrarian);
-
-        config.ModelProvider.Should().Be("openai");
-        config.ModelName.Should().Be("gpt-5.2");
-    }
-
-    [Fact]
-    public void DefaultCouncilConfigs_SynthesisValidation_UsesOpenAi()
-    {
-        var config = AgentConfig.DefaultCouncil
-            .Single(c => c.AgentId == AgentId.SynthesisValidation);
+            .Single(c => c.AgentId == AgentId.Synthesizer);
 
         config.ModelProvider.Should().Be("openai");
         config.ModelName.Should().Be("gpt-5.2");
         config.ActivePhases.Should().Contain(SessionPhase.Synthesis);
+        config.ActivePhases.Should().Contain(SessionPhase.TargetedLoop);
     }
 
     [Fact]

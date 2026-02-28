@@ -36,7 +36,7 @@ public class InMemoryTruthMapRepositoryTests
             Ops = [],
             Meta = new PatchMeta
             {
-                Agent = "contrarian",
+                Agent = "claude_agent",
                 Round = 1,
                 Reason = "test",
                 SessionId = sessionId

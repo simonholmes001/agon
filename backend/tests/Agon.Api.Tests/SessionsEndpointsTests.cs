@@ -137,11 +137,11 @@ public class SessionsEndpointsTests : IClassFixture<ApiWebApplicationFactory>
             message.Type == "system"
             && message.Content.Contains("Round 1"));
         transcript.Should().Contain(message =>
-            (message.Type == "agent" && message.AgentId == "product-strategist")
-            || (message.Type == "system" && message.Content.Contains("product-strategist")));
+            (message.Type == "agent" && message.AgentId == "gpt-agent")
+            || (message.Type == "system" && message.Content.Contains("gpt-agent")));
         transcript.Should().Contain(message =>
             message.Type == "agent"
-            && message.AgentId == "synthesis-validation");
+            && message.AgentId == "synthesizer");
     }
 
     [Fact]
@@ -165,7 +165,7 @@ public class SessionsEndpointsTests : IClassFixture<ApiWebApplicationFactory>
         payload.Should().NotBeNull();
         payload!.SessionId.Should().Be(created.SessionId);
         payload.Phase.Should().Be("Clarification");
-        payload.RoutedAgentId.Should().Be("socratic_clarifier");
+        payload.RoutedAgentId.Should().Be("moderator");
         payload.Reply.Should().NotBeNullOrWhiteSpace();
     }
 
@@ -190,7 +190,7 @@ public class SessionsEndpointsTests : IClassFixture<ApiWebApplicationFactory>
         var payload = await response.Content.ReadFromJsonAsync<MessageResponse>();
         payload.Should().NotBeNull();
         payload!.Phase.Should().Be("PostDelivery");
-        payload.RoutedAgentId.Should().Be("technical_architect");
+        payload.RoutedAgentId.Should().Be("gpt_agent");
     }
 
     [Fact]
@@ -222,6 +222,124 @@ public class SessionsEndpointsTests : IClassFixture<ApiWebApplicationFactory>
 
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);
     }
+
+    #region Error Paths - GetSession
+
+    [Fact]
+    public async Task GetSession_ReturnsNotFound_WhenSessionDoesNotExist()
+    {
+        var unknownId = Guid.NewGuid();
+
+        var response = await client.GetAsync($"/sessions/{unknownId}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
+    public async Task GetSession_ReturnsSession_WhenExists()
+    {
+        var create = await client.PostAsJsonAsync("/sessions", new
+        {
+            idea = "A service that validates startup ideas with an AI council.",
+            mode = "Deep",
+            frictionLevel = 50
+        });
+        var created = await create.Content.ReadFromJsonAsync<SessionResponse>();
+
+        var response = await client.GetAsync($"/sessions/{created!.SessionId}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var session = await response.Content.ReadFromJsonAsync<SessionResponse>();
+        session.Should().NotBeNull();
+        session!.SessionId.Should().Be(created.SessionId);
+    }
+
+    #endregion
+
+    #region Error Paths - TruthMap
+
+    [Fact]
+    public async Task GetTruthMap_ReturnsNotFound_WhenSessionDoesNotExist()
+    {
+        var unknownId = Guid.NewGuid();
+
+        var response = await client.GetAsync($"/sessions/{unknownId}/truthmap");
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    #endregion
+
+    #region Error Paths - Transcript
+
+    [Fact]
+    public async Task GetTranscript_ReturnsNotFound_WhenSessionDoesNotExist()
+    {
+        var unknownId = Guid.NewGuid();
+
+        var response = await client.GetAsync($"/sessions/{unknownId}/transcript");
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    #endregion
+
+    #region Error Paths - CreateSession
+
+    [Fact]
+    public async Task CreateSession_ReturnsBadRequest_ForInvalidMode()
+    {
+        var response = await client.PostAsJsonAsync("/sessions", new
+        {
+            idea = "A valid idea.",
+            mode = "InvalidMode",
+            frictionLevel = 50
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+    }
+
+    [Fact]
+    public async Task CreateSession_ReturnsBadRequest_ForEmptyIdea()
+    {
+        var response = await client.PostAsJsonAsync("/sessions", new
+        {
+            idea = "",
+            mode = "Deep",
+            frictionLevel = 50
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+    }
+
+    [Fact]
+    public async Task CreateSession_ReturnsBadRequest_ForFrictionLevelOutOfRange()
+    {
+        var response = await client.PostAsJsonAsync("/sessions", new
+        {
+            idea = "A valid idea.",
+            mode = "Deep",
+            frictionLevel = 150
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+    }
+
+    #endregion
+
+    #region Error Paths - StartSession
+
+    [Fact]
+    public async Task StartSession_ReturnsNotFound_WhenSessionDoesNotExist()
+    {
+        var unknownId = Guid.NewGuid();
+
+        var response = await client.PostAsync($"/sessions/{unknownId}/start", content: null);
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    #endregion
 
     private sealed class SessionResponse
     {

@@ -28,7 +28,7 @@ public class InMemoryTranscriptRepositoryTests
             Id = Guid.NewGuid(),
             SessionId = sessionId,
             Type = TranscriptMessageType.Agent,
-            AgentId = "socratic-clarifier",
+            AgentId = "moderator",
             Content = "Kickoff transcript",
             Round = 1,
             IsStreaming = false,

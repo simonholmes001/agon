@@ -36,48 +36,43 @@ public sealed record AgentConfig
     }
 
     /// <summary>
-    /// Default council configuration matching the agent roster
-    /// in architecture.instructions.md §4.3.
+    /// Default council configuration matching the simplified three-model architecture.
+    /// 
+    /// Workflow:
+    /// 1. Moderator (GPT-5.2) handles clarification
+    /// 2. GPT Agent (GPT-5.2) creates initial draft
+    /// 3. Gemini Agent (Gemini 3) improves draft
+    /// 4. Claude Agent (Claude Opus 4.6) refines draft
+    /// 5. All three critique in parallel
+    /// 6. Synthesizer (GPT-5.2) produces final report
     /// </summary>
     public static IReadOnlyList<AgentConfig> DefaultCouncil { get; } =
     [
-        new(Agents.AgentId.SocraticClarifier,
+        new(Agents.AgentId.Moderator,
             ModelProvider: "openai",
             ModelName: "gpt-5.2",
             MaxOutputTokens: 4096,
             ActivePhases: [SessionPhase.Clarification]),
 
-        new(Agents.AgentId.FramingChallenger,
+        new(Agents.AgentId.GptAgent,
+            ModelProvider: "openai",
+            ModelName: "gpt-5.2",
+            MaxOutputTokens: 8192,
+            ActivePhases: [SessionPhase.DraftRound1, SessionPhase.Critique]),
+
+        new(Agents.AgentId.GeminiAgent,
             ModelProvider: "gemini",
             ModelName: "gemini-3.1-pro-preview",
-            MaxOutputTokens: 4096,
-            ActivePhases: [SessionPhase.DebateRound1]),
+            MaxOutputTokens: 8192,
+            ActivePhases: [SessionPhase.DraftRound2, SessionPhase.Critique]),
 
-        new(Agents.AgentId.ProductStrategist,
+        new(Agents.AgentId.ClaudeAgent,
             ModelProvider: "anthropic",
             ModelName: "claude-opus-4-6",
-            MaxOutputTokens: 4096,
-            ActivePhases: [SessionPhase.DebateRound1, SessionPhase.DebateRound2]),
+            MaxOutputTokens: 8192,
+            ActivePhases: [SessionPhase.DraftRound3, SessionPhase.Critique]),
 
-        new(Agents.AgentId.TechnicalArchitect,
-            ModelProvider: "openai",
-            ModelName: "gpt-5.2",
-            MaxOutputTokens: 4096,
-            ActivePhases: [SessionPhase.DebateRound1, SessionPhase.DebateRound2]),
-
-        new(Agents.AgentId.Contrarian,
-            ModelProvider: "gemini",
-            ModelName: "gemini-3.1-pro-preview",
-            MaxOutputTokens: 4096,
-            ActivePhases: [SessionPhase.DebateRound1, SessionPhase.DebateRound2]),
-
-        new(Agents.AgentId.ResearchLibrarian,
-            ModelProvider: "openai",
-            ModelName: "gpt-5.2",
-            MaxOutputTokens: 4096,
-            ActivePhases: [SessionPhase.DebateRound1]),
-
-        new(Agents.AgentId.SynthesisValidation,
+        new(Agents.AgentId.Synthesizer,
             ModelProvider: "openai",
             ModelName: "gpt-5.2",
             MaxOutputTokens: 8192,

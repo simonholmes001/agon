@@ -33,7 +33,7 @@ public class OpenAiCouncilAgentTests
         });
         var httpClient = new HttpClient(handler);
         var options = new OpenAiCouncilAgentOptions(
-            AgentId: "research_librarian",
+            AgentId: "moderator",
             ApiKey: "test-key",
             ModelName: "gpt-5.2",
             MaxOutputTokens: 256,
@@ -63,7 +63,7 @@ public class OpenAiCouncilAgentTests
         });
         var httpClient = new HttpClient(handler);
         var options = new OpenAiCouncilAgentOptions(
-            AgentId: "research_librarian",
+            AgentId: "moderator",
             ApiKey: "test-key",
             ModelName: "gpt-5.2",
             MaxOutputTokens: 256);
@@ -94,7 +94,7 @@ public class OpenAiCouncilAgentTests
         });
         var httpClient = new HttpClient(handler);
         var options = new OpenAiCouncilAgentOptions(
-            AgentId: "research_librarian",
+            AgentId: "moderator",
             ApiKey: "bad-key",
             ModelName: "gpt-5.2",
             MaxOutputTokens: 256);
@@ -116,7 +116,7 @@ public class OpenAiCouncilAgentTests
         {
             SessionId = sessionId,
             Round = 1,
-            Phase = SessionPhase.DebateRound1,
+            Phase = SessionPhase.DraftRound1,
             FrictionLevel = 50,
             TruthMap = map
         };

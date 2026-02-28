@@ -13,14 +13,14 @@ public class EntityTests
         var claim = new Claim
         {
             Id = "c1",
-            Agent = "product_strategist",
+            Agent = "gpt_agent",
             Round = 1,
             Text = "The MVP should focus on mobile-first.",
             Confidence = 0.8f
         };
 
         claim.Id.Should().Be("c1");
-        claim.Agent.Should().Be("product_strategist");
+        claim.Agent.Should().Be("gpt_agent");
         claim.Round.Should().Be(1);
         claim.Text.Should().Be("The MVP should focus on mobile-first.");
         claim.Confidence.Should().Be(0.8f);
@@ -35,7 +35,7 @@ public class EntityTests
         var claim = new Claim
         {
             Id = "c2",
-            Agent = "technical_architect",
+            Agent = "gpt_agent",
             Round = 1,
             Text = "Microservices are overkill for this scope.",
             Confidence = 0.7f,
@@ -53,7 +53,7 @@ public class EntityTests
         var claim = new Claim
         {
             Id = "c1",
-            Agent = "product_strategist",
+            Agent = "gpt_agent",
             Round = 1,
             Text = "Mobile-first is essential.",
             Confidence = 0.8f,
@@ -105,13 +105,13 @@ public class EntityTests
             Id = "d1",
             Text = "Use PostgreSQL for persistence.",
             Rationale = "Supports JSONB for Truth Map storage and pgvector for embeddings.",
-            Owner = "technical_architect",
+            Owner = "gpt_agent",
             Binding = true
         };
 
         decision.Id.Should().Be("d1");
         decision.Rationale.Should().NotBeNullOrEmpty();
-        decision.Owner.Should().Be("technical_architect");
+        decision.Owner.Should().Be("gpt_agent");
         decision.Binding.Should().BeTrue();
         decision.DerivedFrom.Should().BeEmpty();
     }
@@ -129,14 +129,14 @@ public class EntityTests
             Severity = Severity.High,
             Likelihood = Likelihood.Medium,
             Mitigation = "Implement per-session budget caps with graceful degradation.",
-            Agent = "contrarian"
+            Agent = "claude_agent"
         };
 
         risk.Id.Should().Be("r1");
         risk.Category.Should().Be(RiskCategory.Financial);
         risk.Severity.Should().Be(Severity.High);
         risk.Likelihood.Should().Be(Likelihood.Medium);
-        risk.Agent.Should().Be("contrarian");
+        risk.Agent.Should().Be("claude_agent");
         risk.DerivedFrom.Should().BeEmpty();
     }
 
@@ -183,11 +183,11 @@ public class EntityTests
             Id = "q1",
             Text = "What is the target launch market?",
             Blocking = true,
-            RaisedBy = "socratic_clarifier"
+            RaisedBy = "moderator"
         };
 
         question.Blocking.Should().BeTrue();
-        question.RaisedBy.Should().Be("socratic_clarifier");
+        question.RaisedBy.Should().Be("moderator");
     }
 
     [Fact]
@@ -197,7 +197,7 @@ public class EntityTests
         {
             Id = "q2",
             Text = "Should we consider B2B?",
-            RaisedBy = "framing_challenger"
+            RaisedBy = "gemini_agent"
         };
 
         question.Blocking.Should().BeFalse();

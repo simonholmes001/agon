@@ -34,7 +34,7 @@ public class AnthropicCouncilAgentTests
         });
         var sut = new AnthropicCouncilAgent(
             new HttpClient(handler),
-            new AnthropicCouncilAgentOptions("product_strategist", "anthropic-key", "claude-opus-4-6", 256, 0.25),
+            new AnthropicCouncilAgentOptions("gpt_agent", "anthropic-key", "claude-opus-4-6", 256, 0.25),
             NullLogger<AnthropicCouncilAgent>.Instance);
 
         var response = await sut.RunAsync(CreateContext(), CancellationToken.None);
@@ -61,7 +61,7 @@ public class AnthropicCouncilAgentTests
         });
         var sut = new AnthropicCouncilAgent(
             new HttpClient(handler),
-            new AnthropicCouncilAgentOptions("product_strategist", "anthropic-key", "claude-opus-4-6", 256),
+            new AnthropicCouncilAgentOptions("gpt_agent", "anthropic-key", "claude-opus-4-6", 256),
             NullLogger<AnthropicCouncilAgent>.Instance);
 
         var response = await sut.RunAsync(CreateContext(), CancellationToken.None);
@@ -89,7 +89,7 @@ public class AnthropicCouncilAgentTests
         });
         var sut = new AnthropicCouncilAgent(
             new HttpClient(handler),
-            new AnthropicCouncilAgentOptions("product_strategist", "bad", "claude-opus-4-6", 256),
+            new AnthropicCouncilAgentOptions("gpt_agent", "bad", "claude-opus-4-6", 256),
             NullLogger<AnthropicCouncilAgent>.Instance);
 
         var act = () => sut.RunAsync(CreateContext(), CancellationToken.None);
@@ -107,7 +107,7 @@ public class AnthropicCouncilAgentTests
         {
             SessionId = sessionId,
             Round = 1,
-            Phase = SessionPhase.DebateRound1,
+            Phase = SessionPhase.DraftRound1,
             FrictionLevel = 50,
             TruthMap = map
         };

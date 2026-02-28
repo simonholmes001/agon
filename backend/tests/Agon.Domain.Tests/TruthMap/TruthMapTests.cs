@@ -52,7 +52,7 @@ public class TruthMapTests
         map.Claims.Add(new Claim
         {
             Id = "c1",
-            Agent = "product_strategist",
+            Agent = "gpt_agent",
             Round = 1,
             Text = "MVP should be mobile-first.",
             Confidence = 0.8f
@@ -78,7 +78,7 @@ public class TruthMapTests
         map.Risks.Add(new Risk
         {
             Id = "r1",
-            Agent = "contrarian",
+            Agent = "claude_agent",
             Text = "Token costs may be prohibitive."
         });
 
@@ -107,7 +107,7 @@ public class TruthMapTests
             Id = "d1",
             Text = "Use Postgres.",
             Rationale = "JSONB support.",
-            Owner = "technical_architect"
+            Owner = "gpt_agent"
         });
 
         map.EntityExists("d1").Should().BeTrue();
@@ -135,7 +135,7 @@ public class TruthMapTests
         {
             Id = "q1",
             Text = "What market?",
-            RaisedBy = "socratic_clarifier"
+            RaisedBy = "moderator"
         });
 
         map.EntityExists("q1").Should().BeTrue();
@@ -148,7 +148,7 @@ public class TruthMapTests
         var claim = new Claim
         {
             Id = "c1",
-            Agent = "product_strategist",
+            Agent = "gpt_agent",
             Round = 1,
             Text = "Test",
             Confidence = 0.5f
@@ -197,7 +197,7 @@ public class TruthMapTests
         map.Claims.Add(new Claim
         {
             Id = "c1",
-            Agent = "product_strategist",
+            Agent = "gpt_agent",
             Round = 2,
             Text = "Ship a narrow MVP",
             Confidence = 0.6f,
@@ -216,18 +216,18 @@ public class TruthMapTests
             Id = "d1",
             Text = "Use web-first delivery",
             Rationale = "Fastest to market",
-            Owner = "technical_architect",
+            Owner = "gpt_agent",
             DerivedFrom = ["c1"]
         });
         map.Risks.Add(new Risk
         {
             Id = "r1",
-            Agent = "contrarian",
+            Agent = "claude_agent",
             Text = "Scope creep",
             Mitigation = "Weekly scope review",
             DerivedFrom = ["d1"]
         });
-        map.OpenQuestions.Add(new OpenQuestion { Id = "q1", Text = "What is pricing?", RaisedBy = "socratic_clarifier" });
+        map.OpenQuestions.Add(new OpenQuestion { Id = "q1", Text = "What is pricing?", RaisedBy = "moderator" });
         map.Evidence.Add(new Evidence
         {
             Id = "e1",

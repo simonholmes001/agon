@@ -22,18 +22,18 @@ public class AgentRunnerTests
 
         var responses = new List<AgentExecutionResult>
         {
-            AgentExecutionResult.Success("technical_architect", CreatePatch("technical_architect")),
-            AgentExecutionResult.Success("contrarian", CreatePatch("contrarian")),
-            AgentExecutionResult.Success("product_strategist", CreatePatch("product_strategist"))
+            AgentExecutionResult.Success("gpt_agent", CreatePatch("gpt_agent")),
+            AgentExecutionResult.Success("claude_agent", CreatePatch("claude_agent")),
+            AgentExecutionResult.Success("gpt_agent", CreatePatch("gpt_agent"))
         };
 
         await sut.ApplyValidatedPatchesAsync(sessionId, responses, CancellationToken.None);
 
         Received.InOrder(() =>
         {
-            repository.ApplyPatchAsync(sessionId, Arg.Is<TruthMapPatch>(p => p.Meta.Agent == "contrarian"), Arg.Any<CancellationToken>());
-            repository.ApplyPatchAsync(sessionId, Arg.Is<TruthMapPatch>(p => p.Meta.Agent == "product_strategist"), Arg.Any<CancellationToken>());
-            repository.ApplyPatchAsync(sessionId, Arg.Is<TruthMapPatch>(p => p.Meta.Agent == "technical_architect"), Arg.Any<CancellationToken>());
+            repository.ApplyPatchAsync(sessionId, Arg.Is<TruthMapPatch>(p => p.Meta.Agent == "claude_agent"), Arg.Any<CancellationToken>());
+            repository.ApplyPatchAsync(sessionId, Arg.Is<TruthMapPatch>(p => p.Meta.Agent == "gpt_agent"), Arg.Any<CancellationToken>());
+            repository.ApplyPatchAsync(sessionId, Arg.Is<TruthMapPatch>(p => p.Meta.Agent == "gpt_agent"), Arg.Any<CancellationToken>());
         });
     }
 
@@ -52,8 +52,8 @@ public class AgentRunnerTests
 
         var responses = new List<AgentExecutionResult>
         {
-            AgentExecutionResult.Success("contrarian", CreatePatch("contrarian")),
-            AgentExecutionResult.Success("product_strategist", CreatePatch("product_strategist"))
+            AgentExecutionResult.Success("claude_agent", CreatePatch("claude_agent")),
+            AgentExecutionResult.Success("gpt_agent", CreatePatch("gpt_agent"))
         };
 
         await sut.ApplyValidatedPatchesAsync(sessionId, responses, CancellationToken.None);
@@ -76,20 +76,20 @@ public class AgentRunnerTests
 
         var responses = new List<AgentExecutionResult>
         {
-            AgentExecutionResult.Timeout("contrarian"),
-            AgentExecutionResult.Success("product_strategist", patch: null, message: "no patch"),
-            AgentExecutionResult.Success("technical_architect", CreatePatch("technical_architect"))
+            AgentExecutionResult.Timeout("claude_agent"),
+            AgentExecutionResult.Success("gpt_agent", patch: null, message: "no patch"),
+            AgentExecutionResult.Success("gpt_agent", CreatePatch("gpt_agent"))
         };
 
         await sut.ApplyValidatedPatchesAsync(sessionId, responses, CancellationToken.None);
 
         await repository.Received(1).ApplyPatchAsync(
             sessionId,
-            Arg.Is<TruthMapPatch>(patch => patch.Meta.Agent == "technical_architect"),
+            Arg.Is<TruthMapPatch>(patch => patch.Meta.Agent == "gpt_agent"),
             Arg.Any<CancellationToken>());
         await eventBroadcaster.Received(1).TruthMapPatchedAsync(
             sessionId,
-            Arg.Is<TruthMapPatch>(patch => patch.Meta.Agent == "technical_architect"),
+            Arg.Is<TruthMapPatch>(patch => patch.Meta.Agent == "gpt_agent"),
             Arg.Any<int>(),
             Arg.Any<CancellationToken>());
     }
@@ -104,11 +104,11 @@ public class AgentRunnerTests
         var logger = Substitute.For<ILogger<AgentRunner>>();
         var sut = new AgentRunner(repository, eventBroadcaster, logger);
         var sessionId = Guid.NewGuid();
-        var patch = CreatePatch("contrarian");
+        var patch = CreatePatch("claude_agent");
 
         await sut.ApplyValidatedPatchesAsync(
             sessionId,
-            [AgentExecutionResult.Success("contrarian", patch)],
+            [AgentExecutionResult.Success("claude_agent", patch)],
             CancellationToken.None);
 
         await eventBroadcaster.Received(1).TruthMapPatchedAsync(
@@ -125,13 +125,13 @@ public class AgentRunnerTests
         var eventBroadcaster = Substitute.For<IEventBroadcaster>();
         var logger = Substitute.For<ILogger<AgentRunner>>();
         var sut = new AgentRunner(repository, eventBroadcaster, logger);
-        var slowAgent = new SlowAgent("contrarian");
+        var slowAgent = new SlowAgent("claude_agent");
 
         var context = new AgentContext
         {
             SessionId = Guid.NewGuid(),
             Round = 1,
-            Phase = SessionPhase.DebateRound1,
+            Phase = SessionPhase.DraftRound1,
             TruthMap = TruthMapState.CreateNew(Guid.NewGuid()),
             FrictionLevel = 50
         };
@@ -150,13 +150,13 @@ public class AgentRunnerTests
         var eventBroadcaster = Substitute.For<IEventBroadcaster>();
         var logger = Substitute.For<ILogger<AgentRunner>>();
         var sut = new AgentRunner(repository, eventBroadcaster, logger);
-        var failingAgent = new SyncFailAgent("product_strategist");
+        var failingAgent = new SyncFailAgent("gpt_agent");
 
         var context = new AgentContext
         {
             SessionId = Guid.NewGuid(),
             Round = 1,
-            Phase = SessionPhase.DebateRound1,
+            Phase = SessionPhase.DraftRound1,
             TruthMap = TruthMapState.CreateNew(Guid.NewGuid()),
             FrictionLevel = 50
         };
@@ -180,7 +180,7 @@ public class AgentRunnerTests
         {
             SessionId = Guid.NewGuid(),
             Round = 1,
-            Phase = SessionPhase.DebateRound1,
+            Phase = SessionPhase.DraftRound1,
             TruthMap = TruthMapState.CreateNew(Guid.NewGuid()),
             FrictionLevel = 50
         };
@@ -218,7 +218,7 @@ public class AgentRunnerTests
         {
             SessionId = Guid.NewGuid(),
             Round = 1,
-            Phase = SessionPhase.DebateRound1,
+            Phase = SessionPhase.DraftRound1,
             TruthMap = TruthMapState.CreateNew(Guid.NewGuid()),
             FrictionLevel = 50
         };
@@ -246,13 +246,13 @@ public class AgentRunnerTests
         {
             SessionId = Guid.NewGuid(),
             Round = 1,
-            Phase = SessionPhase.DebateRound1,
+            Phase = SessionPhase.DraftRound1,
             TruthMap = TruthMapState.CreateNew(Guid.NewGuid()),
             FrictionLevel = 50
         };
 
         var results = await sut.RunRoundAsync(
-            [new AsyncFailAgent("research_librarian", "upstream 500")],
+            [new AsyncFailAgent("moderator", "upstream 500")],
             context,
             TimeSpan.FromSeconds(1),
             CancellationToken.None);
@@ -274,13 +274,13 @@ public class AgentRunnerTests
         {
             SessionId = Guid.NewGuid(),
             Round = 1,
-            Phase = SessionPhase.DebateRound1,
+            Phase = SessionPhase.DraftRound1,
             TruthMap = TruthMapState.CreateNew(Guid.NewGuid()),
             FrictionLevel = 50
         };
 
         var results = await sut.RunRoundAsync(
-            [new CanceledAgent("contrarian")],
+            [new CanceledAgent("claude_agent")],
             context,
             TimeSpan.FromSeconds(1),
             CancellationToken.None);
