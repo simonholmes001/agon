@@ -56,3 +56,24 @@ public record SessionMessageResponse(
     string RoutedAgentId,
     string Reply,
     bool PatchApplied);
+
+/// <summary>
+/// Response containing list of available artifact types.
+/// </summary>
+public record ArtifactListResponse(
+    Guid SessionId,
+    IReadOnlyList<string> AvailableTypes);
+
+/// <summary>
+/// Response containing a generated artifact.
+/// </summary>
+public record ArtifactResponse(
+    Guid SessionId,
+    string Type,
+    string Content,
+    DateTimeOffset GeneratedAtUtc);
+
+/// <summary>
+/// Request to export selected artifact types.
+/// </summary>
+public record ExportArtifactsRequest(IReadOnlyList<string>? Types);

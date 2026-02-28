@@ -84,11 +84,13 @@ applyTo: '**'
 - [x] CI updated — backend test count captured + combined frontend+backend badge in `update-badges` job
 - [x] README badges — xUnit badge added, combined test count (frontend + backend)
 - [x] Architecture pivot — 7 role-based agents → 5 model-based agents (Moderator, GPT, Gemini, Claude, Synthesizer)
-- [x] Artifact generator infrastructure — `IArtifactGenerator` interface + full suite of generators (83 tests total):
+- [x] Artifact generator infrastructure — `IArtifactGenerator` interface + full suite of generators (88 tests total):
   - `CopilotInstructionGenerator` (26 tests) — generates `.github/copilot-instructions.md` style files
   - `ArchitectureInstructionGenerator` (18 tests) — generates architecture instruction files with topology, decisions, constraints, technical risks
   - `PrdInstructionGenerator` (21 tests) — generates PRD instruction files with executive summary, problem statement, metrics, assumptions, risks, open questions
   - `RiskRegistryGenerator` (10 tests) — generates risk registry with severity/category summaries
   - `AssumptionValidationGenerator` (13 tests) — generates assumption validation tables with status tracking
+- [x] Artifact API endpoints — `GET /sessions/{id}/artifacts`, `GET /sessions/{id}/artifacts/{type}`, `POST /sessions/{id}/artifacts/export` (15 API tests)
+- [x] Artifact export UI — Export Artifacts dialog with artifact type selection, ZIP download (12 frontend tests)
 
 

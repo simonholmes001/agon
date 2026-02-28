@@ -7,7 +7,7 @@
 [![.NET](https://img.shields.io/badge/.NET-9-512BD4?style=flat-square&logo=dotnet&logoColor=fff)](https://dotnet.microsoft.com)
 [![Vitest](https://img.shields.io/badge/Tested_with-Vitest-6E9F18?style=flat-square&logo=vitest&logoColor=fff)](https://vitest.dev)
 [![xUnit](https://img.shields.io/badge/Tested_with-xUnit-512BD4?style=flat-square&logo=dotnet&logoColor=fff)](https://xunit.net)
-[![Tests](https://img.shields.io/badge/Tests-589_passing-brightgreen?style=flat-square)]()
+[![Tests](https://img.shields.io/badge/Tests-616_passing-brightgreen?style=flat-square)]()
 [![Coverage](https://img.shields.io/badge/Coverage-87%25_lines-green?style=flat-square)]()
 [![TDD](https://img.shields.io/badge/Methodology-TDD-red?style=flat-square)]()
 [![Licence](https://img.shields.io/badge/Licence-Private-lightgrey?style=flat-square)]()
@@ -444,14 +444,16 @@ All generators implement the `IArtifactGenerator` interface and produce Markdown
 - [x] Frontend shell — landing, session creation, debate view, sessions list
 - [x] Type system mirroring backend schemas
 - [x] Agent registry with model assignments and visual identity
-- [x] Component test suite (178 tests, 21 files)
+- [x] Component test suite (190 tests, 22 files)
 - [x] CI pipeline with automated badge updates
 - [x] Backend architecture decisions documented (MAF integration strategy)
 - [x] Domain model — TruthMap, PatchValidator, RoundPolicy, ConfidenceDecayEngine, ChangeImpactCalculator (TDD)
 - [x] Backend vertical slice — Application/Infrastructure/API scaffold with in-memory adapters and core session endpoints
 - [x] Architecture pivot — 7 role-based agents → 5 model-based agents (Moderator, GPT, Gemini, Claude, Synthesizer)
-- [x] Backend test suite — 411 tests (149 Domain + 47 Infrastructure + 37 API + 178 Application)
+- [x] Backend test suite — 426 tests (149 Domain + 47 Infrastructure + 52 API + 178 Application)
 - [x] Artifact generator infrastructure — `IArtifactGenerator` interface + 5 generators for GitHub Copilot instruction file export
+- [x] Artifact export API — `GET /sessions/{id}/artifacts`, `GET /sessions/{id}/artifacts/{type}`, `POST /sessions/{id}/artifacts/export`
+- [x] Artifact export UI — Export dialog with artifact type selection and ZIP download
 - [ ] Application layer — full Orchestrator state machine, AgentRunner, ICouncilAgent expansion
 - [ ] Infrastructure layer — MAF agents, PostgreSQL, Redis, full SignalR event surface (replace in-memory adapters)
 - [ ] API layer — full REST endpoints + global exception middleware

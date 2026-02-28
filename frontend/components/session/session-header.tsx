@@ -16,19 +16,21 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import ThemeToggle from "@/components/theme-toggle";
+import ExportArtifactsDialog from "@/components/session/export-artifacts-dialog";
 import { PHASE_LABELS, getFrictionLabel } from "@/lib/constants";
 import type { SessionPhase } from "@/types";
 
 interface SessionHeaderProps {
-  sessionId: string;
-  phase: SessionPhase;
-  frictionLevel: number;
-  onFrictionChange: (value: number) => void;
-  onToggleTruthMap: () => void;
-  truthMapOpen: boolean;
+  readonly sessionId: string;
+  readonly phase: SessionPhase;
+  readonly frictionLevel: number;
+  readonly onFrictionChange: (value: number) => void;
+  readonly onToggleTruthMap: () => void;
+  readonly truthMapOpen: boolean;
 }
 
 export default function SessionHeader({
+  sessionId,
   phase,
   frictionLevel,
   onFrictionChange,
@@ -86,6 +88,11 @@ export default function SessionHeader({
         </div>
 
         <ThemeToggle />
+
+        <ExportArtifactsDialog 
+          sessionId={sessionId} 
+          disabled={phase === "CLARIFICATION" || phase === "INTAKE"} 
+        />
 
         <Button
           variant={truthMapOpen ? "secondary" : "ghost"}

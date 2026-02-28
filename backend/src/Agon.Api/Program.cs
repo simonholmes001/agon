@@ -45,7 +45,15 @@ builder.Services.AddSingleton<IEventBroadcaster, SignalREventBroadcaster>();
 builder.Services.AddSingleton<Orchestrator>();
 builder.Services.AddSingleton<AgentRunner>();
 builder.Services.AddSingleton<SessionService>();
+builder.Services.AddSingleton<ArtifactService>();
 builder.Services.AddHttpClient();
+
+// Artifact generators
+builder.Services.AddSingleton<IArtifactGenerator, CopilotInstructionGenerator>();
+builder.Services.AddSingleton<IArtifactGenerator, ArchitectureInstructionGenerator>();
+builder.Services.AddSingleton<IArtifactGenerator, PrdInstructionGenerator>();
+builder.Services.AddSingleton<IArtifactGenerator, RiskRegistryGenerator>();
+builder.Services.AddSingleton<IArtifactGenerator, AssumptionValidationGenerator>();
 
 var providerConfig = ProviderConfiguration.Load(builder.Configuration);
 builder.Services.AddCouncilAgents(providerConfig);
@@ -57,6 +65,7 @@ app.UseCors(FrontendCorsPolicy);
 LogStartupInformation(app, dotEnvLoadResult, providerConfig);
 
 app.MapSessionEndpoints();
+app.MapArtifactEndpoints();
 app.MapHub<DebateHub>("/hubs/debate");
 
 await app.RunAsync();
