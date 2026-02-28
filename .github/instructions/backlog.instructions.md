@@ -53,7 +53,7 @@ applyTo: '**'
 - [x] Landing page with gradient branding + theme toggle
 - [x] Session UI components (thread view, agent message cards, message composer, session header, Truth Map drawer)
 - [x] Light/dark theme (ThemeProvider + ThemeToggle)
-- [x] Frontend test suite — 154 tests, 19 files
+- [x] Frontend test suite — 178 tests, 21 files
 - [x] CI pipeline — GitHub Actions (frontend-tests + backend-tests with .NET auto-detect)
 - [x] Pre-commit hook (frontend + backend, skips if no .NET project)
 - [x] Automatic coverage badges (frontend only — backend pending)
@@ -80,6 +80,15 @@ applyTo: '**'
 - [x] Agent config — per-agent model provider, model name, max tokens, timeout, active phases with `DefaultCouncil`
 - [x] Agent identifiers — `AgentId` constants with `IsCouncilAgent` + `AllCouncil`
 - [x] Session enums — `SessionPhase` (9 phases), `SessionMode`, `SessionStatus`
-- [x] Backend test suite — 158 tests, TDD (Red → Green → Refactor)
+- [x] Backend test suite — 354 tests, TDD (Red → Green → Refactor)
 - [x] CI updated — backend test count captured + combined frontend+backend badge in `update-badges` job
 - [x] README badges — xUnit badge added, combined test count (frontend + backend)
+- [x] Architecture pivot — 7 role-based agents → 5 model-based agents (Moderator, GPT, Gemini, Claude, Synthesizer)
+- [x] Artifact generator infrastructure — `IArtifactGenerator` interface + full suite of generators (83 tests total):
+  - `CopilotInstructionGenerator` (26 tests) — generates `.github/copilot-instructions.md` style files
+  - `ArchitectureInstructionGenerator` (18 tests) — generates architecture instruction files with topology, decisions, constraints, technical risks
+  - `PrdInstructionGenerator` (21 tests) — generates PRD instruction files with executive summary, problem statement, metrics, assumptions, risks, open questions
+  - `RiskRegistryGenerator` (10 tests) — generates risk registry with severity/category summaries
+  - `AssumptionValidationGenerator` (13 tests) — generates assumption validation tables with status tracking
+
+
