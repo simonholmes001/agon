@@ -3,20 +3,21 @@ namespace Agon.Domain.Sessions;
 /// <summary>
 /// All session phases from the round-policy specification v2.0.
 /// The Orchestrator transitions between these phases deterministically.
-/// 
-/// Sequential drafting flow:
-///   INTAKE → CLARIFICATION → DRAFT_ROUND_1 (GPT) → DRAFT_ROUND_2 (Gemini) → DRAFT_ROUND_3 (Claude) → CRITIQUE → SYNTHESIS
+///
+/// New parallel agent graph:
+///   INTAKE → CLARIFICATION (GPT moderator, may loop) → CONSTRUCTION (GPT+Gemini+Claude in parallel)
+///          → CRITIQUE (critique agent reviews all proposals) → REFINEMENT (agents refine, bounded)
+///          → SYNTHESIS → DELIVER | DELIVER_WITH_GAPS → POST_DELIVERY
 /// </summary>
 public enum SessionPhase
 {
     Intake,
-    Clarification,
-    DraftRound1,    // GPT Agent creates initial draft
-    DraftRound2,    // Gemini Agent improves draft
-    DraftRound3,    // Claude Agent refines draft
-    Critique,       // All three agents critique in parallel
-    Synthesis,
-    TargetedLoop,
+    Clarification,      // GPT moderator asks clarifying questions (may loop up to MaxClarificationRounds)
+    Construction,       // GPT, Gemini, Claude all run in parallel producing proposals
+    Critique,           // Critique agent reviews all proposals and produces suggestions
+    Refinement,         // GPT, Gemini, Claude all refine their proposals based on critique (bounded)
+    Synthesis,          // Synthesizer produces final unified output from all refined proposals
+    TargetedLoop,       // Reserved: additional targeted gap-filling after synthesis
     Deliver,
     DeliverWithGaps,
     PostDelivery

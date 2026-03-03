@@ -6,12 +6,13 @@ namespace Agon.Domain.Tests.Agents;
 public class AgentIdTests
 {
     [Fact]
-    public void AgentId_ContainsAllFiveCouncilAgents()
+    public void AgentId_ContainsAllSixCouncilAgents()
     {
         AgentId.Moderator.Should().Be("moderator");
         AgentId.GptAgent.Should().Be("gpt_agent");
         AgentId.GeminiAgent.Should().Be("gemini_agent");
         AgentId.ClaudeAgent.Should().Be("claude_agent");
+        AgentId.CritiqueAgent.Should().Be("critique_agent");
         AgentId.Synthesizer.Should().Be("synthesizer");
     }
 
@@ -28,15 +29,16 @@ public class AgentIdTests
     }
 
     [Fact]
-    public void AgentId_All_ReturnsAllFiveCouncilAgents()
+    public void AgentId_All_ReturnsAllSixCouncilAgents()
     {
         var all = AgentId.AllCouncil;
 
-        all.Should().HaveCount(5);
+        all.Should().HaveCount(6);
         all.Should().Contain(AgentId.Moderator);
         all.Should().Contain(AgentId.GptAgent);
         all.Should().Contain(AgentId.GeminiAgent);
         all.Should().Contain(AgentId.ClaudeAgent);
+        all.Should().Contain(AgentId.CritiqueAgent);
         all.Should().Contain(AgentId.Synthesizer);
     }
 
@@ -56,6 +58,7 @@ public class AgentIdTests
     [InlineData("gpt_agent", true)]
     [InlineData("gemini_agent", true)]
     [InlineData("claude_agent", true)]
+    [InlineData("critique_agent", true)]
     [InlineData("synthesizer", true)]
     [InlineData("orchestrator", false)]
     [InlineData("user", false)]

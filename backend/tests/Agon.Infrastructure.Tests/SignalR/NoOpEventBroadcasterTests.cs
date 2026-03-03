@@ -13,7 +13,7 @@ public class NoOpEventBroadcasterTests
     {
         var sut = new NoOpEventBroadcaster();
 
-        var act = () => sut.RoundProgressAsync(Guid.NewGuid(), SessionPhase.DraftRound1, CancellationToken.None);
+        var act = () => sut.RoundProgressAsync(Guid.NewGuid(), SessionPhase.Construction, CancellationToken.None);
 
         await act.Should().NotThrowAsync();
     }

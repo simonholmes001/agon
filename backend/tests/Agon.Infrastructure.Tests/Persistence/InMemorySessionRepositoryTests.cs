@@ -45,11 +45,11 @@ public class InMemorySessionRepositoryTests
         };
 
         await repository.CreateAsync(session, CancellationToken.None);
-        session.Phase = SessionPhase.DraftRound1;
+        session.Phase = SessionPhase.Construction;
 
         await repository.UpdateAsync(session, CancellationToken.None);
 
         var loaded = await repository.GetAsync(session.SessionId, CancellationToken.None);
-        loaded!.Phase.Should().Be(SessionPhase.DraftRound1);
+        loaded!.Phase.Should().Be(SessionPhase.Construction);
     }
 }

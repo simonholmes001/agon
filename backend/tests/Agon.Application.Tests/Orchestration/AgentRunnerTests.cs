@@ -131,7 +131,7 @@ public class AgentRunnerTests
         {
             SessionId = Guid.NewGuid(),
             Round = 1,
-            Phase = SessionPhase.DraftRound1,
+            Phase = SessionPhase.Construction,
             TruthMap = TruthMapState.CreateNew(Guid.NewGuid()),
             FrictionLevel = 50
         };
@@ -156,7 +156,7 @@ public class AgentRunnerTests
         {
             SessionId = Guid.NewGuid(),
             Round = 1,
-            Phase = SessionPhase.DraftRound1,
+            Phase = SessionPhase.Construction,
             TruthMap = TruthMapState.CreateNew(Guid.NewGuid()),
             FrictionLevel = 50
         };
@@ -180,7 +180,7 @@ public class AgentRunnerTests
         {
             SessionId = Guid.NewGuid(),
             Round = 1,
-            Phase = SessionPhase.DraftRound1,
+            Phase = SessionPhase.Construction,
             TruthMap = TruthMapState.CreateNew(Guid.NewGuid()),
             FrictionLevel = 50
         };
@@ -218,7 +218,7 @@ public class AgentRunnerTests
         {
             SessionId = Guid.NewGuid(),
             Round = 1,
-            Phase = SessionPhase.DraftRound1,
+            Phase = SessionPhase.Construction,
             TruthMap = TruthMapState.CreateNew(Guid.NewGuid()),
             FrictionLevel = 50
         };
@@ -246,7 +246,7 @@ public class AgentRunnerTests
         {
             SessionId = Guid.NewGuid(),
             Round = 1,
-            Phase = SessionPhase.DraftRound1,
+            Phase = SessionPhase.Construction,
             TruthMap = TruthMapState.CreateNew(Guid.NewGuid()),
             FrictionLevel = 50
         };
@@ -274,7 +274,7 @@ public class AgentRunnerTests
         {
             SessionId = Guid.NewGuid(),
             Round = 1,
-            Phase = SessionPhase.DraftRound1,
+            Phase = SessionPhase.Construction,
             TruthMap = TruthMapState.CreateNew(Guid.NewGuid()),
             FrictionLevel = 50
         };

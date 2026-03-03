@@ -12,7 +12,7 @@ public static class AgentPromptComposer
     public static string ComposePrompt(string agentId, AgentContext context)
     {
         var normalizedAgentId = NormalizeAgentId(agentId);
-        var systemPrompt = AgentSystemPrompts.GetPrompt(normalizedAgentId);
+        var systemPrompt = AgentSystemPrompts.GetPrompt(normalizedAgentId, context.Phase);
         var directives = context.MicroDirectives
             .Where(directive => !string.IsNullOrWhiteSpace(directive))
             .Select(directive => directive.Trim())

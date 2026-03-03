@@ -17,33 +17,33 @@ public class AgentSystemPromptsTests
     [Fact]
     public void GptAgentDraft_PromptContainsRoleAndAnalysis()
     {
-        AgentSystemPrompts.GptAgentDraft.Should().Contain("Initial Analyst");
-        AgentSystemPrompts.GptAgentDraft.Should().Contain("comprehensive analysis");
-        AgentSystemPrompts.GptAgentDraft.Should().Contain("foundation");
+        AgentSystemPrompts.GptAgentConstruct.Should().Contain("Constructor");
+        AgentSystemPrompts.GptAgentConstruct.Should().Contain("proposal");
+        AgentSystemPrompts.GptAgentConstruct.Should().Contain("GPT");
     }
 
     [Fact]
     public void GeminiAgentImprove_PromptContainsRoleAndImprovement()
     {
-        AgentSystemPrompts.GeminiAgentImprove.Should().Contain("Draft Improver");
-        AgentSystemPrompts.GeminiAgentImprove.Should().Contain("Improve");
-        AgentSystemPrompts.GeminiAgentImprove.Should().Contain("DELTA");
+        AgentSystemPrompts.GeminiAgentConstruct.Should().Contain("Constructor");
+        AgentSystemPrompts.GeminiAgentConstruct.Should().Contain("proposal");
+        AgentSystemPrompts.GeminiAgentConstruct.Should().Contain("Gemini");
     }
 
     [Fact]
     public void ClaudeAgentRefine_PromptContainsRoleAndRefinement()
     {
-        AgentSystemPrompts.ClaudeAgentRefine.Should().Contain("Draft Refiner");
-        AgentSystemPrompts.ClaudeAgentRefine.Should().Contain("polished");
-        AgentSystemPrompts.ClaudeAgentRefine.Should().Contain("harmonise");
+        AgentSystemPrompts.ClaudeAgentRefine.Should().Contain("Refiner");
+        AgentSystemPrompts.ClaudeAgentRefine.Should().Contain("critique");
+        AgentSystemPrompts.ClaudeAgentRefine.Should().Contain("Claude Opus");
     }
 
     [Fact]
     public void CritiqueMode_PromptContainsRoleAndCritique()
     {
-        AgentSystemPrompts.CritiqueMode.Should().Contain("Critic");
-        AgentSystemPrompts.CritiqueMode.Should().Contain("critique");
-        AgentSystemPrompts.CritiqueMode.Should().Contain("weaknesses");
+        AgentSystemPrompts.CritiqueAgentPrompt.Should().Contain("Critique Agent");
+        AgentSystemPrompts.CritiqueAgentPrompt.Should().Contain("CRITIQUE SUMMARY");
+        AgentSystemPrompts.CritiqueAgentPrompt.Should().Contain("feedback");
     }
 
     [Fact]
@@ -57,10 +57,13 @@ public class AgentSystemPromptsTests
     public void AllPrompts_AreNonEmptyStrings()
     {
         AgentSystemPrompts.Moderator.Should().NotBeNullOrWhiteSpace();
-        AgentSystemPrompts.GptAgentDraft.Should().NotBeNullOrWhiteSpace();
-        AgentSystemPrompts.GeminiAgentImprove.Should().NotBeNullOrWhiteSpace();
+        AgentSystemPrompts.GptAgentConstruct.Should().NotBeNullOrWhiteSpace();
+        AgentSystemPrompts.GptAgentRefine.Should().NotBeNullOrWhiteSpace();
+        AgentSystemPrompts.GeminiAgentConstruct.Should().NotBeNullOrWhiteSpace();
+        AgentSystemPrompts.GeminiAgentRefine.Should().NotBeNullOrWhiteSpace();
+        AgentSystemPrompts.ClaudeAgentConstruct.Should().NotBeNullOrWhiteSpace();
         AgentSystemPrompts.ClaudeAgentRefine.Should().NotBeNullOrWhiteSpace();
-        AgentSystemPrompts.CritiqueMode.Should().NotBeNullOrWhiteSpace();
+        AgentSystemPrompts.CritiqueAgentPrompt.Should().NotBeNullOrWhiteSpace();
         AgentSystemPrompts.Synthesizer.Should().NotBeNullOrWhiteSpace();
     }
 
@@ -68,10 +71,10 @@ public class AgentSystemPromptsTests
     public void AllPrompts_ContainPatchRules()
     {
         AgentSystemPrompts.Moderator.Should().Contain("PATCH");
-        AgentSystemPrompts.GptAgentDraft.Should().Contain("PATCH");
-        AgentSystemPrompts.GeminiAgentImprove.Should().Contain("PATCH");
-        AgentSystemPrompts.ClaudeAgentRefine.Should().Contain("PATCH");
-        AgentSystemPrompts.CritiqueMode.Should().Contain("PATCH");
+        AgentSystemPrompts.GptAgentConstruct.Should().Contain("PATCH");
+        AgentSystemPrompts.GeminiAgentConstruct.Should().Contain("PATCH");
+        AgentSystemPrompts.ClaudeAgentConstruct.Should().Contain("PATCH");
+        AgentSystemPrompts.CritiqueAgentPrompt.Should().Contain("PATCH");
         AgentSystemPrompts.Synthesizer.Should().Contain("PATCH");
     }
 
@@ -79,22 +82,23 @@ public class AgentSystemPromptsTests
     public void GetPrompt_WithPhase_ReturnsCorrectPromptForAgentId()
     {
         AgentSystemPrompts.GetPrompt(AgentId.Moderator, SessionPhase.Clarification).Should().Be(AgentSystemPrompts.Moderator);
-        AgentSystemPrompts.GetPrompt(AgentId.GptAgent, SessionPhase.DraftRound1).Should().Be(AgentSystemPrompts.GptAgentDraft);
-        AgentSystemPrompts.GetPrompt(AgentId.GeminiAgent, SessionPhase.DraftRound2).Should().Be(AgentSystemPrompts.GeminiAgentImprove);
-        AgentSystemPrompts.GetPrompt(AgentId.ClaudeAgent, SessionPhase.DraftRound3).Should().Be(AgentSystemPrompts.ClaudeAgentRefine);
+        AgentSystemPrompts.GetPrompt(AgentId.GptAgent, SessionPhase.Construction).Should().Be(AgentSystemPrompts.GptAgentConstruct);
+        AgentSystemPrompts.GetPrompt(AgentId.GptAgent, SessionPhase.Refinement).Should().Be(AgentSystemPrompts.GptAgentRefine);
+        AgentSystemPrompts.GetPrompt(AgentId.GeminiAgent, SessionPhase.Construction).Should().Be(AgentSystemPrompts.GeminiAgentConstruct);
+        AgentSystemPrompts.GetPrompt(AgentId.GeminiAgent, SessionPhase.Refinement).Should().Be(AgentSystemPrompts.GeminiAgentRefine);
+        AgentSystemPrompts.GetPrompt(AgentId.ClaudeAgent, SessionPhase.Construction).Should().Be(AgentSystemPrompts.ClaudeAgentConstruct);
+        AgentSystemPrompts.GetPrompt(AgentId.ClaudeAgent, SessionPhase.Refinement).Should().Be(AgentSystemPrompts.ClaudeAgentRefine);
+        AgentSystemPrompts.GetPrompt(AgentId.CritiqueAgent, SessionPhase.Critique).Should().Be(AgentSystemPrompts.CritiqueAgentPrompt);
         AgentSystemPrompts.GetPrompt(AgentId.Synthesizer, SessionPhase.Synthesis).Should().Be(AgentSystemPrompts.Synthesizer);
     }
 
     [Fact]
     public void GetPrompt_InCritiquePhase_ReturnsCritiquePromptWithModelName()
     {
-        var gptCritique = AgentSystemPrompts.GetPrompt(AgentId.GptAgent, SessionPhase.Critique);
-        var geminiCritique = AgentSystemPrompts.GetPrompt(AgentId.GeminiAgent, SessionPhase.Critique);
-        var claudeCritique = AgentSystemPrompts.GetPrompt(AgentId.ClaudeAgent, SessionPhase.Critique);
+        var critiquePrompt = AgentSystemPrompts.GetPrompt(AgentId.CritiqueAgent, SessionPhase.Critique);
 
-        gptCritique.Should().Contain("GPT-5.2");
-        geminiCritique.Should().Contain("Gemini 3");
-        claudeCritique.Should().Contain("Claude Opus 4.6");
+        critiquePrompt.Should().Contain("Critique");
+        critiquePrompt.Should().Be(AgentSystemPrompts.CritiqueAgentPrompt);
     }
 
     [Fact]

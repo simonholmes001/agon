@@ -7,7 +7,7 @@
 [![.NET](https://img.shields.io/badge/.NET-9-512BD4?style=flat-square&logo=dotnet&logoColor=fff)](https://dotnet.microsoft.com)
 [![Vitest](https://img.shields.io/badge/Tested_with-Vitest-6E9F18?style=flat-square&logo=vitest&logoColor=fff)](https://vitest.dev)
 [![xUnit](https://img.shields.io/badge/Tested_with-xUnit-512BD4?style=flat-square&logo=dotnet&logoColor=fff)](https://xunit.net)
-[![Tests](https://img.shields.io/badge/Tests-616_passing-brightgreen?style=flat-square)]()
+[![Tests](https://img.shields.io/badge/Tests-618_passing-brightgreen?style=flat-square)]()
 [![Coverage](https://img.shields.io/badge/Coverage-87%25_lines-green?style=flat-square)]()
 [![TDD](https://img.shields.io/badge/Methodology-TDD-red?style=flat-square)]()
 [![Licence](https://img.shields.io/badge/Licence-Private-lightgrey?style=flat-square)]()
@@ -25,8 +25,8 @@ Unlike a single-prompt AI chat, Agon maintains a **living Truth Map**: a structu
 | Concept | Description |
 |---|---|
 | **Truth Map** | Shared state graph (claims, assumptions, risks, decisions, evidence) — the single source of truth for the session. Agents propose patches; the Orchestrator validates and applies them. |
-| **Council** | Five model-based agents: Moderator, GPT Agent (OpenAI), Gemini Agent (Google), Claude Agent (Anthropic), and Synthesizer. |
-| **Multi-Model** | Agents use multiple providers (GPT-5.2, Gemini 3, Claude Opus 4.6). Technical Architect is temporarily mapped to GPT-5.2 while DeepSeek billing is paused. |
+| **Council** | Six model-based agents: Moderator, GPT Agent (OpenAI), Gemini Agent (Google), Claude Agent (Anthropic), Critique Agent (Google Gemini), and Synthesizer. |
+| **Multi-Model** | Agents use multiple providers (GPT-5.2, Gemini 3, Claude Opus 4.6) via a single provider-agnostic `MafCouncilAgent` backed by `IChatClient` from `Microsoft.Extensions.AI`. |
 | **Friction Slider** | User-controlled dial (0–100) that modulates agent tone *and* convergence thresholds — from brainstorm (low friction) to adversarial red-team (high friction). |
 | **Bounded Debate** | Hard-capped rounds and token budgets. Sessions always terminate. Degradation is graceful and surfaced, never silent. |
 | **HITL** | Human-in-the-loop: pause, challenge a claim, force a deep dive, change a constraint mid-session — with full change propagation. |
@@ -55,7 +55,7 @@ Unlike a single-prompt AI chat, Agon maintains a **living Truth Map**: a structu
 │  AgentSystemPrompts · Entity types (Claims, Risks, etc.)        │
 ├─────────────────────────────────────────────────────────────────┤
 │  Agon.Infrastructure — MAF agents · DB · SignalR · Blob         │
-│  MafCouncilAgent (wraps ChatClientAgent via IChatClient)        │
+│  MafCouncilAgent (provider-agnostic, IChatClient-backed)        │
 │  FakeCouncilAgent (canned responses for tests)                  │
 └──────┬───────────┬───────────┬───────────┬──────────────────────┘
        │           │           │           │
@@ -111,10 +111,11 @@ Full implementation guide: [`.github/instructions/backend-implementation.instruc
 | Technology | Purpose |
 |---|---|
 | [ASP.NET Core (.NET 9)](https://dotnet.microsoft.com) | API host and composition root |
-| [Microsoft Agent Framework](https://github.com/microsoft/agent-framework) `1.0.0-rc1` | Agent call layer — `ChatClientAgent`, `IChatClient`, provider adapters |
+| [Microsoft Agent Framework](https://github.com/microsoft/agent-framework) `1.0.0-rc1` | Agent call layer — `IChatClient` provider-agnostic interface, `MafCouncilAgent` |
 | [`IChatClient`](https://learn.microsoft.com/dotnet/api/microsoft.extensions.ai.ichatclient) (`Microsoft.Extensions.AI`) | Provider-agnostic LLM interface (replaces spec's `IChatModelClient`) |
-| `Microsoft.Agents.AI.OpenAI` | OpenAI adapter (GPT-5.2 Thinking) |
-| `Microsoft.Agents.AI.Anthropic` | Anthropic adapter (Claude Opus 4.6) |
+| `Microsoft.Extensions.AI.OpenAI` | OpenAI adapter (`new OpenAIClient(key).GetChatClient(model).AsIChatClient()`) |
+| `Anthropic` (official SDK) | Anthropic adapter (`new AnthropicClient { ApiKey = key }.AsIChatClient(modelName)`) |
+| `Google_GenerativeAI.Microsoft` | Gemini adapter (`new GenerativeAIChatClient(apiKey, modelName)` — implements `IChatClient` directly) |
 | [PostgreSQL](https://www.postgresql.org) + [pgvector](https://github.com/pgvector/pgvector) | Sessions, Truth Map (JSONB + normalised entities), semantic memory |
 | [Redis](https://redis.io) | Ephemeral round state, locks, rate limits |
 | [SignalR](https://learn.microsoft.com/aspnet/core/signalr) | Real-time streaming (tokens, patches, convergence) |
@@ -128,9 +129,10 @@ Full implementation guide: [`.github/instructions/backend-implementation.instruc
 | GPT Agent | GPT-5.2 Thinking | OpenAI |
 | Gemini Agent | Gemini 3 (thinking: high) | Google |
 | Claude Agent | Claude Opus 4.6 | Anthropic |
+| Critique Agent | Gemini 3 (thinking: high) | Google |
 | Synthesizer | GPT-5.2 Thinking | OpenAI |
 
-All providers are accessed via `IChatClient` — interchangeable behind the interface. DeepSeek wiring remains in the codebase and can be restored once billing is enabled.
+All providers are accessed via `IChatClient` through `MafCouncilAgent` — fully interchangeable behind the interface. DeepSeek can be wired in via the OpenAI-compatible adapter when needed.
 
 ---
 
@@ -450,12 +452,13 @@ All generators implement the `IArtifactGenerator` interface and produce Markdown
 - [x] Domain model — TruthMap, PatchValidator, RoundPolicy, ConfidenceDecayEngine, ChangeImpactCalculator (TDD)
 - [x] Backend vertical slice — Application/Infrastructure/API scaffold with in-memory adapters and core session endpoints
 - [x] Architecture pivot — 7 role-based agents → 5 model-based agents (Moderator, GPT, Gemini, Claude, Synthesizer)
-- [x] Backend test suite — 426 tests (149 Domain + 47 Infrastructure + 52 API + 178 Application)
+- [x] Backend test suite — 428 tests (151 Domain + 42 Infrastructure + 54 API + 181 Application)
 - [x] Artifact generator infrastructure — `IArtifactGenerator` interface + 5 generators for GitHub Copilot instruction file export
 - [x] Artifact export API — `GET /sessions/{id}/artifacts`, `GET /sessions/{id}/artifacts/{type}`, `POST /sessions/{id}/artifacts/export`
 - [x] Artifact export UI — Export dialog with artifact type selection and ZIP download
+- [x] MAF compliance remediation — Single provider-agnostic `MafCouncilAgent` via `IChatClient`; 6 agents (Moderator, GPT, Gemini, Claude, Critique, Synthesizer); providers: `Microsoft.Extensions.AI.OpenAI`, `Anthropic`, `Google_GenerativeAI.Microsoft`
 - [ ] Application layer — full Orchestrator state machine, AgentRunner, ICouncilAgent expansion
-- [ ] Infrastructure layer — MAF agents, PostgreSQL, Redis, full SignalR event surface (replace in-memory adapters)
+- [ ] Infrastructure layer — PostgreSQL, Redis, full SignalR event surface (replace in-memory adapters)
 - [ ] API layer — full REST endpoints + global exception middleware
 - [ ] Frontend–backend integration — replace remaining demo thread/truth-map state with live REST + SignalR event data
 

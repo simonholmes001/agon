@@ -79,61 +79,317 @@ public class SessionService(
         string? correlationId = null)
     {
         var resolvedCorrelationId = NormalizeCorrelationId(correlationId);
+        using var logScope = logger.BeginScope(new Dictionary<string, object>
+        {
+            ["SessionId"] = sessionId,
+            ["CorrelationId"] = resolvedCorrelationId
+        });
+
+        logger.LogInformation("StartSessionAsync begin. SessionId={SessionId} CorrelationId={CorrelationId}",
+            sessionId, resolvedCorrelationId);
+
         var session = await sessionRepository.GetAsync(sessionId, cancellationToken);
         if (session is null)
         {
-            logger.LogWarning(
-                "Cannot start session because it was not found. SessionId={SessionId} CorrelationId={CorrelationId}",
-                sessionId,
-                resolvedCorrelationId);
+            logger.LogWarning("Cannot start session — not found. SessionId={SessionId}", sessionId);
             throw new KeyNotFoundException($"Session '{sessionId}' was not found.");
         }
 
         var map = await truthMapRepository.GetAsync(sessionId, cancellationToken);
         if (map is null)
         {
-            logger.LogWarning(
-                "Cannot start session because truth map was not found. SessionId={SessionId} CorrelationId={CorrelationId}",
-                sessionId,
-                resolvedCorrelationId);
+            logger.LogWarning("Cannot start session — truth map not found. SessionId={SessionId}", sessionId);
             throw new KeyNotFoundException($"Truth map for session '{sessionId}' was not found.");
         }
 
-        if (session.Phase == SessionPhase.Clarification)
+        logger.LogInformation("Session found. Phase={Phase} Status={Status}", session.Phase, session.Status);
+
+        if (session.Phase != SessionPhase.Clarification)
         {
-            orchestrator.StartDraftRound1(session);
-            map.Round = session.RoundNumber;
-            await truthMapRepository.UpdateAsync(map, cancellationToken);
-            await eventBroadcaster.RoundProgressAsync(sessionId, session.Phase, cancellationToken);
-            var kickoffMessage = CreateRoundKickoffSystemMessage(sessionId, session.RoundNumber);
-            await transcriptRepository.AppendAsync(sessionId, kickoffMessage, cancellationToken);
-            await eventBroadcaster.TranscriptMessageAppendedAsync(sessionId, kickoffMessage, cancellationToken);
+            logger.LogWarning("StartSession called on session not in Clarification phase. Phase={Phase}", session.Phase);
+            await sessionRepository.UpdateAsync(session, cancellationToken);
+            return session;
+        }
 
-            await RunCouncilRoundAsync(session, map, resolvedCorrelationId, cancellationToken);
+        // ── PHASE 1: CLARIFICATION ─────────────────────────────────────────────
+        // Moderator (GPT) runs once (or up to MaxClarificationRounds if user answers questions).
+        // For the /start endpoint the user has not yet answered anything, so we run once.
+        logger.LogInformation("═══ PHASE: Clarification — running Moderator agent ═══");
+        orchestrator.StartClarification(session);
+        await BroadcastPhaseStartAsync(session, map, cancellationToken);
 
-            // Current vertical slice completes after round 1 and opens
-            // a moderator follow-up lane for user-guided orchestration.
-            session.Phase = SessionPhase.PostDelivery;
-            session.Status = SessionStatus.CompleteWithGaps;
-            await eventBroadcaster.RoundProgressAsync(sessionId, session.Phase, cancellationToken);
+        var clarifierAgents = SelectActiveAgentsForPhase(SessionPhase.Clarification);
+        logger.LogInformation("Clarification agents selected. Count={Count} Agents={Agents}",
+            clarifierAgents.Count,
+            string.Join(", ", clarifierAgents.Select(a => a.AgentId)));
+
+        if (clarifierAgents.Count == 0)
+        {
+            logger.LogWarning("No clarification agent configured — skipping clarification phase");
         }
         else
         {
-            logger.LogDebug(
-                "StartSession called but session is not in clarification. SessionId={SessionId} Phase={Phase} CorrelationId={CorrelationId}",
-                sessionId,
-                session.Phase,
-                resolvedCorrelationId);
+            await RunPhaseRoundAsync(session, map, SessionPhase.Clarification, clarifierAgents, resolvedCorrelationId, cancellationToken);
         }
 
+        // ── PHASE 2: CONSTRUCTION ──────────────────────────────────────────────
+        // GPT, Gemini, Claude all run IN PARALLEL.
+        logger.LogInformation("═══ PHASE: Construction — dispatching GPT + Gemini + Claude in parallel ═══");
+        orchestrator.TransitionToConstruction(session);
+        map.Round = session.RoundNumber;
+        await truthMapRepository.UpdateAsync(map, cancellationToken);
+        await BroadcastPhaseStartAsync(session, map, cancellationToken);
+
+        var constructionAgents = SelectActiveAgentsForPhase(SessionPhase.Construction);
+        logger.LogInformation("Construction agents selected. Count={Count} Agents={Agents}",
+            constructionAgents.Count,
+            string.Join(", ", constructionAgents.Select(a => a.AgentId)));
+
+        if (constructionAgents.Count == 0)
+        {
+            logger.LogWarning("No construction agents configured — cannot proceed");
+        }
+        else
+        {
+            await RunPhaseRoundAsync(session, map, SessionPhase.Construction, constructionAgents, resolvedCorrelationId, cancellationToken);
+        }
+
+        // ── PHASES 3+4: CRITIQUE → REFINEMENT loop (bounded) ──────────────────
+        var continueLoop = true;
+        while (continueLoop)
+        {
+            // ── CRITIQUE ────────────────────────────────────────────────────────
+            logger.LogInformation(
+                "═══ PHASE: Critique (iteration {Iteration}) ═══",
+                session.RefinementIterationCount + 1);
+            orchestrator.TransitionToCritique(session);
+            await BroadcastPhaseStartAsync(session, map, cancellationToken);
+
+            var critiqueAgents = SelectActiveAgentsForPhase(SessionPhase.Critique);
+            logger.LogInformation("Critique agents selected. Count={Count} Agents={Agents}",
+                critiqueAgents.Count,
+                string.Join(", ", critiqueAgents.Select(a => a.AgentId)));
+
+            string? critiqueMessage = null;
+            if (critiqueAgents.Count == 0)
+            {
+                logger.LogWarning("No critique agent configured — skipping critique phase");
+            }
+            else
+            {
+                var critiqueResults = await RunPhaseRoundAsync(
+                    session, map, SessionPhase.Critique, critiqueAgents, resolvedCorrelationId, cancellationToken);
+
+                // Capture the critique MESSAGE so it can be injected into refinement prompts
+                critiqueMessage = critiqueResults
+                    .Where(r => !string.IsNullOrWhiteSpace(r.Message))
+                    .Select(r => r.Message)
+                    .FirstOrDefault();
+                session.LastCritiqueMessage = critiqueMessage;
+                logger.LogInformation("Critique message captured. Length={Length}",
+                    critiqueMessage?.Length ?? 0);
+            }
+
+            // Decide whether to run another refinement
+            continueLoop = orchestrator.ShouldContinueRefinement(session);
+            if (!continueLoop)
+            {
+                logger.LogInformation(
+                    "Refinement iterations exhausted ({Max}), skipping refinement and advancing to Synthesis",
+                    session.RoundPolicy.MaxRefinementIterations);
+                break;
+            }
+
+            // ── REFINEMENT ──────────────────────────────────────────────────────
+            logger.LogInformation(
+                "═══ PHASE: Refinement (iteration {Iteration}) ═══",
+                session.RefinementIterationCount + 1);
+            orchestrator.TransitionToRefinement(session);
+            await BroadcastPhaseStartAsync(session, map, cancellationToken);
+
+            var refinementAgents = SelectActiveAgentsForPhase(SessionPhase.Refinement);
+            logger.LogInformation("Refinement agents selected. Count={Count} Agents={Agents}",
+                refinementAgents.Count,
+                string.Join(", ", refinementAgents.Select(a => a.AgentId)));
+
+            if (refinementAgents.Count == 0)
+            {
+                logger.LogWarning("No refinement agents configured — skipping refinement phase");
+            }
+            else
+            {
+                // Inject the critique message as a directive for each agent
+                var critiquePreamble = string.IsNullOrWhiteSpace(critiqueMessage)
+                    ? []
+                    : new List<string> { $"CRITIQUE FEEDBACK TO ADDRESS:\n{critiqueMessage}" };
+
+                await RunPhaseRoundAsync(
+                    session, map, SessionPhase.Refinement, refinementAgents,
+                    resolvedCorrelationId, cancellationToken, critiquePreamble);
+            }
+
+            // After one full Critique→Refinement, check if more loops are allowed
+            continueLoop = orchestrator.ShouldContinueRefinement(session);
+            logger.LogInformation("After refinement iteration {Iteration}: continueLoop={Continue}",
+                session.RefinementIterationCount, continueLoop);
+        }
+
+        // ── PHASE 5: SYNTHESIS ─────────────────────────────────────────────────
+        logger.LogInformation("═══ PHASE: Synthesis ═══");
+        orchestrator.TransitionToSynthesis(session);
+        await BroadcastPhaseStartAsync(session, map, cancellationToken);
+
+        var synthesisAgents = SelectActiveAgentsForPhase(SessionPhase.Synthesis);
+        logger.LogInformation("Synthesis agents selected. Count={Count} Agents={Agents}",
+            synthesisAgents.Count,
+            string.Join(", ", synthesisAgents.Select(a => a.AgentId)));
+
+        if (synthesisAgents.Count == 0)
+        {
+            logger.LogWarning("No synthesis agent configured — falling back to moderator summary");
+            // Fall back to the existing streamed summary path
+            var allResults = new List<AgentExecutionResult>();
+            var fallbackSummary = await CreateModeratorSummaryMessageAsync(
+                session, map, allResults, resolvedCorrelationId, cancellationToken);
+            if (fallbackSummary is not null)
+            {
+                await StreamAndStoreTranscriptMessageAsync(session.SessionId, session.RoundNumber, fallbackSummary.Message, cancellationToken);
+            }
+        }
+        else
+        {
+            await RunPhaseRoundAsync(session, map, SessionPhase.Synthesis, synthesisAgents, resolvedCorrelationId, cancellationToken);
+        }
+
+        // ── PHASE 6: DELIVER ───────────────────────────────────────────────────
+        map = await truthMapRepository.GetAsync(sessionId, cancellationToken) ?? map;
+        orchestrator.TransitionFromSynthesis(session, map);
+
+        logger.LogInformation("═══ PHASE: {Phase} — session complete ═══", session.Phase);
+
+        await eventBroadcaster.RoundProgressAsync(sessionId, session.Phase, cancellationToken);
         await sessionRepository.UpdateAsync(session, cancellationToken);
+
         logger.LogInformation(
-            "Started session. SessionId={SessionId} Phase={Phase} Round={Round} CorrelationId={CorrelationId}",
-            sessionId,
-            session.Phase,
-            session.RoundNumber,
+            "StartSessionAsync complete. SessionId={SessionId} FinalPhase={Phase} Status={Status} ClarificationRounds={CR} RefinementIterations={RI} CorrelationId={CorrelationId}",
+            sessionId, session.Phase, session.Status,
+            session.ClarificationRoundCount, session.RefinementIterationCount,
             resolvedCorrelationId);
+
         return session;
+    }
+
+    private async Task BroadcastPhaseStartAsync(SessionState session, TruthMapState map, CancellationToken cancellationToken)
+    {
+        map.Round = session.RoundNumber;
+        await truthMapRepository.UpdateAsync(map, cancellationToken);
+        await eventBroadcaster.RoundProgressAsync(session.SessionId, session.Phase, cancellationToken);
+        var kickoffMessage = CreateRoundKickoffSystemMessage(session.SessionId, session.RoundNumber, session.Phase);
+        await transcriptRepository.AppendAsync(session.SessionId, kickoffMessage, cancellationToken);
+        await eventBroadcaster.TranscriptMessageAppendedAsync(session.SessionId, kickoffMessage, cancellationToken);
+    }
+
+    /// <summary>
+    /// Runs a council round for the given phase, logs everything verbosely, and returns results.
+    /// </summary>
+    private async Task<IReadOnlyList<AgentExecutionResult>> RunPhaseRoundAsync(
+        SessionState session,
+        TruthMapState map,
+        SessionPhase phase,
+        List<ICouncilAgent> agents,
+        string correlationId,
+        CancellationToken cancellationToken,
+        IReadOnlyList<string>? additionalDirectives = null)
+    {
+        var context = new AgentContext
+        {
+            SessionId = session.SessionId,
+            CorrelationId = correlationId,
+            Round = session.RoundNumber,
+            Phase = phase,
+            FrictionLevel = session.FrictionLevel,
+            TruthMap = map.DeepCopy(),
+            MicroDirectives = additionalDirectives ?? Array.Empty<string>()
+        };
+
+        var timeout = ResolveRoundTimeout(agents);
+        logger.LogInformation(
+            "Dispatching {Phase} round. SessionId={SessionId} AgentCount={AgentCount} TimeoutSeconds={TimeoutSeconds} CorrelationId={CorrelationId}",
+            phase, session.SessionId, agents.Count, timeout.TotalSeconds, correlationId);
+
+        var storedMessages = 0;
+        var results = await agentRunner.RunRoundAsync(
+            agents,
+            context,
+            timeout,
+            async (result, token) =>
+            {
+                logger.LogInformation(
+                    "Agent callback fired. Phase={Phase} AgentId={AgentId} HasMessage={HasMessage} HasPatch={HasPatch} TimedOut={TimedOut} Error={Error}",
+                    phase, result.AgentId,
+                    !string.IsNullOrWhiteSpace(result.Message),
+                    result.Patch is not null,
+                    result.TimedOut,
+                    result.Error ?? "none");
+
+                if (!string.IsNullOrWhiteSpace(result.Message))
+                {
+                    if (await StreamAndStoreAgentMessageAsync(session.SessionId, session.RoundNumber, result, token))
+                    {
+                        storedMessages++;
+                    }
+                    return;
+                }
+
+                var transcriptMessage = CreateTranscriptMessageForResult(session.SessionId, session.RoundNumber, result);
+                if (transcriptMessage is null)
+                {
+                    logger.LogDebug("No transcript message to store for agent {AgentId}", result.AgentId);
+                    return;
+                }
+
+                await transcriptRepository.AppendAsync(session.SessionId, transcriptMessage, token);
+                await eventBroadcaster.TranscriptMessageAppendedAsync(session.SessionId, transcriptMessage, token);
+                storedMessages++;
+            },
+            cancellationToken);
+
+        // Synthesizer-like phases get a moderator summary too (except the Critique phase itself)
+        var shouldSummarize = phase == SessionPhase.Synthesis
+            && results.Any(r => CanonicalizeAgentId(r.AgentId) != CanonicalizeAgentId(AgentId.Synthesizer));
+        if (shouldSummarize)
+        {
+            logger.LogInformation("Creating moderator summary after {Phase} round", phase);
+            var summaryMessage = await CreateModeratorSummaryMessageAsync(
+                session, map, results, correlationId, cancellationToken);
+            if (summaryMessage is not null)
+            {
+                if (summaryMessage.WasStreamed)
+                {
+                    await StoreFinalTranscriptMessageAsync(session.SessionId, summaryMessage.Message, cancellationToken);
+                    storedMessages++;
+                }
+                else if (await StreamAndStoreTranscriptMessageAsync(session.SessionId, session.RoundNumber, summaryMessage.Message, cancellationToken))
+                {
+                    storedMessages++;
+                }
+            }
+        }
+
+        await agentRunner.ApplyValidatedPatchesAsync(session.SessionId, results, cancellationToken);
+
+        var completionMessage = CreateRoundCompletionSystemMessage(session.SessionId, session.RoundNumber, results, storedMessages);
+        await transcriptRepository.AppendAsync(session.SessionId, completionMessage, cancellationToken);
+        await eventBroadcaster.TranscriptMessageAppendedAsync(session.SessionId, completionMessage, cancellationToken);
+
+        logger.LogInformation(
+            "{Phase} round complete. AgentCount={AgentCount} StoredMessages={StoredMessages} TimedOut={TimedOut} Failed={Failed} CorrelationId={CorrelationId}",
+            phase, agents.Count, storedMessages,
+            results.Count(r => r.TimedOut),
+            results.Count(r => r.Error is not null && r.Error != "timeout"),
+            correlationId);
+
+        return results;
     }
 
     public async Task<SessionMessageResult> PostUserMessageAsync(
@@ -362,7 +618,7 @@ public class SessionService(
         return [byCanonicalId.Values.First()];
     }
 
-    private static TranscriptMessage CreateRoundKickoffSystemMessage(Guid sessionId, int roundNumber)
+    private static TranscriptMessage CreateRoundKickoffSystemMessage(Guid sessionId, int roundNumber, SessionPhase phase)
     {
         return new TranscriptMessage
         {
@@ -370,117 +626,11 @@ public class SessionService(
             SessionId = sessionId,
             Type = TranscriptMessageType.System,
             AgentId = null,
-            Content = $"Round {roundNumber} started. Dispatching council agents.",
+            Content = $"Phase {phase} started (round {roundNumber}). Dispatching council agents.",
             Round = roundNumber,
             IsStreaming = false,
             CreatedAtUtc = DateTimeOffset.UtcNow
         };
-    }
-
-    private async Task RunCouncilRoundAsync(
-        SessionState session,
-        TruthMapState map,
-        string correlationId,
-        CancellationToken cancellationToken)
-    {
-        var activeAgents = SelectActiveAgentsForPhase(session.Phase);
-        if (activeAgents.Count == 0)
-        {
-            logger.LogWarning(
-                "No active council agents configured for phase. SessionId={SessionId} Phase={Phase} CorrelationId={CorrelationId}",
-                session.SessionId,
-                session.Phase,
-                correlationId);
-            return;
-        }
-
-        var context = new AgentContext
-        {
-            SessionId = session.SessionId,
-            CorrelationId = correlationId,
-            Round = session.RoundNumber,
-            Phase = session.Phase,
-            FrictionLevel = session.FrictionLevel,
-            TruthMap = map.DeepCopy()
-        };
-
-        var timeout = ResolveRoundTimeout(activeAgents);
-        logger.LogInformation(
-            "Dispatching council round. SessionId={SessionId} Round={Round} Phase={Phase} AgentCount={AgentCount} TimeoutSeconds={TimeoutSeconds} CorrelationId={CorrelationId}",
-            session.SessionId,
-            session.RoundNumber,
-            session.Phase,
-            activeAgents.Count,
-            timeout.TotalSeconds,
-            correlationId);
-
-        var storedMessages = 0;
-        var results = await agentRunner.RunRoundAsync(
-            activeAgents,
-            context,
-            timeout,
-            async (result, token) =>
-            {
-                if (!string.IsNullOrWhiteSpace(result.Message))
-                {
-                    if (await StreamAndStoreAgentMessageAsync(session.SessionId, session.RoundNumber, result, token))
-                    {
-                        storedMessages++;
-                    }
-                    return;
-                }
-
-                var transcriptMessage = CreateTranscriptMessageForResult(session.SessionId, session.RoundNumber, result);
-                if (transcriptMessage is null)
-                {
-                    return;
-                }
-
-                await transcriptRepository.AppendAsync(session.SessionId, transcriptMessage, token);
-                await eventBroadcaster.TranscriptMessageAppendedAsync(session.SessionId, transcriptMessage, token);
-                storedMessages++;
-            },
-            cancellationToken);
-
-        var summaryMessage = await CreateModeratorSummaryMessageAsync(
-            session,
-            map,
-            results,
-            correlationId,
-            cancellationToken);
-        if (summaryMessage is not null)
-        {
-            if (summaryMessage.WasStreamed)
-            {
-                await StoreFinalTranscriptMessageAsync(session.SessionId, summaryMessage.Message, cancellationToken);
-                storedMessages++;
-            }
-            else if (await StreamAndStoreTranscriptMessageAsync(session.SessionId, session.RoundNumber, summaryMessage.Message, cancellationToken))
-            {
-                storedMessages++;
-            }
-        }
-
-        var completionMessage = CreateRoundCompletionSystemMessage(
-            session.SessionId,
-            session.RoundNumber,
-            results,
-            storedMessages);
-        await transcriptRepository.AppendAsync(session.SessionId, completionMessage, cancellationToken);
-        await eventBroadcaster.TranscriptMessageAppendedAsync(session.SessionId, completionMessage, cancellationToken);
-        storedMessages++;
-
-        await agentRunner.ApplyValidatedPatchesAsync(session.SessionId, results, cancellationToken);
-
-        logger.LogInformation(
-            "Council round completed. SessionId={SessionId} Round={Round} AgentCount={AgentCount} StoredMessages={StoredMessages} TimedOut={TimedOut} Failed={Failed} CorrelationId={CorrelationId}",
-            session.SessionId,
-            session.RoundNumber,
-            activeAgents.Count,
-            storedMessages,
-            results.Count(result => result.TimedOut),
-            results.Count(result => result.Error is not null && result.Error != "timeout"),
-            correlationId);
     }
 
     private async Task<bool> StreamAndStoreAgentMessageAsync(

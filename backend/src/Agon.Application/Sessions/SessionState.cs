@@ -14,4 +14,19 @@ public class SessionState
     public int TargetedLoopCount { get; set; }
     public int TokensUsed { get; set; }
     public bool ClarificationIncomplete { get; set; }
+
+    /// <summary>
+    /// How many clarification rounds have completed. Bounded by RoundPolicy.MaxClarificationRounds.
+    /// </summary>
+    public int ClarificationRoundCount { get; set; }
+
+    /// <summary>
+    /// How many Critique→Refinement iterations have completed. Bounded by RoundPolicy.MaxRefinementIterations.
+    /// </summary>
+    public int RefinementIterationCount { get; set; }
+
+    /// <summary>
+    /// The critique agent's last MESSAGE, injected as context into refinement rounds.
+    /// </summary>
+    public string? LastCritiqueMessage { get; set; }
 }

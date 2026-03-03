@@ -6,6 +6,17 @@ using Agon.Application.Orchestration;
 using Agon.Application.Services;
 using Agon.Infrastructure.Persistence.InMemory;
 using Agon.Infrastructure.SignalR;
+using Serilog;
+using Serilog.Events;
+
+// Bootstrap logger catches startup errors before the full Serilog pipeline is configured.
+// Use CreateLogger (not CreateBootstrapLogger) so the static Log.Logger is not frozen when
+// WebApplicationFactory creates a second host instance during integration tests.
+Log.Logger = new LoggerConfiguration()
+    .MinimumLevel.Debug()
+    .WriteTo.Console(outputTemplate:
+        "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}")
+    .CreateLogger();
 
 var builder = WebApplication.CreateBuilder(args);
 var isTestingEnvironment =
@@ -21,9 +32,23 @@ var dotEnvLoadResult = isTestingEnvironment
     ? new DotEnvLoadResult(null, 0, 0)
     : DotEnvLoader.Load(builder.Environment.ContentRootPath);
 
-builder.Logging.AddFilter("Microsoft.AspNetCore.Hosting.Diagnostics", LogLevel.Warning);
-builder.Logging.AddFilter("Microsoft.AspNetCore.Routing.EndpointMiddleware", LogLevel.Warning);
-builder.Logging.AddFilter("Microsoft.AspNetCore.Cors.Infrastructure.CorsService", LogLevel.Warning);
+// Replace the default Microsoft logging with Serilog.
+builder.Host.UseSerilog((ctx, services, config) => config
+    .ReadFrom.Configuration(ctx.Configuration)
+    .ReadFrom.Services(services)
+    .Enrich.FromLogContext()
+    .Enrich.WithMachineName()
+    .Enrich.WithThreadId()
+    .MinimumLevel.Debug()
+    // Quiet down chatty framework namespaces
+    .MinimumLevel.Override("Microsoft.AspNetCore.Hosting", LogEventLevel.Warning)
+    .MinimumLevel.Override("Microsoft.AspNetCore.Routing", LogEventLevel.Warning)
+    .MinimumLevel.Override("Microsoft.AspNetCore.Cors", LogEventLevel.Warning)
+    .MinimumLevel.Override("Microsoft.AspNetCore.StaticFiles", LogEventLevel.Warning)
+    .MinimumLevel.Override("Microsoft.EntityFrameworkCore", LogEventLevel.Warning)
+    .WriteTo.Console(
+        outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {SourceContext} {Message:lj}{NewLine}{Exception}",
+        restrictedToMinimumLevel: LogEventLevel.Debug));
 
 builder.Services.AddCors(options =>
 {
@@ -62,13 +87,39 @@ var app = builder.Build();
 app.UseMiddleware<GlobalExceptionMiddleware>();
 app.UseCors(FrontendCorsPolicy);
 
+// Serilog request logging — logs each HTTP request with method, path, status code and elapsed time.
+app.UseSerilogRequestLogging(options =>
+{
+    options.MessageTemplate =
+        "HTTP {RequestMethod} {RequestPath} responded {StatusCode} in {Elapsed:0.0000} ms";
+    options.EnrichDiagnosticContext = (diagnosticContext, httpContext) =>
+    {
+        diagnosticContext.Set("RequestHost", httpContext.Request.Host.Value ?? "unknown");
+        diagnosticContext.Set("RequestScheme", httpContext.Request.Scheme);
+        var correlationId = httpContext.Request.Headers["X-Correlation-ID"].FirstOrDefault()
+            ?? httpContext.TraceIdentifier;
+        diagnosticContext.Set("CorrelationId", correlationId);
+    };
+});
+
 LogStartupInformation(app, dotEnvLoadResult, providerConfig);
 
 app.MapSessionEndpoints();
 app.MapArtifactEndpoints();
 app.MapHub<DebateHub>("/hubs/debate");
 
-await app.RunAsync();
+try
+{
+    await app.RunAsync();
+}
+catch (Exception ex) when (ex is not HostAbortedException and not OperationCanceledException)
+{
+    Log.Fatal(ex, "Application terminated unexpectedly");
+}
+finally
+{
+    await Log.CloseAndFlushAsync();
+}
 
 static void LogStartupInformation(
     WebApplication app,

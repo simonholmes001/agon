@@ -24,14 +24,14 @@ public class SignalREventBroadcasterTests
         hubClients.Group(DebateHub.SessionGroupName(sessionId)).Returns(proxy);
         var sut = new SignalREventBroadcaster(hubContext, NullLogger<SignalREventBroadcaster>.Instance);
 
-        await sut.RoundProgressAsync(sessionId, SessionPhase.DraftRound1, cancellationToken);
+        await sut.RoundProgressAsync(sessionId, SessionPhase.Construction, cancellationToken);
 
         await proxy.Received(1).SendCoreAsync(
             "RoundProgress",
             Arg.Is<object?[]>(args =>
                 args.Length == 1
                 && HasProperty(args[0], "SessionId", sessionId)
-                && HasProperty(args[0], "Phase", SessionPhase.DraftRound1.ToString())),
+                && HasProperty(args[0], "Phase", SessionPhase.Construction.ToString())),
             cancellationToken);
     }
 
@@ -131,7 +131,7 @@ public class SignalREventBroadcasterTests
             .Returns(_ => throw new InvalidOperationException("transport down"));
         var sut = new SignalREventBroadcaster(hubContext, NullLogger<SignalREventBroadcaster>.Instance);
 
-        var act = () => sut.RoundProgressAsync(sessionId, SessionPhase.DraftRound1, CancellationToken.None);
+        var act = () => sut.RoundProgressAsync(sessionId, SessionPhase.Construction, CancellationToken.None);
 
         await act.Should().NotThrowAsync();
     }

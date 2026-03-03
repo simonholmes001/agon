@@ -14,8 +14,17 @@ public class RoundPolicy
     public float ConvergenceThresholdHighFriction { get; init; } = 0.85f;
     public int HighFrictionCutoff { get; init; } = 70;
 
+    /// <summary>
+    /// Maximum number of Critique→Refinement iterations before advancing to Synthesis.
+    /// Maps to MaxDebateRounds in the new parallel-construction architecture.
+    /// </summary>
+    public int MaxRefinementIterations => MaxDebateRounds;
+
     public bool ShouldTerminateClarification(int currentRound) =>
         currentRound >= MaxClarificationRounds;
+
+    public bool ShouldTerminateRefinement(int currentIteration) =>
+        currentIteration >= MaxRefinementIterations;
 
     public bool ShouldTerminateDebate(int currentRound) =>
         currentRound >= MaxDebateRounds;

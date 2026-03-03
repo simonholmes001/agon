@@ -29,7 +29,7 @@ public class FakeCouncilAgentTests
         {
             SessionId = sessionId,
             Round = 1,
-            Phase = SessionPhase.DraftRound1,
+            Phase = SessionPhase.Construction,
             FrictionLevel = 50,
             TruthMap = TruthMapState.CreateNew(sessionId)
         };

@@ -23,8 +23,6 @@ applyTo: '**'
 
 - [ ] **Backend logging** — `ILogger<T>` via DI in Application, Infrastructure, and Api layers. Orchestrator: phase transitions, round progression, convergence scores, patch counts, budget consumption. AgentRunner: dispatch, latency, timeout, token usage. MafCouncilAgent: provider calls, streaming, error/retry. GlobalExceptionMiddleware: unhandled exceptions with correlation IDs. Never log raw user content or agent responses in plaintext.
 - [ ] **Orchestrator state machine** — Deterministic phase transitions per `round-policy.instructions.md`. LLM outputs cannot trigger transitions.
-- [ ] **`IChatClient` integration** — Provider-agnostic LLM calls via MAF's `IChatClient` (from `Microsoft.Extensions.AI`) + `FakeCouncilAgent` for tests. See `backend-implementation.instructions.md` §1.3.
-- [ ] **MAF compliance audit (follow-up)** — Verify provider adapters, reasoning parameter mapping, and trace metadata (`session_id`, `agent_id`, `round_id`) are fully aligned with `copilot.instructions.md` §Model and Provider Rules.
 - [ ] **SignalR event surface expansion** — Extend `/hubs/debate` beyond baseline `RoundProgress` + `TruthMapPatch` to full event set (tokens, convergence, budget warnings, artifacts).
 - [ ] **REST API endpoints** — Expand beyond vertical-slice core (`POST /sessions`, `GET /sessions/{id}`, `POST /sessions/{id}/start`, `GET /sessions/{id}/truthmap`) to full surface in `architecture.instructions.md` §6.
 - [ ] **PostgreSQL persistence** — Sessions, Truth Map (JSONB + normalised entities), append-only event log.
@@ -53,7 +51,7 @@ applyTo: '**'
 - [x] Landing page with gradient branding + theme toggle
 - [x] Session UI components (thread view, agent message cards, message composer, session header, Truth Map drawer)
 - [x] Light/dark theme (ThemeProvider + ThemeToggle)
-- [x] Frontend test suite — 178 tests, 21 files
+- [x] Frontend test suite — 190 tests, 22 files
 - [x] CI pipeline — GitHub Actions (frontend-tests + backend-tests with .NET auto-detect)
 - [x] Pre-commit hook (frontend + backend, skips if no .NET project)
 - [x] Automatic coverage badges (frontend only — backend pending)
@@ -80,7 +78,7 @@ applyTo: '**'
 - [x] Agent config — per-agent model provider, model name, max tokens, timeout, active phases with `DefaultCouncil`
 - [x] Agent identifiers — `AgentId` constants with `IsCouncilAgent` + `AllCouncil`
 - [x] Session enums — `SessionPhase` (9 phases), `SessionMode`, `SessionStatus`
-- [x] Backend test suite — 354 tests, TDD (Red → Green → Refactor)
+- [x] Backend test suite — 428 tests, TDD (Red → Green → Refactor)
 - [x] CI updated — backend test count captured + combined frontend+backend badge in `update-badges` job
 - [x] README badges — xUnit badge added, combined test count (frontend + backend)
 - [x] Architecture pivot — 7 role-based agents → 5 model-based agents (Moderator, GPT, Gemini, Claude, Synthesizer)
@@ -92,5 +90,6 @@ applyTo: '**'
   - `AssumptionValidationGenerator` (13 tests) — generates assumption validation tables with status tracking
 - [x] Artifact API endpoints — `GET /sessions/{id}/artifacts`, `GET /sessions/{id}/artifacts/{type}`, `POST /sessions/{id}/artifacts/export` (15 API tests)
 - [x] Artifact export UI — Export Artifacts dialog with artifact type selection, ZIP download (12 frontend tests)
+- [x] MAF compliance remediation — Replaced 4 bespoke HTTP-stack provider agents (`OpenAiCouncilAgent`, `AnthropicCouncilAgent`, `GeminiCouncilAgent`, `DeepSeekCouncilAgent`) with a single provider-agnostic `MafCouncilAgent` backed by `IChatClient` from `Microsoft.Extensions.AI`. Provider adapters: `Microsoft.Extensions.AI.OpenAI` (OpenAI + DeepSeek), `Anthropic` SDK, `Google_GenerativeAI.Microsoft` (Gemini). Registration via `AgentRegistrationExtensions` with 6 agents (Moderator, GptAgent, GeminiAgent, ClaudeAgent, CritiqueAgent, Synthesizer). `FakeCouncilAgent` and `ConfigurationErrorCouncilAgent` retained for tests and missing-key graceful degradation.
 
 

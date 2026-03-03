@@ -96,7 +96,7 @@ public class ProviderErrorSummaryTests
 
     private static string InvokeFromResponseBody(string responseBody)
     {
-        var assembly = typeof(OpenAiCouncilAgent).Assembly;
+        var assembly = typeof(MafCouncilAgent).Assembly;
         var type = assembly.GetType("Agon.Infrastructure.Agents.ProviderErrorSummary", throwOnError: true)!;
         var method = type.GetMethod(
             "FromResponseBody",

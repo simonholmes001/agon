@@ -36,15 +36,15 @@ public sealed record AgentConfig
     }
 
     /// <summary>
-    /// Default council configuration matching the simplified three-model architecture.
-    /// 
+    /// Default council configuration for the parallel construction architecture.
+    ///
     /// Workflow:
-    /// 1. Moderator (GPT-5.2) handles clarification
-    /// 2. GPT Agent (GPT-5.2) creates initial draft
-    /// 3. Gemini Agent (Gemini 3) improves draft
-    /// 4. Claude Agent (Claude Opus 4.6) refines draft
-    /// 5. All three critique in parallel
-    /// 6. Synthesizer (GPT-5.2) produces final report
+    /// 1. Moderator (GPT-5.2)  — Clarification: asks targeted questions, may loop
+    /// 2. GPT Agent (GPT-5.2)  — Construction + Refinement: runs in parallel with Gemini + Claude
+    /// 3. Gemini Agent          — Construction + Refinement: runs in parallel with GPT + Claude
+    /// 4. Claude Agent          — Construction + Refinement: runs in parallel with GPT + Gemini
+    /// 5. Critique Agent (GPT-5.2) — Critique: reviews all proposals, produces structured feedback
+    /// 6. Synthesizer (GPT-5.2) — Synthesis: unifies all refined proposals into the final output
     /// </summary>
     public static IReadOnlyList<AgentConfig> DefaultCouncil { get; } =
     [
@@ -58,19 +58,25 @@ public sealed record AgentConfig
             ModelProvider: "openai",
             ModelName: "gpt-5.2",
             MaxOutputTokens: 8192,
-            ActivePhases: [SessionPhase.DraftRound1, SessionPhase.Critique]),
+            ActivePhases: [SessionPhase.Construction, SessionPhase.Refinement]),
 
         new(Agents.AgentId.GeminiAgent,
             ModelProvider: "gemini",
             ModelName: "gemini-3.1-pro-preview",
             MaxOutputTokens: 8192,
-            ActivePhases: [SessionPhase.DraftRound2, SessionPhase.Critique]),
+            ActivePhases: [SessionPhase.Construction, SessionPhase.Refinement]),
 
         new(Agents.AgentId.ClaudeAgent,
             ModelProvider: "anthropic",
             ModelName: "claude-opus-4-6",
             MaxOutputTokens: 8192,
-            ActivePhases: [SessionPhase.DraftRound3, SessionPhase.Critique]),
+            ActivePhases: [SessionPhase.Construction, SessionPhase.Refinement]),
+
+        new(Agents.AgentId.CritiqueAgent,
+            ModelProvider: "openai",
+            ModelName: "gpt-5.2",
+            MaxOutputTokens: 4096,
+            ActivePhases: [SessionPhase.Critique]),
 
         new(Agents.AgentId.Synthesizer,
             ModelProvider: "openai",

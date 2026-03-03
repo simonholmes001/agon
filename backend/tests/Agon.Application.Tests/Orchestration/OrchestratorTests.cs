@@ -11,90 +11,69 @@ public class OrchestratorTests
 {
     private readonly Orchestrator _sut = new();
 
-    #region StartDraftRound1 Tests
+    #region StartClarification Tests
 
     [Fact]
-    public void StartDraftRound1_TransitionsToDraftRound1_FromClarification()
+    public void StartClarification_TransitionsToClarification_FromIntake()
+    {
+        var session = CreateSession(phase: SessionPhase.Intake);
+
+        var updated = _sut.StartClarification(session);
+
+        updated.Phase.Should().Be(SessionPhase.Clarification);
+        updated.RoundNumber.Should().Be(0);
+    }
+
+    [Fact]
+    public void StartClarification_IsIdempotent_FromClarification()
     {
         var session = CreateSession(phase: SessionPhase.Clarification);
 
-        var updated = _sut.StartDraftRound1(session);
+        var updated = _sut.StartClarification(session);
 
-        updated.Phase.Should().Be(SessionPhase.DraftRound1);
+        updated.Phase.Should().Be(SessionPhase.Clarification);
+    }
+
+    [Theory]
+    [InlineData(SessionPhase.Construction)]
+    [InlineData(SessionPhase.Critique)]
+    [InlineData(SessionPhase.Synthesis)]
+    [InlineData(SessionPhase.PostDelivery)]
+    public void StartClarification_ThrowsInvalidOperationException_FromInvalidPhase(SessionPhase invalidPhase)
+    {
+        var session = CreateSession(phase: invalidPhase);
+
+        var act = () => _sut.StartClarification(session);
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage($"*{invalidPhase}*");
+    }
+
+    #endregion
+
+    #region TransitionToConstruction Tests
+
+    [Fact]
+    public void TransitionToConstruction_TransitionsCorrectly_FromClarification()
+    {
+        var session = CreateSession(phase: SessionPhase.Clarification);
+
+        var updated = _sut.TransitionToConstruction(session);
+
+        updated.Phase.Should().Be(SessionPhase.Construction);
         updated.RoundNumber.Should().Be(1);
     }
 
     [Theory]
     [InlineData(SessionPhase.Intake)]
-    [InlineData(SessionPhase.DraftRound1)]
-    [InlineData(SessionPhase.DraftRound2)]
-    [InlineData(SessionPhase.Synthesis)]
-    [InlineData(SessionPhase.PostDelivery)]
-    public void StartDraftRound1_ThrowsInvalidOperationException_FromInvalidPhase(SessionPhase invalidPhase)
-    {
-        var session = CreateSession(phase: invalidPhase);
-
-        var act = () => _sut.StartDraftRound1(session);
-
-        act.Should().Throw<InvalidOperationException>()
-            .WithMessage($"*{invalidPhase}*");
-    }
-
-    #endregion
-
-    #region TransitionToDraftRound2 Tests
-
-    [Fact]
-    public void TransitionToDraftRound2_TransitionsToDraftRound2_FromDraftRound1()
-    {
-        var session = CreateSession(phase: SessionPhase.DraftRound1);
-
-        var updated = _sut.TransitionToDraftRound2(session);
-
-        updated.Phase.Should().Be(SessionPhase.DraftRound2);
-        updated.RoundNumber.Should().Be(2);
-    }
-
-    [Theory]
-    [InlineData(SessionPhase.Clarification)]
-    [InlineData(SessionPhase.DraftRound2)]
-    [InlineData(SessionPhase.DraftRound3)]
-    [InlineData(SessionPhase.Critique)]
-    public void TransitionToDraftRound2_ThrowsInvalidOperationException_FromInvalidPhase(SessionPhase invalidPhase)
-    {
-        var session = CreateSession(phase: invalidPhase);
-
-        var act = () => _sut.TransitionToDraftRound2(session);
-
-        act.Should().Throw<InvalidOperationException>()
-            .WithMessage($"*{invalidPhase}*");
-    }
-
-    #endregion
-
-    #region TransitionToDraftRound3 Tests
-
-    [Fact]
-    public void TransitionToDraftRound3_TransitionsToDraftRound3_FromDraftRound2()
-    {
-        var session = CreateSession(phase: SessionPhase.DraftRound2);
-
-        var updated = _sut.TransitionToDraftRound3(session);
-
-        updated.Phase.Should().Be(SessionPhase.DraftRound3);
-        updated.RoundNumber.Should().Be(3);
-    }
-
-    [Theory]
-    [InlineData(SessionPhase.DraftRound1)]
-    [InlineData(SessionPhase.DraftRound3)]
+    [InlineData(SessionPhase.Construction)]
     [InlineData(SessionPhase.Critique)]
     [InlineData(SessionPhase.Synthesis)]
-    public void TransitionToDraftRound3_ThrowsInvalidOperationException_FromInvalidPhase(SessionPhase invalidPhase)
+    public void TransitionToConstruction_ThrowsInvalidOperationException_FromInvalidPhase(SessionPhase invalidPhase)
     {
         var session = CreateSession(phase: invalidPhase);
 
-        var act = () => _sut.TransitionToDraftRound3(session);
+        var act = () => _sut.TransitionToConstruction(session);
 
         act.Should().Throw<InvalidOperationException>()
             .WithMessage($"*{invalidPhase}*");
@@ -105,18 +84,27 @@ public class OrchestratorTests
     #region TransitionToCritique Tests
 
     [Fact]
-    public void TransitionToCritique_TransitionsToCritique_FromDraftRound3()
+    public void TransitionToCritique_TransitionsCorrectly_FromConstruction()
     {
-        var session = CreateSession(phase: SessionPhase.DraftRound3);
+        var session = CreateSession(phase: SessionPhase.Construction);
 
         var updated = _sut.TransitionToCritique(session);
 
         updated.Phase.Should().Be(SessionPhase.Critique);
-        updated.RoundNumber.Should().Be(4);
+    }
+
+    [Fact]
+    public void TransitionToCritique_TransitionsCorrectly_FromRefinement()
+    {
+        var session = CreateSession(phase: SessionPhase.Refinement);
+
+        var updated = _sut.TransitionToCritique(session);
+
+        updated.Phase.Should().Be(SessionPhase.Critique);
     }
 
     [Theory]
-    [InlineData(SessionPhase.DraftRound2)]
+    [InlineData(SessionPhase.Clarification)]
     [InlineData(SessionPhase.Critique)]
     [InlineData(SessionPhase.Synthesis)]
     [InlineData(SessionPhase.Deliver)]
@@ -128,6 +116,64 @@ public class OrchestratorTests
 
         act.Should().Throw<InvalidOperationException>()
             .WithMessage($"*{invalidPhase}*");
+    }
+
+    #endregion
+
+    #region TransitionToRefinement Tests
+
+    [Fact]
+    public void TransitionToRefinement_TransitionsCorrectly_FromCritique()
+    {
+        var session = CreateSession(phase: SessionPhase.Critique);
+
+        var updated = _sut.TransitionToRefinement(session);
+
+        updated.Phase.Should().Be(SessionPhase.Refinement);
+        updated.RefinementIterationCount.Should().Be(1);
+    }
+
+    [Theory]
+    [InlineData(SessionPhase.Clarification)]
+    [InlineData(SessionPhase.Construction)]
+    [InlineData(SessionPhase.Refinement)]
+    [InlineData(SessionPhase.Synthesis)]
+    public void TransitionToRefinement_ThrowsInvalidOperationException_FromInvalidPhase(SessionPhase invalidPhase)
+    {
+        var session = CreateSession(phase: invalidPhase);
+
+        var act = () => _sut.TransitionToRefinement(session);
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage($"*{invalidPhase}*");
+    }
+
+    #endregion
+
+    #region ShouldContinueRefinement Tests
+
+    [Fact]
+    public void ShouldContinueRefinement_ReturnsFalse_WhenMaxIterationsReached()
+    {
+        var session = CreateSession();
+        session.RoundPolicy = new RoundPolicy { MaxDebateRounds = 2 };
+        session.RefinementIterationCount = 2;
+
+        var result = _sut.ShouldContinueRefinement(session);
+
+        result.Should().BeFalse();
+    }
+
+    [Fact]
+    public void ShouldContinueRefinement_ReturnsTrue_WhenIterationsRemain()
+    {
+        var session = CreateSession();
+        session.RoundPolicy = new RoundPolicy { MaxDebateRounds = 2 };
+        session.RefinementIterationCount = 1;
+
+        var result = _sut.ShouldContinueRefinement(session);
+
+        result.Should().BeTrue();
     }
 
     #endregion
@@ -145,6 +191,16 @@ public class OrchestratorTests
     }
 
     [Fact]
+    public void TransitionToSynthesis_TransitionsToSynthesis_FromRefinement()
+    {
+        var session = CreateSession(phase: SessionPhase.Refinement);
+
+        var updated = _sut.TransitionToSynthesis(session);
+
+        updated.Phase.Should().Be(SessionPhase.Synthesis);
+    }
+
+    [Fact]
     public void TransitionToSynthesis_TransitionsToSynthesis_FromTargetedLoop()
     {
         var session = CreateSession(phase: SessionPhase.TargetedLoop);
@@ -155,7 +211,7 @@ public class OrchestratorTests
     }
 
     [Theory]
-    [InlineData(SessionPhase.DraftRound3)]
+    [InlineData(SessionPhase.Construction)]
     [InlineData(SessionPhase.Synthesis)]
     [InlineData(SessionPhase.Deliver)]
     [InlineData(SessionPhase.PostDelivery)]
@@ -273,10 +329,10 @@ public class OrchestratorTests
         map.Convergence.ClaritySpecificity = 0.75f;
         map.Convergence.Feasibility = 0.75f;
         map.Convergence.RiskCoverage = 0.75f;
-        map.Convergence.AssumptionExplicitness = 0.75f; // Below 0.8 required for high friction
+        map.Convergence.AssumptionExplicitness = 0.75f;
         map.Convergence.Coherence = 0.85f;
         map.Convergence.Actionability = 0.75f;
-        map.Convergence.EvidenceQuality = 0.65f; // Below 0.7 required for high friction
+        map.Convergence.EvidenceQuality = 0.65f;
 
         var updated = _sut.TransitionFromSynthesis(session, map);
 
@@ -289,11 +345,10 @@ public class OrchestratorTests
 
     [Theory]
     [InlineData(SessionPhase.Intake, SessionPhase.Clarification)]
-    [InlineData(SessionPhase.Clarification, SessionPhase.DraftRound1)]
-    [InlineData(SessionPhase.DraftRound1, SessionPhase.DraftRound2)]
-    [InlineData(SessionPhase.DraftRound2, SessionPhase.DraftRound3)]
-    [InlineData(SessionPhase.DraftRound3, SessionPhase.Critique)]
-    [InlineData(SessionPhase.Critique, SessionPhase.Synthesis)]
+    [InlineData(SessionPhase.Clarification, SessionPhase.Construction)]
+    [InlineData(SessionPhase.Construction, SessionPhase.Critique)]
+    [InlineData(SessionPhase.Critique, SessionPhase.Refinement)]
+    [InlineData(SessionPhase.Refinement, SessionPhase.Synthesis)]
     [InlineData(SessionPhase.TargetedLoop, SessionPhase.Synthesis)]
     public void GetNextPhase_ReturnsCorrectNextPhase(SessionPhase current, SessionPhase expected)
     {

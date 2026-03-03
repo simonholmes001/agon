@@ -15,7 +15,7 @@ public class AgentRegistrationExtensionsTests
     #region Full Valid Configuration
 
     [Fact]
-    public void AddCouncilAgents_WithAllApiKeysConfigured_RegistersFiveAgents()
+    public void AddCouncilAgents_WithAllApiKeysConfigured_RegistersSixAgents()
     {
         var services = CreateServicesWithLogging();
         var config = CreateProviderConfiguration(
@@ -27,7 +27,7 @@ public class AgentRegistrationExtensionsTests
         var provider = services.BuildServiceProvider();
 
         var agents = provider.GetServices<ICouncilAgent>().ToList();
-        agents.Should().HaveCount(5);
+        agents.Should().HaveCount(6);
     }
 
     [Fact]
@@ -44,11 +44,15 @@ public class AgentRegistrationExtensionsTests
 
         var agents = provider.GetServices<ICouncilAgent>().ToList();
         agents.Select(a => a.AgentId).Should().BeEquivalentTo(
-            new[] { AgentId.Moderator, AgentId.GptAgent, AgentId.GeminiAgent, AgentId.ClaudeAgent, AgentId.Synthesizer });
+            new[]
+            {
+                AgentId.Moderator, AgentId.GptAgent, AgentId.GeminiAgent,
+                AgentId.ClaudeAgent, AgentId.CritiqueAgent, AgentId.Synthesizer
+            });
     }
 
     [Fact]
-    public void AddCouncilAgents_WithAllApiKeysConfigured_RegistersCorrectAgentTypes()
+    public void AddCouncilAgents_WithAllApiKeysConfigured_RegistersAllAsMafCouncilAgent()
     {
         var services = CreateServicesWithLogging();
         var config = CreateProviderConfiguration(
@@ -61,14 +65,35 @@ public class AgentRegistrationExtensionsTests
 
         var agents = provider.GetServices<ICouncilAgent>().ToList();
 
-        // OpenAI agents (Moderator, GptAgent, Synthesizer)
-        agents.Count(a => a is OpenAiCouncilAgent).Should().Be(3);
+        // All 6 agents should be MafCouncilAgent — provider-agnostic
+        agents.Should().AllSatisfy(agent => agent.Should().BeOfType<MafCouncilAgent>());
+    }
 
-        // Gemini agent
-        agents.Count(a => a is GeminiCouncilAgent).Should().Be(1);
+    [Fact]
+    public void AddCouncilAgents_WithAllApiKeysConfigured_SetsCorrectModelProviders()
+    {
+        var services = CreateServicesWithLogging();
+        var config = CreateProviderConfiguration(
+            openAiKey: "test-openai-key",
+            geminiKey: "test-gemini-key",
+            anthropicKey: "test-anthropic-key");
+
+        services.AddCouncilAgents(config);
+        var provider = services.BuildServiceProvider();
+
+        var agents = provider.GetServices<ICouncilAgent>().ToList();
+
+        // OpenAI agents
+        agents.Single(a => a.AgentId == AgentId.Moderator).ModelProvider.Should().Be("openai");
+        agents.Single(a => a.AgentId == AgentId.GptAgent).ModelProvider.Should().Be("openai");
+        agents.Single(a => a.AgentId == AgentId.Synthesizer).ModelProvider.Should().Be("openai");
+
+        // Gemini agents
+        agents.Single(a => a.AgentId == AgentId.GeminiAgent).ModelProvider.Should().Be("gemini");
+        agents.Single(a => a.AgentId == AgentId.CritiqueAgent).ModelProvider.Should().Be("gemini");
 
         // Anthropic agent
-        agents.Count(a => a is AnthropicCouncilAgent).Should().Be(1);
+        agents.Single(a => a.AgentId == AgentId.ClaudeAgent).ModelProvider.Should().Be("anthropic");
     }
 
     #endregion
@@ -130,7 +155,7 @@ public class AgentRegistrationExtensionsTests
     }
 
     [Fact]
-    public void AddCouncilAgents_WithMissingOpenAiKey_StillRegistersGeminiAgent()
+    public void AddCouncilAgents_WithMissingOpenAiKey_StillRegistersGeminiAgents()
     {
         var services = CreateServicesWithLogging();
         var config = CreateProviderConfiguration(
@@ -142,9 +167,9 @@ public class AgentRegistrationExtensionsTests
         var provider = services.BuildServiceProvider();
 
         var agents = provider.GetServices<ICouncilAgent>().ToList();
-        var geminiAgent = agents.Single(a => a.AgentId == AgentId.GeminiAgent);
 
-        geminiAgent.Should().BeOfType<GeminiCouncilAgent>();
+        agents.Single(a => a.AgentId == AgentId.GeminiAgent).Should().BeOfType<MafCouncilAgent>();
+        agents.Single(a => a.AgentId == AgentId.CritiqueAgent).Should().BeOfType<MafCouncilAgent>();
     }
 
     #endregion
@@ -170,6 +195,22 @@ public class AgentRegistrationExtensionsTests
     }
 
     [Fact]
+    public void AddCouncilAgents_WithMissingGeminiKey_RegistersErrorAgentForCritiqueAgent()
+    {
+        var services = CreateServicesWithLogging();
+        var config = CreateProviderConfiguration(
+            openAiKey: "test-openai-key",
+            geminiKey: null,
+            anthropicKey: "test-anthropic-key");
+
+        services.AddCouncilAgents(config);
+        var provider = services.BuildServiceProvider();
+
+        var agents = provider.GetServices<ICouncilAgent>().ToList();
+        agents.Single(a => a.AgentId == AgentId.CritiqueAgent).Should().BeOfType<ConfigurationErrorCouncilAgent>();
+    }
+
+    [Fact]
     public void AddCouncilAgents_WithMissingGeminiKey_StillRegistersOpenAiAgents()
     {
         var services = CreateServicesWithLogging();
@@ -183,9 +224,9 @@ public class AgentRegistrationExtensionsTests
 
         var agents = provider.GetServices<ICouncilAgent>().ToList();
 
-        agents.Single(a => a.AgentId == AgentId.Moderator).Should().BeOfType<OpenAiCouncilAgent>();
-        agents.Single(a => a.AgentId == AgentId.GptAgent).Should().BeOfType<OpenAiCouncilAgent>();
-        agents.Single(a => a.AgentId == AgentId.Synthesizer).Should().BeOfType<OpenAiCouncilAgent>();
+        agents.Single(a => a.AgentId == AgentId.Moderator).Should().BeOfType<MafCouncilAgent>();
+        agents.Single(a => a.AgentId == AgentId.GptAgent).Should().BeOfType<MafCouncilAgent>();
+        agents.Single(a => a.AgentId == AgentId.Synthesizer).Should().BeOfType<MafCouncilAgent>();
     }
 
     #endregion
@@ -224,8 +265,8 @@ public class AgentRegistrationExtensionsTests
 
         var agents = provider.GetServices<ICouncilAgent>().ToList();
 
-        agents.Single(a => a.AgentId == AgentId.GeminiAgent).Should().BeOfType<GeminiCouncilAgent>();
-        agents.Single(a => a.AgentId == AgentId.Moderator).Should().BeOfType<OpenAiCouncilAgent>();
+        agents.Single(a => a.AgentId == AgentId.GeminiAgent).Should().BeOfType<MafCouncilAgent>();
+        agents.Single(a => a.AgentId == AgentId.Moderator).Should().BeOfType<MafCouncilAgent>();
     }
 
     #endregion
@@ -246,7 +287,7 @@ public class AgentRegistrationExtensionsTests
 
         var agents = provider.GetServices<ICouncilAgent>().ToList();
 
-        agents.Should().HaveCount(5);
+        agents.Should().HaveCount(6);
         agents.Should().AllSatisfy(agent => agent.Should().BeOfType<ConfigurationErrorCouncilAgent>());
     }
 
@@ -257,8 +298,7 @@ public class AgentRegistrationExtensionsTests
     private static IServiceCollection CreateServicesWithLogging()
     {
         var services = new ServiceCollection();
-        services.AddSingleton<ILoggerFactory>(NullLoggerFactory.Instance);
-        services.AddHttpClient();
+        services.AddLogging(b => b.AddProvider(NullLoggerProvider.Instance));
         return services;
     }
 

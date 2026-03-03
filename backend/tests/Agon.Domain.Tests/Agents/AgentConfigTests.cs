@@ -56,11 +56,11 @@ public class AgentConfigTests
     }
 
     [Fact]
-    public void DefaultCouncilConfigs_ContainsAllFiveAgents()
+    public void DefaultCouncilConfigs_ContainsAllSixAgents()
     {
         var configs = AgentConfig.DefaultCouncil;
 
-        configs.Should().HaveCount(5);
+        configs.Should().HaveCount(6);
         configs.Select(c => c.AgentId).Should().BeEquivalentTo(AgentId.AllCouncil);
     }
 
@@ -83,8 +83,9 @@ public class AgentConfigTests
 
         config.ModelProvider.Should().Be("openai");
         config.ModelName.Should().Be("gpt-5.2");
-        config.ActivePhases.Should().Contain(SessionPhase.DraftRound1);
-        config.ActivePhases.Should().Contain(SessionPhase.Critique);
+        config.ActivePhases.Should().Contain(SessionPhase.Construction);
+        config.ActivePhases.Should().Contain(SessionPhase.Refinement);
+        config.ActivePhases.Should().NotContain(SessionPhase.Critique);
     }
 
     [Fact]
@@ -95,8 +96,9 @@ public class AgentConfigTests
 
         config.ModelProvider.Should().Be("gemini");
         config.ModelName.Should().Be("gemini-3.1-pro-preview");
-        config.ActivePhases.Should().Contain(SessionPhase.DraftRound2);
-        config.ActivePhases.Should().Contain(SessionPhase.Critique);
+        config.ActivePhases.Should().Contain(SessionPhase.Construction);
+        config.ActivePhases.Should().Contain(SessionPhase.Refinement);
+        config.ActivePhases.Should().NotContain(SessionPhase.Critique);
     }
 
     [Fact]
@@ -107,8 +109,19 @@ public class AgentConfigTests
 
         config.ModelProvider.Should().Be("anthropic");
         config.ModelName.Should().Be("claude-opus-4-6");
-        config.ActivePhases.Should().Contain(SessionPhase.DraftRound3);
-        config.ActivePhases.Should().Contain(SessionPhase.Critique);
+        config.ActivePhases.Should().Contain(SessionPhase.Construction);
+        config.ActivePhases.Should().Contain(SessionPhase.Refinement);
+        config.ActivePhases.Should().NotContain(SessionPhase.Critique);
+    }
+
+    [Fact]
+    public void DefaultCouncilConfigs_CritiqueAgent_UsesGemini()
+    {
+        var config = AgentConfig.DefaultCouncil
+            .Single(c => c.AgentId == AgentId.CritiqueAgent);
+
+        config.ActivePhases.Should().ContainSingle()
+            .Which.Should().Be(SessionPhase.Critique);
     }
 
     [Fact]

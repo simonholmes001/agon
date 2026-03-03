@@ -12,9 +12,9 @@ public class SessionPhaseTests
 
         phases.Should().Contain(SessionPhase.Intake);
         phases.Should().Contain(SessionPhase.Clarification);
-        phases.Should().Contain(SessionPhase.DraftRound1);
-        phases.Should().Contain(SessionPhase.DraftRound2);
-        phases.Should().Contain(SessionPhase.DraftRound3);
+        phases.Should().Contain(SessionPhase.Construction);
+        phases.Should().Contain(SessionPhase.Refinement);
+        phases.Should().Contain(SessionPhase.Critique);
         phases.Should().Contain(SessionPhase.Critique);
         phases.Should().Contain(SessionPhase.Synthesis);
         phases.Should().Contain(SessionPhase.TargetedLoop);
@@ -24,9 +24,9 @@ public class SessionPhaseTests
     }
 
     [Fact]
-    public void SessionPhase_HasExactlyElevenPhases()
+    public void SessionPhase_HasExactlyTenPhases()
     {
-        Enum.GetValues<SessionPhase>().Should().HaveCount(11);
+        Enum.GetValues<SessionPhase>().Should().HaveCount(10);
     }
 
     [Fact]

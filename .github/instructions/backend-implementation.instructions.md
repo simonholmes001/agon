@@ -17,11 +17,11 @@ MAF (`1.0.0-rc1`) provides a provider-agnostic agent abstraction. Agon uses it f
 
 | MAF Component | Agon Usage |
 |---|---|
-| `ChatClientAgent` (extends `AIAgent`) | Wraps `IChatClient` per provider with `name`, `instructions`, and tools |
 | `IChatClient` (from `Microsoft.Extensions.AI`) | Provider-agnostic LLM interface — replaces the spec's `IChatModelClient` |
-| `Microsoft.Agents.AI.OpenAI` | OpenAI provider adapter — `.AsAIAgent()` extension methods |
-| `Microsoft.Agents.AI.Anthropic` | Anthropic provider adapter — `.AsAIAgent()` extension methods |
-| Streaming via `RunStreamingAsync()` | Built-in token streaming for real-time UI |
+| `Microsoft.Extensions.AI.OpenAI` | OpenAI provider adapter — `new OpenAIClient(key).GetChatClient(model).AsIChatClient()` |
+| `Anthropic` (official SDK) | Anthropic provider adapter — `new AnthropicClient { ApiKey = key }.AsIChatClient(modelName)` |
+| `Google_GenerativeAI.Microsoft` | Gemini provider adapter — `new GenerativeAIChatClient(apiKey, modelName)` (implements `IChatClient` directly) |
+| Streaming via `GetStreamingResponseAsync()` | Built-in token streaming for real-time UI |
 
 ### 1.2 What We Do NOT Use from MAF
 
@@ -36,10 +36,10 @@ MAF's workflow engine (`AgentWorkflowBuilder`, `WorkflowBuilder`) is **not used*
 
 The existing spec references `IChatModelClient` as a custom abstraction. Since MAF already uses `IChatClient` from `Microsoft.Extensions.AI` — which is provider-agnostic and supports all our target providers — we use `IChatClient` directly. No need to invent a separate interface.
 
-- OpenAI: `new OpenAIClient(apiKey).GetResponsesClient(model).AsIChatClient()`
-- Anthropic: `new AnthropicClient(apiKey).AsIChatClient(model)`
-- DeepSeek: Uses OpenAI-compatible API via `OpenAIClient` with custom endpoint
-- Gemini: Via `Microsoft.Extensions.AI` Gemini adapter or OpenAI-compatible endpoint
+- OpenAI: `new OpenAIClient(apiKey).GetChatClient(model).AsIChatClient()`
+- Anthropic: `new AnthropicClient { ApiKey = apiKey }.AsIChatClient(modelName)` (extension in `Microsoft.Extensions.AI` namespace)
+- DeepSeek: Uses OpenAI-compatible API via `OpenAIClient` with a custom `OpenAIClientOptions` endpoint
+- Gemini: `new GenerativeAIChatClient(apiKey, modelName)` from `Google_GenerativeAI.Microsoft` — implements `IChatClient` directly
 
 All references to `IChatModelClient` in the spec should be read as `IChatClient`.
 
@@ -105,7 +105,7 @@ backend/
 │   ├── Agon.Infrastructure/                  ← MAF, DB, SignalR, external I/O
 │   │   ├── Agon.Infrastructure.csproj        ← References: Agon.Application, MAF packages
 │   │   ├── Agents/
-│   │   │   ├── MafCouncilAgent.cs            ← ICouncilAgent → MAF ChatClientAgent
+│   │   │   ├── MafCouncilAgent.cs            ← ICouncilAgent, provider-agnostic via IChatClient
 │   │   │   ├── FakeCouncilAgent.cs           ← Canned responses for unit/integration tests
 │   │   │   └── AgentResponseParser.cs        ← Parses MESSAGE + PATCH sections from LLM output
 │   │   ├── Persistence/
@@ -189,8 +189,8 @@ public interface ICouncilAgent
 
 The Infrastructure layer implements this as `MafCouncilAgent`, which:
 1. Loads the system prompt from `AgentSystemPrompts` (Domain layer)
-2. Injects the Truth Map and context into the prompt
-3. Calls MAF's `ChatClientAgent.RunAsync()` or `RunStreamingAsync()`
+2. Composes the full prompt via `AgentPromptComposer.ComposePrompt()` (injects Truth Map, friction level, round metadata)
+3. Calls `chatClient.GetResponseAsync()` or `chatClient.GetStreamingResponseAsync()` directly on the injected `IChatClient`
 4. Parses the response into MESSAGE + PATCH sections via `AgentResponseParser`
 
 For tests, `FakeCouncilAgent` returns canned MESSAGE + PATCH responses without calling any LLM.
@@ -227,10 +227,10 @@ No NuGet references. Pure C# with BCL types only.
 ### Infrastructure
 | Package | Purpose |
 |---|---|
-| `Microsoft.Agents.AI` | Core MAF — `ChatClientAgent`, `AIAgent`, `AgentWorkflowBuilder` (agents only) |
-| `Microsoft.Agents.AI.OpenAI` | OpenAI provider adapter |
-| `Microsoft.Agents.AI.Anthropic` | Anthropic provider adapter |
-| `Microsoft.Extensions.AI` | `IChatClient` abstraction (pulled in by MAF) |
+| `Microsoft.Extensions.AI.OpenAI` | OpenAI provider adapter (`IChatClient` implementation) |
+| `Anthropic` | Official Anthropic SDK with `.AsIChatClient()` extension |
+| `Google_GenerativeAI.Microsoft` | Gemini adapter — `GenerativeAIChatClient` implements `IChatClient` |
+| `Microsoft.Extensions.AI` | `IChatClient` abstraction (pulled in transitively) |
 | `Microsoft.AspNetCore.SignalR` | Real-time streaming hub |
 | `Npgsql.EntityFrameworkCore.PostgreSQL` or `Dapper` | PostgreSQL persistence (choose one) |
 | `StackExchange.Redis` | Redis ephemeral state |
