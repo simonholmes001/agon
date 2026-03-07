@@ -1,0 +1,70 @@
+{
+  "name": "@agon/cli",
+  "version": "0.1.0",
+  "description": "CLI tool for Agon - AI-powered strategy debate platform",
+  "author": "Simon Holmes",
+  "license": "MIT",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "agon": "./bin/run.js"
+  },
+  "files": [
+    "/bin",
+    "/dist",
+    "/oclif.manifest.json"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "vitest",
+    "test:watch": "vitest --watch",
+    "test:coverage": "vitest --coverage",
+    "lint": "eslint . --ext .ts",
+    "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
+    "prepack": "npm run build && oclif manifest",
+    "postpack": "rm -f oclif.manifest.json",
+    "prepare": "npm run build"
+  },
+  "dependencies": {
+    "@oclif/core": "^3.0.0",
+    "axios": "^1.6.0",
+    "chalk": "^5.3.0",
+    "cli-table3": "^0.6.3",
+    "cosmiconfig": "^9.0.0",
+    "eventsource": "^2.0.2",
+    "ink": "^4.4.1",
+    "inquirer": "^9.2.12",
+    "marked": "^11.0.0",
+    "marked-terminal": "^7.0.0",
+    "ora": "^8.0.1",
+    "react": "^18.2.0",
+    "zod": "^3.22.4"
+  },
+  "devDependencies": {
+    "@oclif/test": "^3.0.0",
+    "@types/eventsource": "^1.1.15",
+    "@types/inquirer": "^9.0.7",
+    "@types/marked-terminal": "^6.0.0",
+    "@types/node": "^20.10.0",
+    "@types/react": "^18.2.0",
+    "@typescript-eslint/eslint-plugin": "^6.13.0",
+    "@typescript-eslint/parser": "^6.13.0",
+    "@vitest/coverage-v8": "^1.0.0",
+    "eslint": "^8.54.0",
+    "oclif": "^4.0.0",
+    "prettier": "^3.1.0",
+    "typescript": "^5.3.0",
+    "vitest": "^1.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "oclif": {
+    "bin": "agon",
+    "dirname": "agon",
+    "commands": "./dist/commands",
+    "topicSeparator": " "
+  }
+}
