@@ -14,6 +14,10 @@
 
 import { cosmiconfig } from 'cosmiconfig';
 import { z } from 'zod';
+import { promises as fs } from 'node:fs';
+import { stringify as yamlStringify } from 'yaml';
+import * as path from 'node:path';
+import * as os from 'node:os';
 
 // Configuration schema
 const ConfigSchema = z.object({
@@ -33,7 +37,7 @@ const DEFAULT_CONFIG: Required<AgonConfig> = {
 };
 
 export class ConfigManager {
-  private explorer = cosmiconfig('agon');
+  private readonly explorer = cosmiconfig('agon');
   private cachedConfig: Required<AgonConfig> | null = null;
 
   /**
@@ -55,14 +59,14 @@ export class ConfigManager {
     try {
       const result = await this.explorer.search();
       
-      if (result && result.config) {
+      if (result?.config) {
         const validated = this.validate(result.config);
         this.cachedConfig = this.merge(validated);
         return this.cachedConfig;
       }
-    } catch (error) {
+    } catch {
       // Config file not found or invalid - use defaults
-      // In production, we might want to log this
+      // Silently fall back to defaults
     }
 
     this.cachedConfig = { ...DEFAULT_CONFIG };
@@ -113,5 +117,47 @@ export class ConfigManager {
   clearCache(): void {
     this.cachedConfig = null;
     this.explorer.clearCaches();
+  }
+
+  /**
+   * Set a configuration value and save to file
+   */
+  async set<K extends keyof AgonConfig>(
+    key: K,
+    value: Required<AgonConfig>[K]
+  ): Promise<void> {
+    // Validate the new value by creating a partial config
+    const partialConfig: Partial<AgonConfig> = { [key]: value };
+    this.validate(partialConfig);
+
+    // Load current config (or defaults if no config file)
+    const currentConfig = await this.load();
+    
+    // Merge with new value
+    const updatedConfig = { ...currentConfig, [key]: value };
+
+    // Determine config file path
+    const configPath = await this.getConfigPath() || 
+      path.join(os.homedir(), '.agonrc');
+
+    // Save to file as YAML
+    const yamlContent = yamlStringify(updatedConfig);
+    await fs.writeFile(configPath, yamlContent, 'utf-8');
+
+    // Clear cache to force reload on next access
+    this.clearCache();
+  }
+
+  /**
+   * Get the path to the config file
+   * Returns null if no config file exists
+   */
+  async getConfigPath(): Promise<string | null> {
+    try {
+      const result = await this.explorer.search();
+      return result?.filepath || null;
+    } catch {
+      return null;
+    }
   }
 }

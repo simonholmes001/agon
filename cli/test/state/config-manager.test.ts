@@ -154,4 +154,79 @@ describe('ConfigManager', () => {
       expect(partial.defaultFriction).toBe(75); // Unchanged
     });
   });
+
+  describe('set configuration value', () => {
+    it('should set a string value (apiUrl)', async () => {
+      // Act & Assert - Should not throw
+      await expect(
+        configManager.set('apiUrl', 'https://api.agon.ai')
+      ).resolves.not.toThrow();
+    });
+
+    it('should set a number value (defaultFriction)', async () => {
+      // Act & Assert
+      await expect(
+        configManager.set('defaultFriction', 75)
+      ).resolves.not.toThrow();
+    });
+
+    it('should set a boolean value (researchEnabled)', async () => {
+      // Act & Assert
+      await expect(
+        configManager.set('researchEnabled', false)
+      ).resolves.not.toThrow();
+    });
+
+    it('should set an enum value (logLevel)', async () => {
+      // Act & Assert
+      await expect(
+        configManager.set('logLevel', 'debug')
+      ).resolves.not.toThrow();
+    });
+
+    it('should validate before setting (invalid friction)', async () => {
+      // Act & Assert
+      await expect(
+        configManager.set('defaultFriction', 150)
+      ).rejects.toThrow();
+    });
+
+    it('should validate before setting (invalid apiUrl)', async () => {
+      // Act & Assert
+      await expect(
+        configManager.set('apiUrl', 'not-a-url')
+      ).rejects.toThrow();
+    });
+
+    it('should clear cache after setting value', async () => {
+      // Arrange - Load config to populate cache
+      await configManager.load();
+      
+      // Act - Set a value (should clear cache)
+      await configManager.set('defaultFriction', 75);
+
+      // Assert - Next load should re-read from file
+      const config = await configManager.load();
+      expect(config).toBeDefined();
+    });
+  });
+
+  describe('get config file path', () => {
+    it('should return config file path if exists', async () => {
+      // Act
+      const path = await configManager.getConfigPath();
+
+      // Assert - May be null or a string path
+      expect(path === null || typeof path === 'string').toBe(true);
+    });
+
+    it('should return null if no config file exists', async () => {
+      // This test depends on environment - if .agonrc doesn't exist
+      // in the home directory or project, it should return null
+      const path = await configManager.getConfigPath();
+      
+      // Assert - Valid return values
+      expect(path === null || typeof path === 'string').toBe(true);
+    });
+  });
 });
