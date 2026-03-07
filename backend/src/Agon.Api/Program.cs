@@ -1,149 +1,243 @@
 using Agon.Api.Configuration;
-using Agon.Api.Endpoints;
 using Agon.Api.Middleware;
 using Agon.Application.Interfaces;
 using Agon.Application.Orchestration;
 using Agon.Application.Services;
-using Agon.Infrastructure.Persistence.InMemory;
+using Agon.Domain.Agents;
+using Agon.Infrastructure.Agents;
+using Agon.Infrastructure.Persistence.PostgreSQL;
+using Agon.Infrastructure.Persistence.Redis;
 using Agon.Infrastructure.SignalR;
-using Serilog;
-using Serilog.Events;
-
-// Bootstrap logger catches startup errors before the full Serilog pipeline is configured.
-// Use CreateLogger (not CreateBootstrapLogger) so the static Log.Logger is not frozen when
-// WebApplicationFactory creates a second host instance during integration tests.
-Log.Logger = new LoggerConfiguration()
-    .MinimumLevel.Debug()
-    .WriteTo.Console(outputTemplate:
-        "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}")
-    .CreateLogger();
+using Anthropic;
+using Google.GenAI;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.AI;
+using Mscc.GenerativeAI.Microsoft;
+using OpenAI;
+using StackExchange.Redis;
 
 var builder = WebApplication.CreateBuilder(args);
-var isTestingEnvironment =
-    builder.Environment.IsEnvironment("Test")
-    || builder.Environment.IsEnvironment("Testing");
 
-const string FrontendCorsPolicy = "FrontendCorsPolicy";
-var allowedOrigins = builder.Configuration
-    .GetSection("Cors:AllowedOrigins")
-    .Get<string[]>()
-    ?? ["http://localhost:3000", "https://localhost:3000"];
-var dotEnvLoadResult = isTestingEnvironment
-    ? new DotEnvLoadResult(null, 0, 0)
-    : DotEnvLoader.Load(builder.Environment.ContentRootPath);
-
-// Replace the default Microsoft logging with Serilog.
-builder.Host.UseSerilog((ctx, services, config) => config
-    .ReadFrom.Configuration(ctx.Configuration)
-    .ReadFrom.Services(services)
-    .Enrich.FromLogContext()
-    .Enrich.WithMachineName()
-    .Enrich.WithThreadId()
-    .MinimumLevel.Debug()
-    // Quiet down chatty framework namespaces
-    .MinimumLevel.Override("Microsoft.AspNetCore.Hosting", LogEventLevel.Warning)
-    .MinimumLevel.Override("Microsoft.AspNetCore.Routing", LogEventLevel.Warning)
-    .MinimumLevel.Override("Microsoft.AspNetCore.Cors", LogEventLevel.Warning)
-    .MinimumLevel.Override("Microsoft.AspNetCore.StaticFiles", LogEventLevel.Warning)
-    .MinimumLevel.Override("Microsoft.EntityFrameworkCore", LogEventLevel.Warning)
-    .WriteTo.Console(
-        outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {SourceContext} {Message:lj}{NewLine}{Exception}",
-        restrictedToMinimumLevel: LogEventLevel.Debug));
-
-builder.Services.AddCors(options =>
+// ── Load Environment Variables from .env File ───────────────────────────
+// This allows us to read OPENAI_KEY, CLAUDE_KEY, etc. from the .env file
+var envFilePath = Path.Combine(Directory.GetParent(builder.Environment.ContentRootPath)?.Parent?.FullName ?? "", ".env");
+if (File.Exists(envFilePath))
 {
-    options.AddPolicy(FrontendCorsPolicy, cors =>
+    foreach (var line in File.ReadAllLines(envFilePath))
     {
-        cors
-            .WithOrigins(allowedOrigins)
-            .AllowAnyHeader()
-            .AllowAnyMethod()
-            .AllowCredentials();
-    });
-});
+        if (string.IsNullOrWhiteSpace(line) || line.StartsWith("#")) continue;
+        
+        var parts = line.Split('=', 2, StringSplitOptions.TrimEntries);
+        if (parts.Length == 2)
+        {
+            var key = parts[0];
+            var value = parts[1].Trim('"'); // Remove surrounding quotes
+            Environment.SetEnvironmentVariable(key, value);
+        }
+    }
+}
 
+// ── Configuration ───────────────────────────────────────────────────────
+var llmConfig = builder.Configuration.GetSection(LlmConfiguration.SectionName).Get<LlmConfiguration>() ?? new();
+var agonConfig = builder.Configuration.GetSection(AgonConfiguration.SectionName).Get<AgonConfiguration>() ?? new();
+
+// Replace ${ENV_VAR} placeholders with actual environment variables
+llmConfig.OpenAI.ApiKey = ReplaceEnvVars(llmConfig.OpenAI.ApiKey);
+llmConfig.Anthropic.ApiKey = ReplaceEnvVars(llmConfig.Anthropic.ApiKey);
+llmConfig.Google.ApiKey = ReplaceEnvVars(llmConfig.Google.ApiKey);
+llmConfig.DeepSeek.ApiKey = ReplaceEnvVars(llmConfig.DeepSeek.ApiKey);
+
+builder.Services.AddSingleton(llmConfig);
+builder.Services.AddSingleton(agonConfig);
+
+// ── Controllers and OpenAPI ─────────────────────────────────────────────
+builder.Services.AddControllers();
+builder.Services.AddOpenApi();
+
+// ── SignalR for Real-Time Events ────────────────────────────────────────
 builder.Services.AddSignalR();
-builder.Services.AddSingleton<ISessionRepository, InMemorySessionRepository>();
-builder.Services.AddSingleton<ITruthMapRepository, InMemoryTruthMapRepository>();
-builder.Services.AddSingleton<ITranscriptRepository, InMemoryTranscriptRepository>();
-builder.Services.AddSingleton<IEventBroadcaster, SignalREventBroadcaster>();
-builder.Services.AddSingleton<Orchestrator>();
-builder.Services.AddSingleton<AgentRunner>();
-builder.Services.AddSingleton<SessionService>();
-builder.Services.AddSingleton<ArtifactService>();
-builder.Services.AddHttpClient();
 
-// Artifact generators
-builder.Services.AddSingleton<IArtifactGenerator, CopilotInstructionGenerator>();
-builder.Services.AddSingleton<IArtifactGenerator, ArchitectureInstructionGenerator>();
-builder.Services.AddSingleton<IArtifactGenerator, PrdInstructionGenerator>();
-builder.Services.AddSingleton<IArtifactGenerator, RiskRegistryGenerator>();
-builder.Services.AddSingleton<IArtifactGenerator, AssumptionValidationGenerator>();
+// ── Database: PostgreSQL ────────────────────────────────────────────────
+var postgresConnectionString = builder.Configuration.GetConnectionString("PostgreSQL");
+if (!string.IsNullOrEmpty(postgresConnectionString))
+{
+    builder.Services.AddDbContext<AgonDbContext>(options =>
+        options.UseNpgsql(postgresConnectionString));
+    
+    // ── Infrastructure: Repositories ────────────────────────────────────────
+    builder.Services.AddScoped<ISessionRepository, SessionRepository>();
+    builder.Services.AddScoped<ITruthMapRepository, TruthMapRepository>();
+}
 
-var providerConfig = ProviderConfiguration.Load(builder.Configuration);
-builder.Services.AddCouncilAgents(providerConfig);
+// ── Database: Redis ─────────────────────────────────────────────────────
+var redisConnectionString = builder.Configuration.GetConnectionString("Redis") ?? "localhost:6379";
+if (!builder.Environment.IsEnvironment("Testing"))
+{
+    builder.Services.AddSingleton<IConnectionMultiplexer>(sp =>
+        ConnectionMultiplexer.Connect(redisConnectionString));
+    builder.Services.AddScoped<IDatabase>(sp =>
+        sp.GetRequiredService<IConnectionMultiplexer>().GetDatabase());
+    
+    builder.Services.AddScoped<ISnapshotStore, RedisSnapshotStore>();
+}
+
+// ── Infrastructure: SignalR Event Broadcasting ──────────────────────────
+builder.Services.AddScoped<IEventBroadcaster, SignalREventBroadcaster>();
+
+// ── Application Layer Services ──────────────────────────────────────────
+builder.Services.AddScoped<ISessionService, SessionService>();
+
+// Only register Orchestrator and AgentRunner if dependencies are available
+if (!builder.Environment.IsEnvironment("Testing"))
+{
+    builder.Services.AddScoped<IAgentRunner, AgentRunner>();
+    builder.Services.AddScoped<Orchestrator>();
+}
+
+// ── Infrastructure: Council Agents (MAF with Multiple Providers) ────────
+if (!builder.Environment.IsEnvironment("Testing"))
+{
+    // Register AgentResponseParser adapter (shared by all agents)
+    builder.Services.AddScoped<IAgentResponseParser, AgentResponseParserAdapter>();
+
+    var config = builder.Configuration.Get<LlmConfiguration>() ?? throw new InvalidOperationException("LlmConfiguration is missing");
+
+    // ── Register Council Agents with Provider-Specific Native MAF AIAgents ──
+    
+    // Moderator: OpenAI GPT (via ChatCompletion API)
+    builder.Services.AddScoped<ICouncilAgent>(sp =>
+    {
+        var parser = sp.GetRequiredService<IAgentResponseParser>();
+        // Cast ChatClient to IChatClient for .AsAIAgent() extension
+        var aiAgent = ((IChatClient)new OpenAIClient(config.OpenAI.ApiKey)
+            .GetChatClient(config.OpenAI.Model))
+            .AsAIAgent(
+                instructions: AgentSystemPrompts.Moderator,
+                name: AgentId.Moderator);
+        
+        return new MafCouncilAgent(
+            agentId: AgentId.Moderator,
+            modelProvider: $"OpenAI {config.OpenAI.Model}",
+            underlyingAgent: aiAgent,
+            parser: parser);
+    });
+
+    // GPT Agent: OpenAI GPT (via ChatCompletion API)
+    builder.Services.AddScoped<ICouncilAgent>(sp =>
+    {
+        var parser = sp.GetRequiredService<IAgentResponseParser>();
+        // Cast ChatClient to IChatClient for .AsAIAgent() extension
+        var aiAgent = ((IChatClient)new OpenAIClient(config.OpenAI.ApiKey)
+            .GetChatClient(config.OpenAI.Model))
+            .AsAIAgent(
+                instructions: AgentSystemPrompts.GptAgent,
+                name: AgentId.GptAgent);
+        
+        return new MafCouncilAgent(
+            agentId: AgentId.GptAgent,
+            modelProvider: $"OpenAI {config.OpenAI.Model}",
+            underlyingAgent: aiAgent,
+            parser: parser);
+    });
+
+    // Gemini Agent: Google Gemini (via Google.GenAI + Mscc.GenerativeAI.Microsoft)
+    builder.Services.AddScoped<ICouncilAgent>(sp =>
+    {
+        var parser = sp.GetRequiredService<IAgentResponseParser>();
+        var geminiClient = new Client(vertexAI: false, apiKey: config.Google.ApiKey);
+        var chatClient = geminiClient.AsIChatClient(config.Google.Model);
+        var aiAgent = chatClient.AsAIAgent(
+            instructions: AgentSystemPrompts.GeminiAgent,
+            name: AgentId.GeminiAgent);
+        
+        return new MafCouncilAgent(
+            agentId: AgentId.GeminiAgent,
+            modelProvider: $"Google {config.Google.Model}",
+            underlyingAgent: aiAgent,
+            parser: parser);
+    });
+
+    // Claude Agent: Anthropic Claude (via Anthropic SDK)
+    builder.Services.AddScoped<ICouncilAgent>(sp =>
+    {
+        var parser = sp.GetRequiredService<IAgentResponseParser>();
+        // Anthropic: .AsIChatClient(model) then .AsAIAgent()
+        var aiAgent = new AnthropicClient() { ApiKey = config.Anthropic.ApiKey }
+            .AsIChatClient(config.Anthropic.Model)
+            .AsAIAgent(
+                instructions: AgentSystemPrompts.ClaudeAgent,
+                name: AgentId.ClaudeAgent);
+        
+        return new MafCouncilAgent(
+            agentId: AgentId.ClaudeAgent,
+            modelProvider: $"Anthropic {config.Anthropic.Model}",
+            underlyingAgent: aiAgent,
+            parser: parser);
+    });
+
+    // Synthesizer: OpenAI GPT (via ChatCompletion API)
+    builder.Services.AddScoped<ICouncilAgent>(sp =>
+    {
+        var parser = sp.GetRequiredService<IAgentResponseParser>();
+        // Cast ChatClient to IChatClient for .AsAIAgent() extension
+        var aiAgent = ((IChatClient)new OpenAIClient(config.OpenAI.ApiKey)
+            .GetChatClient(config.OpenAI.Model))
+            .AsAIAgent(
+                instructions: AgentSystemPrompts.Synthesizer,
+                name: AgentId.Synthesizer);
+        
+        return new MafCouncilAgent(
+            agentId: AgentId.Synthesizer,
+            modelProvider: $"OpenAI {config.OpenAI.Model}",
+            underlyingAgent: aiAgent,
+            parser: parser);
+    });
+
+    // Register the collection of council agents
+    builder.Services.AddScoped<IReadOnlyList<ICouncilAgent>>(sp =>
+        sp.GetServices<ICouncilAgent>().ToList());
+}
+else
+{
+    // In test environment, provide empty list (tests mock ISessionService)
+    builder.Services.AddScoped<IReadOnlyList<ICouncilAgent>>(sp => new List<ICouncilAgent>());
+}
 
 var app = builder.Build();
+
+// ── HTTP Request Pipeline ───────────────────────────────────────────────
+
+// Global exception handling (must be first in pipeline)
 app.UseMiddleware<GlobalExceptionMiddleware>();
-app.UseCors(FrontendCorsPolicy);
 
-// Serilog request logging — logs each HTTP request with method, path, status code and elapsed time.
-app.UseSerilogRequestLogging(options =>
+if (app.Environment.IsDevelopment())
 {
-    options.MessageTemplate =
-        "HTTP {RequestMethod} {RequestPath} responded {StatusCode} in {Elapsed:0.0000} ms";
-    options.EnrichDiagnosticContext = (diagnosticContext, httpContext) =>
-    {
-        diagnosticContext.Set("RequestHost", httpContext.Request.Host.Value ?? "unknown");
-        diagnosticContext.Set("RequestScheme", httpContext.Request.Scheme);
-        var correlationId = httpContext.Request.Headers["X-Correlation-ID"].FirstOrDefault()
-            ?? httpContext.TraceIdentifier;
-        diagnosticContext.Set("CorrelationId", correlationId);
-    };
-});
+    app.MapOpenApi();
+}
 
-LogStartupInformation(app, dotEnvLoadResult, providerConfig);
+app.UseHttpsRedirection();
+app.UseAuthorization();
 
-app.MapSessionEndpoints();
-app.MapArtifactEndpoints();
+// ── Map Endpoints ───────────────────────────────────────────────────────
+app.MapControllers();
 app.MapHub<DebateHub>("/hubs/debate");
 
-try
-{
-    await app.RunAsync();
-}
-catch (Exception ex) when (ex is not HostAbortedException and not OperationCanceledException)
-{
-    Log.Fatal(ex, "Application terminated unexpectedly");
-}
-finally
-{
-    await Log.CloseAndFlushAsync();
-}
+app.Run();
 
-static void LogStartupInformation(
-    WebApplication app,
-    DotEnvLoadResult dotEnvLoadResult,
-    ProviderConfiguration providerConfig)
+// ── Helper Methods ──────────────────────────────────────────────────────
+
+static string ReplaceEnvVars(string value)
 {
-    if (dotEnvLoadResult.FilePath is not null)
+    if (string.IsNullOrWhiteSpace(value)) return value;
+    
+    // Replace ${VAR_NAME} with environment variable value
+    var pattern = @"\$\{([^}]+)\}";
+    return System.Text.RegularExpressions.Regex.Replace(value, pattern, match =>
     {
-        app.Logger.LogInformation(
-            ".env configuration loaded. Path={Path} LoadedKeys={LoadedKeys} SkippedExistingKeys={SkippedExistingKeys}",
-            dotEnvLoadResult.FilePath,
-            dotEnvLoadResult.LoadedCount,
-            dotEnvLoadResult.SkippedExistingCount);
-    }
-
-    providerConfig.LogConfiguration(app.Logger);
-    providerConfig.LogValidationWarnings(app.Logger);
-    providerConfig.LogMissingApiKeyWarnings(app.Logger);
+        var envVarName = match.Groups[1].Value;
+        return Environment.GetEnvironmentVariable(envVarName) ?? match.Value;
+    });
 }
 
-/// <summary>
-/// Partial class declaration for test factory access.
-/// </summary>
-public sealed partial class Program
-{
-    private Program() { }
-}
+// Make Program class accessible to integration tests
+public partial class Program { }

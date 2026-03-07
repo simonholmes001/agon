@@ -1,8 +1,6 @@
 namespace Agon.Domain.Sessions;
 
-/// <summary>
-/// Lifecycle status of a session.
-/// </summary>
+/// <summary>Lifecycle status of a session record.</summary>
 public enum SessionStatus
 {
     Active,

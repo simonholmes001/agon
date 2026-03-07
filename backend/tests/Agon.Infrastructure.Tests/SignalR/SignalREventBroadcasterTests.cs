@@ -1,201 +1,210 @@
-using Agon.Application.Sessions;
-using Agon.Domain.Sessions;
-using Agon.Domain.TruthMap;
+using Agon.Application.Interfaces;
+using Agon.Domain.TruthMap.Entities;
 using Agon.Infrastructure.SignalR;
 using FluentAssertions;
 using Microsoft.AspNetCore.SignalR;
-using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 
 namespace Agon.Infrastructure.Tests.SignalR;
 
+/// <summary>
+/// Unit tests for SignalR Event Broadcaster using mocked IHubContext.
+/// Tests verify that SignalR methods are called with correct groups and payloads.
+/// </summary>
 public class SignalREventBroadcasterTests
 {
-    [Fact]
-    public async Task RoundProgressAsync_SendsRoundProgressEvent_ToSessionGroup()
+    private readonly IHubContext<DebateHub> _mockHubContext;
+    private readonly IClientProxy _mockClientProxy;
+    private readonly IHubClients _mockClients;
+    private readonly IEventBroadcaster _broadcaster;
+
+    public SignalREventBroadcasterTests()
     {
+        _mockClientProxy = Substitute.For<IClientProxy>();
+        _mockClients = Substitute.For<IHubClients>();
+        _mockHubContext = Substitute.For<IHubContext<DebateHub>>();
+
+        _mockHubContext.Clients.Returns(_mockClients);
+        _mockClients.Group(Arg.Any<string>()).Returns(_mockClientProxy);
+
+        _broadcaster = new SignalREventBroadcaster(_mockHubContext);
+    }
+
+    [Fact]
+    public async Task SendTokenAsync_SendsToSessionGroup()
+    {
+        // Arrange
         var sessionId = Guid.NewGuid();
-        using var cancellationTokenSource = new CancellationTokenSource();
-        var cancellationToken = cancellationTokenSource.Token;
-        var hubContext = Substitute.For<IHubContext<DebateHub>>();
-        var hubClients = Substitute.For<IHubClients>();
-        var proxy = Substitute.For<IClientProxy>();
-        hubContext.Clients.Returns(hubClients);
-        hubClients.Group(DebateHub.SessionGroupName(sessionId)).Returns(proxy);
-        var sut = new SignalREventBroadcaster(hubContext, NullLogger<SignalREventBroadcaster>.Instance);
+        var agentId = "MOD";
+        var token = "Hello ";
+        var isComplete = false;
 
-        await sut.RoundProgressAsync(sessionId, SessionPhase.Construction, cancellationToken);
+        // Act
+        await _broadcaster.SendTokenAsync(sessionId, agentId, token, isComplete);
 
-        await proxy.Received(1).SendCoreAsync(
+        // Assert
+        _mockClients.Received(1).Group($"session:{sessionId}");
+        await _mockClientProxy.Received(1).SendCoreAsync(
+            "AgentToken",
+            Arg.Is<object[]>(args =>
+                args.Length == 3 &&
+                args[0].ToString() == agentId &&
+                args[1].ToString() == token &&
+                (bool)args[2] == isComplete),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task SendRoundProgressAsync_BroadcastsPhaseTransition()
+    {
+        // Arrange
+        var sessionId = Guid.NewGuid();
+        var phase = "ANALYSIS_ROUND";
+        var status = "Active";
+
+        // Act
+        await _broadcaster.SendRoundProgressAsync(sessionId, phase, status);
+
+        // Assert
+        _mockClients.Received(1).Group($"session:{sessionId}");
+        await _mockClientProxy.Received(1).SendCoreAsync(
             "RoundProgress",
-            Arg.Is<object?[]>(args =>
-                args.Length == 1
-                && HasProperty(args[0], "SessionId", sessionId)
-                && HasProperty(args[0], "Phase", SessionPhase.Construction.ToString())),
-            cancellationToken);
+            Arg.Is<object[]>(args =>
+                args.Length == 2 &&
+                args[0].ToString() == phase &&
+                args[1].ToString() == status),
+            Arg.Any<CancellationToken>());
     }
 
     [Fact]
-    public async Task TruthMapPatchedAsync_SendsPatchEvent_ToSessionGroup()
+    public async Task SendTruthMapPatchAsync_BroadcastsPatchEvent()
     {
+        // Arrange
         var sessionId = Guid.NewGuid();
-        var patch = new TruthMapPatch
-        {
-            Meta = new PatchMeta
-            {
-                Agent = "moderator",
-                Round = 1,
-                Reason = "add question",
-                SessionId = sessionId
-            },
-            Ops =
-            [
-                new PatchOperation
-                {
-                    Op = PatchOperationType.Add,
-                    Path = "/open_questions/0",
-                    Value = new { id = Guid.NewGuid().ToString("N"), text = "Who is the user?" }
-                }
-            ]
-        };
-        using var cancellationTokenSource = new CancellationTokenSource();
-        var cancellationToken = cancellationTokenSource.Token;
-        var hubContext = Substitute.For<IHubContext<DebateHub>>();
-        var hubClients = Substitute.For<IHubClients>();
-        var proxy = Substitute.For<IClientProxy>();
-        hubContext.Clients.Returns(hubClients);
-        hubClients.Group(DebateHub.SessionGroupName(sessionId)).Returns(proxy);
-        var sut = new SignalREventBroadcaster(hubContext, NullLogger<SignalREventBroadcaster>.Instance);
+        var patch = new { operation = "add", path = "/claims/c1", value = "new claim" };
+        var version = 5;
 
-        await sut.TruthMapPatchedAsync(sessionId, patch, version: 3, cancellationToken);
+        // Act
+        await _broadcaster.SendTruthMapPatchAsync(sessionId, patch, version);
 
-        await proxy.Received(1).SendCoreAsync(
+        // Assert
+        _mockClients.Received(1).Group($"session:{sessionId}");
+        await _mockClientProxy.Received(1).SendCoreAsync(
             "TruthMapPatch",
-            Arg.Is<object?[]>(args =>
-                args.Length == 1
-                && HasProperty(args[0], "SessionId", sessionId)
-                && HasProperty(args[0], "Version", 3)
-                && HasProperty(args[0], "Patch", patch)),
-            cancellationToken);
+            Arg.Is<object[]>(args =>
+                args.Length == 2 &&
+                args[0] == patch &&
+                (int)args[1] == version),
+            Arg.Any<CancellationToken>());
     }
 
     [Fact]
-    public async Task TranscriptMessageAppendedAsync_SendsTranscriptEvent_ToSessionGroup()
+    public async Task SendConfidenceTransitionAsync_BroadcastsTransition()
     {
+        // Arrange
         var sessionId = Guid.NewGuid();
-        var message = new TranscriptMessage
-        {
-            Id = Guid.NewGuid(),
-            SessionId = sessionId,
-            Type = TranscriptMessageType.Agent,
-            AgentId = "moderator",
-            Content = "Use customer discovery interviews.",
-            Round = 1,
-            IsStreaming = false,
-            CreatedAtUtc = DateTimeOffset.UtcNow
-        };
-        using var cancellationTokenSource = new CancellationTokenSource();
-        var cancellationToken = cancellationTokenSource.Token;
-        var hubContext = Substitute.For<IHubContext<DebateHub>>();
-        var hubClients = Substitute.For<IHubClients>();
-        var proxy = Substitute.For<IClientProxy>();
-        hubContext.Clients.Returns(hubClients);
-        hubClients.Group(DebateHub.SessionGroupName(sessionId)).Returns(proxy);
-        var sut = new SignalREventBroadcaster(hubContext, NullLogger<SignalREventBroadcaster>.Instance);
+        var transition = new ConfidenceTransition(
+            ClaimId: "c1",
+            FromConfidence: 0.75f,
+            ToConfidence: 0.45f,
+            Reason: ConfidenceTransitionReason.ChallengedNoDefense,
+            Round: 3,
+            OccurredAt: DateTimeOffset.UtcNow);
 
-        await sut.TranscriptMessageAppendedAsync(sessionId, message, cancellationToken);
+        // Act
+        await _broadcaster.SendConfidenceTransitionAsync(sessionId, transition);
 
-        await proxy.Received(1).SendCoreAsync(
-            "TranscriptMessage",
-            Arg.Is<object?[]>(args =>
-                args.Length == 1
-                && HasProperty(args[0], "Id", message.Id)
-                && HasProperty(args[0], "Type", "agent")
-                && HasProperty(args[0], "AgentId", "moderator")
-                && HasProperty(args[0], "Content", message.Content)
-                && HasProperty(args[0], "Round", 1)
-                && HasProperty(args[0], "IsStreaming", false)),
-            cancellationToken);
+        // Assert
+        _mockClients.Received(1).Group($"session:{sessionId}");
+        await _mockClientProxy.Received(1).SendCoreAsync(
+            "ConfidenceTransition",
+            Arg.Is<object[]>(args =>
+                args.Length == 1 &&
+                args[0] == transition),
+            Arg.Any<CancellationToken>());
     }
 
     [Fact]
-    public async Task RoundProgressAsync_DoesNotThrow_WhenSendFails()
+    public async Task SendConvergenceUpdateAsync_BroadcastsConvergenceScores()
     {
+        // Arrange
         var sessionId = Guid.NewGuid();
-        var hubContext = Substitute.For<IHubContext<DebateHub>>();
-        var hubClients = Substitute.For<IHubClients>();
-        var proxy = Substitute.For<IClientProxy>();
-        hubContext.Clients.Returns(hubClients);
-        hubClients.Group(DebateHub.SessionGroupName(sessionId)).Returns(proxy);
-        proxy.SendCoreAsync("RoundProgress", Arg.Any<object?[]>(), Arg.Any<CancellationToken>())
-            .Returns(_ => throw new InvalidOperationException("transport down"));
-        var sut = new SignalREventBroadcaster(hubContext, NullLogger<SignalREventBroadcaster>.Instance);
+        var convergence = new { claimStability = 0.85, frameworkSimilarity = 0.72 };
 
-        var act = () => sut.RoundProgressAsync(sessionId, SessionPhase.Construction, CancellationToken.None);
+        // Act
+        await _broadcaster.SendConvergenceUpdateAsync(sessionId, convergence);
 
-        await act.Should().NotThrowAsync();
+        // Assert
+        _mockClients.Received(1).Group($"session:{sessionId}");
+        await _mockClientProxy.Received(1).SendCoreAsync(
+            "ConvergenceUpdate",
+            Arg.Is<object[]>(args =>
+                args.Length == 1 &&
+                args[0] == convergence),
+            Arg.Any<CancellationToken>());
     }
 
     [Fact]
-    public async Task TruthMapPatchedAsync_DoesNotThrow_WhenSendFails()
+    public async Task SendPendingRevalidationAsync_BroadcastsEntityIds()
     {
+        // Arrange
         var sessionId = Guid.NewGuid();
-        var patch = new TruthMapPatch
-        {
-            Meta = new PatchMeta
-            {
-                Agent = "claude_agent",
-                SessionId = sessionId
-            }
-        };
-        var hubContext = Substitute.For<IHubContext<DebateHub>>();
-        var hubClients = Substitute.For<IHubClients>();
-        var proxy = Substitute.For<IClientProxy>();
-        hubContext.Clients.Returns(hubClients);
-        hubClients.Group(DebateHub.SessionGroupName(sessionId)).Returns(proxy);
-        proxy.SendCoreAsync("TruthMapPatch", Arg.Any<object?[]>(), Arg.Any<CancellationToken>())
-            .Returns(_ => throw new InvalidOperationException("transport down"));
-        var sut = new SignalREventBroadcaster(hubContext, NullLogger<SignalREventBroadcaster>.Instance);
+        var entityIds = new List<string> { "c1", "c2", "e1" };
 
-        var act = () => sut.TruthMapPatchedAsync(sessionId, patch, version: 1, CancellationToken.None);
+        // Act
+        await _broadcaster.SendPendingRevalidationAsync(sessionId, entityIds);
 
-        await act.Should().NotThrowAsync();
+        // Assert
+        _mockClients.Received(1).Group($"session:{sessionId}");
+        await _mockClientProxy.Received(1).SendCoreAsync(
+            "PendingRevalidation",
+            Arg.Is<object[]>(args =>
+                args.Length == 1 &&
+                args[0] == entityIds),
+            Arg.Any<CancellationToken>());
     }
 
     [Fact]
-    public async Task TranscriptMessageAppendedAsync_DoesNotThrow_WhenSendFails()
+    public async Task SendBudgetWarningAsync_BroadcastsWarning()
     {
+        // Arrange
         var sessionId = Guid.NewGuid();
-        var message = new TranscriptMessage
-        {
-            Id = Guid.NewGuid(),
-            SessionId = sessionId,
-            Type = TranscriptMessageType.System,
-            Content = "Round complete",
-            Round = 1,
-            IsStreaming = false,
-            CreatedAtUtc = DateTimeOffset.UtcNow
-        };
-        var hubContext = Substitute.For<IHubContext<DebateHub>>();
-        var hubClients = Substitute.For<IHubClients>();
-        var proxy = Substitute.For<IClientProxy>();
-        hubContext.Clients.Returns(hubClients);
-        hubClients.Group(DebateHub.SessionGroupName(sessionId)).Returns(proxy);
-        proxy.SendCoreAsync("TranscriptMessage", Arg.Any<object?[]>(), Arg.Any<CancellationToken>())
-            .Returns(_ => throw new InvalidOperationException("transport down"));
-        var sut = new SignalREventBroadcaster(hubContext, NullLogger<SignalREventBroadcaster>.Instance);
+        var percentUsed = 85.5f;
+        var message = "Budget usage at 85%";
 
-        var act = () => sut.TranscriptMessageAppendedAsync(sessionId, message, CancellationToken.None);
+        // Act
+        await _broadcaster.SendBudgetWarningAsync(sessionId, percentUsed, message);
 
-        await act.Should().NotThrowAsync();
+        // Assert
+        _mockClients.Received(1).Group($"session:{sessionId}");
+        await _mockClientProxy.Received(1).SendCoreAsync(
+            "BudgetWarning",
+            Arg.Is<object[]>(args =>
+                args.Length == 2 &&
+                Math.Abs((float)args[0] - percentUsed) < 0.01f &&
+                args[1].ToString() == message),
+            Arg.Any<CancellationToken>());
     }
 
-    private static bool HasProperty(object? instance, string propertyName, object? expectedValue)
+    [Fact]
+    public async Task SendArtifactReadyAsync_BroadcastsArtifactNotification()
     {
-        instance.Should().NotBeNull();
-        var property = instance!.GetType().GetProperty(propertyName);
-        property.Should().NotBeNull($"payload should include '{propertyName}'");
-        var actual = property!.GetValue(instance);
-        return Equals(actual, expectedValue);
+        // Arrange
+        var sessionId = Guid.NewGuid();
+        var artifactType = "ExecutiveSummary";
+        var version = 3;
+
+        // Act
+        await _broadcaster.SendArtifactReadyAsync(sessionId, artifactType, version);
+
+        // Assert
+        _mockClients.Received(1).Group($"session:{sessionId}");
+        await _mockClientProxy.Received(1).SendCoreAsync(
+            "ArtifactReady",
+            Arg.Is<object[]>(args =>
+                args.Length == 2 &&
+                args[0].ToString() == artifactType &&
+                (int)args[1] == version),
+            Arg.Any<CancellationToken>());
     }
 }

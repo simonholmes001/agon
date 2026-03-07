@@ -1,3 +1,4 @@
+using Agon.Domain.TruthMap;
 using Agon.Infrastructure.Agents;
 using FluentAssertions;
 
@@ -5,88 +6,177 @@ namespace Agon.Infrastructure.Tests.Agents;
 
 public class AgentResponseParserTests
 {
-    [Fact]
-    public void Parse_ExtractsMessageAndPatch_WhenBothSectionsArePresent()
-    {
-        var sessionId = Guid.NewGuid();
-        var raw = $$"""
-            ## MESSAGE
-            This is the user-visible summary.
-
-            ## PATCH
-            {
-              "ops": [],
-              "meta": {
-                "agent": "synthesizer",
-                "round": 1,
-                "reason": "test",
-                "sessionId": "{{sessionId}}"
-              }
-            }
-            """;
-
-        var parsed = AgentResponseParser.Parse(raw);
-
-        parsed.Message.Should().Be("This is the user-visible summary.");
-        parsed.Patch.Should().NotBeNull();
-        parsed.Patch!.Ops.Should().BeEmpty();
-        parsed.Patch.Meta.Agent.Should().Be("synthesizer");
-    }
+    // ── Valid MESSAGE + PATCH format ──────────────────────────────────────────
 
     [Fact]
-    public void Parse_ReturnsMessageAndIgnoresPatch_WhenPatchIsNotPatchSchema()
+    public void Parse_ValidMessageAndPatch_ReturnsPopulatedResponse()
     {
         var raw = """
             ## MESSAGE
-            Keep this message.
-
-            ## PATCH
-            { "decisions": [ { "id": "d-1" } ] }
-            """;
-
-        var parsed = AgentResponseParser.Parse(raw);
-
-        parsed.Message.Should().Be("Keep this message.");
-        parsed.Patch.Should().BeNull();
-    }
-
-    [Fact]
-    public void Parse_ReturnsOriginalText_WhenMessageHeaderIsMissing()
-    {
-        var raw = "Plain response without structured sections.";
-
-        var parsed = AgentResponseParser.Parse(raw);
-
-        parsed.Message.Should().Be(raw);
-        parsed.Patch.Should().BeNull();
-    }
-
-    [Fact]
-    public void Parse_HandlesJsonCodeFenceInPatchSection()
-    {
-        var sessionId = Guid.NewGuid();
-        var raw = $$"""
-            ## MESSAGE
-            A structured answer.
+            This is the agent's human-readable analysis.
+            It can span multiple lines.
 
             ## PATCH
             ```json
             {
               "ops": [],
               "meta": {
-                "agent": "synthesizer",
-                "round": 2,
-                "reason": "fenced",
-                "sessionId": "{{sessionId}}"
+                "agent": "gpt_agent",
+                "round": 1,
+                "reason": "Initial analysis",
+                "session_id": "00000000-0000-0000-0000-000000000000"
               }
             }
             ```
             """;
 
-        var parsed = AgentResponseParser.Parse(raw);
+        var result = AgentResponseParser.Parse(raw, "gpt_agent");
 
-        parsed.Message.Should().Be("A structured answer.");
-        parsed.Patch.Should().NotBeNull();
-        parsed.Patch!.Meta.Round.Should().Be(2);
+        result.Message.Should().Contain("agent's human-readable analysis");
+        result.Patch.Should().NotBeNull();
+        result.Patch!.Meta.Agent.Should().Be("gpt_agent");
+        result.RawOutput.Should().Be(raw);
+    }
+
+    [Fact]
+    public void Parse_MessageOnly_NoPatch()
+    {
+        var raw = """
+            ## MESSAGE
+            Just a message with no patch section.
+            """;
+
+        var result = AgentResponseParser.Parse(raw, "gpt_agent");
+
+        result.Message.Should().Contain("Just a message");
+        result.Patch.Should().BeNull();
+    }
+
+    [Fact]
+    public void Parse_PatchWithMultipleOperations_DeserializesCorrectly()
+    {
+        var raw = """
+            ## MESSAGE
+            Analysis complete.
+
+            ## PATCH
+            ```json
+            {
+              "ops": [
+                {
+                  "op": "add",
+                  "path": "/claims/-",
+                  "value": null
+                }
+              ],
+              "meta": {
+                "agent": "gpt_agent",
+                "round": 1,
+                "reason": "Test",
+                "session_id": "00000000-0000-0000-0000-000000000000"
+              }
+            }
+            ```
+            """;
+
+        var result = AgentResponseParser.Parse(raw, "gpt_agent");
+
+        result.Patch.Should().NotBeNull();
+        result.Patch!.Ops.Should().HaveCount(1);
+        result.Patch.Ops[0].Op.Should().Be(PatchOp.Add);
+        result.Patch.Ops[0].Path.Should().Be("/claims/-");
+    }
+
+    // ── Malformed input ───────────────────────────────────────────────────────
+
+    [Fact]
+    public void Parse_MalformedJson_ReturnsNullPatch()
+    {
+        var raw = """
+            ## MESSAGE
+            Analysis.
+
+            ## PATCH
+            ```json
+            { this is not valid json }
+            ```
+            """;
+
+        var result = AgentResponseParser.Parse(raw, "gpt_agent");
+
+        result.Message.Should().Contain("Analysis");
+        result.Patch.Should().BeNull(); // Parser gracefully handles bad JSON
+    }
+
+    [Fact]
+    public void Parse_EmptyInput_ReturnsEmptyMessage()
+    {
+        var result = AgentResponseParser.Parse("", "gpt_agent");
+
+        result.Message.Should().BeEmpty();
+        result.Patch.Should().BeNull();
+    }
+
+    [Fact]
+    public void Parse_NoSectionHeaders_TreatsEntireTextAsMessage()
+    {
+        var raw = "Just plain text with no headers.";
+
+        var result = AgentResponseParser.Parse(raw, "gpt_agent");
+
+        result.Message.Should().Be(raw);
+        result.Patch.Should().BeNull();
+    }
+
+    // ── Case insensitivity ────────────────────────────────────────────────────
+
+    [Fact]
+    public void Parse_SectionHeadersCaseInsensitive()
+    {
+        var raw = """
+            ## message
+            Content.
+
+            ## patch
+            ```json
+            {
+              "ops": [],
+              "meta": {
+                "agent": "gpt_agent",
+                "round": 1,
+                "reason": "Test",
+                "session_id": "00000000-0000-0000-0000-000000000000"
+              }
+            }
+            ```
+            """;
+
+        var result = AgentResponseParser.Parse(raw, "gpt_agent");
+
+        result.Message.Should().Contain("Content");
+        result.Patch.Should().NotBeNull();
+    }
+
+    // ── Token count estimation ────────────────────────────────────────────────
+
+    [Fact]
+    public void Parse_EstimatesTokenCount()
+    {
+        var raw = """
+            ## MESSAGE
+            This is a message with approximately twenty words in it so we can test token estimation properly indeed yes.
+
+            ## PATCH
+            ```json
+            { "ops": [], "meta": { "agent": "gpt_agent", "round": 1, "reason": "Test", "session_id": "00000000-0000-0000-0000-000000000000" } }
+            ```
+            """;
+
+        var result = AgentResponseParser.Parse(raw, "gpt_agent");
+
+        // Rough heuristic: ~1.3 tokens per word, so ~20 words ≈ 26 tokens for message
+        // Plus JSON overhead for patch. Should be > 0 and reasonable.
+        result.TokensUsed.Should().BeGreaterThan(20);
+        result.TokensUsed.Should().BeLessThan(200); // sanity check
     }
 }

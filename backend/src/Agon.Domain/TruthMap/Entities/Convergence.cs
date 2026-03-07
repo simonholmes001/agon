@@ -1,22 +1,32 @@
 namespace Agon.Domain.TruthMap.Entities;
 
-public enum ConvergenceStatus
-{
-    InProgress,
-    Converged,
-    GapsRemain
-}
+public enum ConvergenceStatus { InProgress, Converged, GapsRemain }
 
-public class Convergence
+/// <summary>
+/// Rubric-scored convergence state for a session.
+/// All dimension scores are in [0.0, 1.0].
+/// </summary>
+public sealed record Convergence(
+    float ClaritySpecificity,
+    float Feasibility,
+    float RiskCoverage,
+    float AssumptionExplicitness,
+    float Coherence,
+    float Actionability,
+    float EvidenceQuality,
+    float Overall,
+    float Threshold,
+    ConvergenceStatus Status)
 {
-    public float ClaritySpecificity { get; set; }
-    public float Feasibility { get; set; }
-    public float RiskCoverage { get; set; }
-    public float AssumptionExplicitness { get; set; }
-    public float Coherence { get; set; }
-    public float Actionability { get; set; }
-    public float EvidenceQuality { get; set; }
-    public float Overall { get; set; }
-    public float Threshold { get; set; }
-    public ConvergenceStatus Status { get; set; } = ConvergenceStatus.InProgress;
+    public static Convergence Empty(float threshold) => new(
+        ClaritySpecificity: 0f,
+        Feasibility: 0f,
+        RiskCoverage: 0f,
+        AssumptionExplicitness: 0f,
+        Coherence: 0f,
+        Actionability: 0f,
+        EvidenceQuality: 0f,
+        Overall: 0f,
+        Threshold: threshold,
+        Status: ConvergenceStatus.InProgress);
 }

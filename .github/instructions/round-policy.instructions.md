@@ -14,16 +14,14 @@ An Agon session passes through these phases in order. Phases are strictly sequen
 
 ```
 INTAKE
-  └─► CLARIFICATION
-        └─► DRAFT_ROUND_1 (GPT Agent — initial draft)
-              └─► DRAFT_ROUND_2 (Gemini Agent — improves draft)
-                    └─► DRAFT_ROUND_3 (Claude Agent — refines draft)
-                          └─► CRITIQUE (all three agents critique in parallel)
-                                └─► SYNTHESIS
-                                      ├─► CONVERGED → DELIVER → POST_DELIVERY
-                                      └─► TARGETED_LOOP (up to N times)
-                                            ├─► SYNTHESIS (re-entry)
-                                            └─► MAX_LOOPS_REACHED → DELIVER_WITH_GAPS → POST_DELIVERY
+  └─► CLARIFICATION (Moderator ↔ User loop — agents blocked until READY)
+        └─► ANALYSIS_ROUND (GPT Agent + Gemini Agent + Claude Agent — all in parallel)
+              └─► CRITIQUE (GPT Agent + Gemini Agent + Claude Agent — all in parallel)
+                    └─► SYNTHESIS
+                          ├─► CONVERGED → DELIVER → POST_DELIVERY
+                          └─► TARGETED_LOOP (up to N times)
+                                ├─► SYNTHESIS (re-entry)
+                                └─► MAX_LOOPS_REACHED → DELIVER_WITH_GAPS → POST_DELIVERY
 ```
 
 ---
@@ -42,85 +40,68 @@ INTAKE
 ### 2.2 CLARIFICATION
 
 **Entry condition:** Arrived from INTAKE.  
-**Agents active:** Moderator / Clarifier only.  
+**Agents active:** Moderator / Clarifier only. All council agents (GPT, Gemini, Claude) are **blocked** — they do not receive any calls until the Moderator outputs `READY`.  
 **Max rounds in this phase:** `max_clarification_rounds` (default: 2).  
 **Max questions per round:** 3.
 
 **Within-phase loop:**
 1. Moderator evaluates the current Truth Map.
 2. If all three elements of the Golden Triangle are present and unambiguous: Moderator outputs `READY` and the phase ends.
-3. If elements are missing or vague: Moderator outputs up to 3 questions. Questions are presented to the user. User responds.
-4. Moderator processes the response, updates Truth Map via patch, re-evaluates.
+3. If elements are missing or vague: Moderator outputs up to 3 questions. Questions are presented to the user. **The Orchestrator waits for the user's response before proceeding.**
+4. Moderator processes the user's response, updates Truth Map via patch, re-evaluates.
 5. Repeat up to `max_clarification_rounds` times.
 
-**Forced exit:** If `max_clarification_rounds` is reached without a `READY` signal, Orchestrator transitions to DRAFT_ROUND_1 anyway with the best available Debate Brief. Flags the session as `clarification_incomplete = true`.
+**Forced exit:** If `max_clarification_rounds` is reached without a `READY` signal, Orchestrator transitions to ANALYSIS_ROUND anyway with the best available Debate Brief. Flags the session as `clarification_incomplete = true`.
 
 **HITL during clarification:** User may add constraints directly. Treated as a clarification response. Does not consume a clarification round.
 
-**Exit condition:** Moderator outputs `READY` → transition to DRAFT_ROUND_1.
+**Exit condition:** Moderator outputs `READY` AND the user's final clarification response has been processed → transition to ANALYSIS_ROUND. Council agents are unblocked at this point.
 
 ---
 
-### 2.3 DRAFT_ROUND_1 (Initial Draft — GPT Agent)
+### 2.3 ANALYSIS_ROUND (All Three Agents in Parallel)
 
-**Entry condition:** Arrived from CLARIFICATION with a seeded Truth Map.  
-**Agent active:** GPT Agent (OpenAI GPT-5.2) — single agent, sequential.  
-**Timeout:** Configurable. Default: 90 seconds wall-clock from first token request to complete response.
+**Entry condition:** Arrived from CLARIFICATION with a completed Debate Brief and seeded Truth Map.  
+**Agents active:** GPT Agent, Gemini Agent, Claude Agent — all run in **parallel**.  
+**Timeout per agent:** Configurable. Default: 90 seconds wall-clock from first token request to complete response.
 
 **Execution sequence:**
-1. Orchestrator dispatches GPT Agent call with the Debate Brief and current Truth Map.
-2. Agent streams its `MESSAGE` to the UI in real time.
-3. Agent's `PATCH` is validated and applied.
-4. Orchestrator writes round-end snapshot.
+1. Orchestrator dispatches all three agent calls simultaneously, each receiving the Debate Brief and the current Truth Map.
+2. Each agent streams its `MESSAGE` to the UI in real time as tokens arrive.
+3. Each agent's `PATCH` is buffered until the agent's full response is received.
+4. Patches are validated and applied sequentially in deterministic order (alphabetical by agent_id) once all agents have responded (or timed out).
+5. Confidence Decay Engine runs after all patches are applied.
 
-**Exit condition:** GPT Agent has responded (or timed out) → transition to DRAFT_ROUND_2.
+**Post-round actions:**
+1. Orchestrator writes round-end snapshot.
+2. Orchestrator broadcasts updated convergence scores and Truth Map patch events to UI.
+3. Orchestrator checks for contested claims (confidence < contested_threshold).
 
----
-
-### 2.4 DRAFT_ROUND_2 (Improvement — Gemini Agent)
-
-**Entry condition:** Arrived from DRAFT_ROUND_1.  
-**Agent active:** Gemini Agent (Google Gemini 3) — single agent, sequential.  
-**Input:** Current Truth Map (including GPT Agent's contributions) + GPT Agent's MESSAGE for reference.
-
-**Execution sequence:**
-1. Orchestrator dispatches Gemini Agent call with the updated Truth Map and previous agent's MESSAGE.
-2. Agent streams its `MESSAGE` to the UI in real time.
-3. Agent's `PATCH` is validated and applied.
-4. Orchestrator writes round-end snapshot.
-
-**Exit condition:** Gemini Agent has responded (or timed out) → transition to DRAFT_ROUND_3.
+**Exit condition:** All active agents have responded (or timed out) → transition to CRITIQUE.
 
 ---
 
-### 2.5 DRAFT_ROUND_3 (Refinement — Claude Agent)
+### 2.4 CRITIQUE (All Agents, Cross-Agent Assignment, in Parallel)
 
-**Entry condition:** Arrived from DRAFT_ROUND_2.  
-**Agent active:** Claude Agent (Anthropic Claude Opus 4.6) — single agent, sequential.  
-**Input:** Current Truth Map (including GPT and Gemini contributions) + both previous agents' MESSAGEs.
-
-**Execution sequence:**
-1. Orchestrator dispatches Claude Agent call with the updated Truth Map and previous agents' MESSAGEs.
-2. Agent streams its `MESSAGE` to the UI in real time.
-3. Agent's `PATCH` is validated and applied.
-4. Orchestrator writes round-end snapshot.
-
-**Exit condition:** Claude Agent has responded (or timed out) → transition to CRITIQUE.
-
----
-
-### 2.6 CRITIQUE (All Agents Critique in Parallel)
-
-**Entry condition:** Arrived from DRAFT_ROUND_3.  
+**Entry condition:** Arrived from ANALYSIS_ROUND.  
 **Agents active:** GPT Agent, Gemini Agent, Claude Agent — all run in **parallel** with critique mode enabled.  
 **Timeout per agent:** Configurable. Default: 90 seconds.
 
+**Cross-agent critique assignment:**
+
+| Agent | Critiques the work of |
+|---|---|
+| GPT Agent | Gemini Agent + Claude Agent |
+| Gemini Agent | GPT Agent + Claude Agent |
+| Claude Agent | GPT Agent + Gemini Agent |
+
 **Execution sequence:**
-1. Orchestrator dispatches all three agent calls simultaneously (each in critique mode).
-2. Each agent streams its critique `MESSAGE` to the UI in real time.
-3. Each agent's `PATCH` is buffered until the full response is received.
-4. Patches are validated and applied sequentially in deterministic order (alphabetical by agent_id).
-5. After all patches are applied, Confidence Decay Engine runs for the round.
+1. Orchestrator computes `critique_targets` for each agent (the other two agent IDs) and injects them into each agent's `AgentContext`.
+2. Orchestrator dispatches all three agent calls simultaneously. Each agent receives the fully-merged Truth Map plus the MESSAGEs of its two assigned targets only — it does NOT receive its own Analysis Round MESSAGE in this context.
+3. Each agent streams its critique `MESSAGE` to the UI in real time.
+4. Each agent's `PATCH` is buffered until the full response is received.
+5. Patches are validated and applied sequentially in deterministic order (alphabetical by agent_id) once all agents have responded (or timed out).
+6. After all patches are applied, Confidence Decay Engine runs for the round.
 
 **Post-round actions:**
 1. Orchestrator writes round-end snapshot.
@@ -131,7 +112,7 @@ INTAKE
 
 ---
 
-### 2.7 SYNTHESIS
+### 2.5 SYNTHESIS
 
 **Entry condition:** Arrived from CRITIQUE or from TARGETED_LOOP (re-entry).  
 **Agent active:** Synthesizer (GPT-5.2) — single agent, sequential.  
@@ -153,7 +134,7 @@ INTAKE
 
 ---
 
-### 2.8 TARGETED_LOOP
+### 2.6 TARGETED_LOOP
 
 **Entry condition:** SYNTHESIS output was `GAPS_REMAIN` and loop budget has not been exhausted.  
 **Purpose:** Address specific identified gaps without re-running the full debate.  
@@ -172,7 +153,7 @@ INTAKE
 
 ---
 
-### 2.9 DELIVER
+### 2.7 DELIVER
 
 **Entry condition:** Convergence threshold met and no blocking open questions.  
 **Actions:**
@@ -184,7 +165,7 @@ INTAKE
 
 ---
 
-### 2.10 DELIVER_WITH_GAPS
+### 2.8 DELIVER_WITH_GAPS
 
 **Entry condition:** Max targeted loops exhausted before convergence threshold was met.  
 **Actions:**
@@ -196,7 +177,7 @@ INTAKE
 
 ---
 
-### 2.11 POST_DELIVERY (Conversational Follow-Up)
+### 2.9 POST_DELIVERY (Conversational Follow-Up)
 
 **Entry condition:** Arrived from DELIVER or DELIVER_WITH_GAPS. Session status is `complete` or `complete_with_gaps`.  
 **Purpose:** Allow the user to continue asking questions, challenging claims, and exploring the output after artifacts have been generated. The session remains a living workspace — delivery is not the end of the conversation.

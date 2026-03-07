@@ -1,80 +1,90 @@
 using Microsoft.AspNetCore.Mvc;
-using Serilog.Context;
+using System.Diagnostics;
+using System.Net;
 
 namespace Agon.Api.Middleware;
 
-public class GlobalExceptionMiddleware(
-    RequestDelegate next,
-    ILogger<GlobalExceptionMiddleware> logger)
+/// <summary>
+/// Global exception handler that converts unhandled exceptions to RFC 7807 ProblemDetails responses.
+/// Includes correlation ID tracking for debugging.
+/// </summary>
+public sealed class GlobalExceptionMiddleware
 {
-    private const string CorrelationHeaderName = "X-Correlation-ID";
+    private readonly RequestDelegate _next;
+    private readonly ILogger<GlobalExceptionMiddleware> _logger;
+    private readonly IHostEnvironment _environment;
+
+    public GlobalExceptionMiddleware(
+        RequestDelegate next,
+        ILogger<GlobalExceptionMiddleware> logger,
+        IHostEnvironment environment)
+    {
+        _next = next;
+        _logger = logger;
+        _environment = environment;
+    }
 
     public async Task InvokeAsync(HttpContext context)
     {
-        var correlationId = ResolveCorrelationId(context);
+        var correlationId = Activity.Current?.Id ?? context.TraceIdentifier;
 
-        // Push the correlation ID into every log event emitted during this request.
-        using (LogContext.PushProperty("CorrelationId", correlationId))
+        try
         {
-            try
-            {
-                await next(context);
-            }
-            catch (OperationCanceledException ex) when (context.RequestAborted.IsCancellationRequested)
-            {
-                // Client disconnected — not an error worth logging at Error level.
-                logger.LogWarning(
-                    ex,
-                    "Request cancelled by client. CorrelationId={CorrelationId} Method={Method} Path={Path}",
-                    correlationId,
-                    context.Request.Method,
-                    context.Request.Path);
-            }
-            catch (Exception exception)
-            {
-                context.Response.Clear();
-                context.Response.StatusCode = StatusCodes.Status500InternalServerError;
-                context.Response.ContentType = "application/problem+json";
-                context.Response.Headers[CorrelationHeaderName] = correlationId;
+            await _next(context);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(
+                ex,
+                "Unhandled exception occurred. CorrelationId: {CorrelationId}, Path: {Path}",
+                correlationId,
+                context.Request.Path);
 
-                logger.LogError(
-                    exception,
-                    "Unhandled exception. CorrelationId={CorrelationId} Method={Method} Path={Path} " +
-                    "ExceptionType={ExceptionType} ExceptionMessage={ExceptionMessage}",
-                    correlationId,
-                    context.Request.Method,
-                    context.Request.Path,
-                    exception.GetType().Name,
-                    exception.Message);
-
-                var problemDetails = new ProblemDetails
-                {
-                    Type = "https://httpstatuses.com/500",
-                    Title = "An unexpected error occurred.",
-                    Status = StatusCodes.Status500InternalServerError,
-                    Detail = "An unexpected error occurred. Contact support with the correlation ID.",
-                    Instance = context.Request.Path
-                };
-                problemDetails.Extensions["correlationId"] = correlationId;
-
-                await context.Response.WriteAsJsonAsync(
-                    problemDetails,
-                    options: null,
-                    contentType: "application/problem+json",
-                    cancellationToken: context.RequestAborted);
-            }
+            await HandleExceptionAsync(context, ex, correlationId);
         }
     }
 
-    private static string ResolveCorrelationId(HttpContext context)
+    private async Task HandleExceptionAsync(HttpContext context, Exception exception, string correlationId)
     {
-        var fromHeader = context.Request.Headers[CorrelationHeaderName].FirstOrDefault();
-        if (!string.IsNullOrWhiteSpace(fromHeader))
+        context.Response.ContentType = "application/problem+json";
+
+        var (statusCode, title) = exception switch
         {
-            context.TraceIdentifier = fromHeader;
-            return fromHeader;
+            ArgumentNullException or ArgumentException => 
+                (HttpStatusCode.BadRequest, "Invalid request data"),
+            InvalidOperationException => 
+                (HttpStatusCode.Conflict, "Operation not allowed in current state"),
+            UnauthorizedAccessException => 
+                (HttpStatusCode.Forbidden, "Access forbidden"),
+            KeyNotFoundException => 
+                (HttpStatusCode.NotFound, "Resource not found"),
+            _ => 
+                (HttpStatusCode.InternalServerError, "An unexpected error occurred")
+        };
+
+        context.Response.StatusCode = (int)statusCode;
+
+        var problemDetails = new ProblemDetails
+        {
+            Type = "https://httpstatuses.io/" + (int)statusCode,
+            Title = title,
+            Status = (int)statusCode,
+            Instance = context.Request.Path,
+            Detail = _environment.IsDevelopment() 
+                ? exception.Message 
+                : "An error occurred while processing your request."
+        };
+
+        // Add correlation ID for debugging
+        problemDetails.Extensions["correlationId"] = correlationId;
+
+        // In development, include stack trace
+        if (_environment.IsDevelopment())
+        {
+            problemDetails.Extensions["exception"] = exception.GetType().Name;
+            problemDetails.Extensions["stackTrace"] = exception.StackTrace;
         }
 
-        return context.TraceIdentifier;
+        await context.Response.WriteAsJsonAsync(problemDetails);
     }
 }

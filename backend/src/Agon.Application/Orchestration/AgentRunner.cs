@@ -1,174 +1,250 @@
 using Agon.Application.Interfaces;
+using Agon.Application.Models;
+using Agon.Domain.Sessions;
 using Agon.Domain.TruthMap;
 using Microsoft.Extensions.Logging;
 
 namespace Agon.Application.Orchestration;
 
-public class AgentRunner(
-    ITruthMapRepository truthMapRepository,
-    IEventBroadcaster eventBroadcaster,
-    ILogger<AgentRunner> logger)
+/// <summary>
+/// Dispatches agent calls for each session phase.
+///
+/// Concurrency strategy:
+/// - Analysis Round and Critique: all agents called concurrently via <c>Task.WhenAll</c>.
+/// - Patches applied sequentially in alphabetical agent-ID order after all tasks complete.
+/// - Per-agent timeout via a linked <c>CancellationTokenSource</c>.
+/// - Token budget tracked on the <see cref="SessionState"/> after each response.
+/// </summary>
+public sealed class AgentRunner : IAgentRunner
 {
-    public Task<IReadOnlyList<AgentExecutionResult>> RunRoundAsync(
-        IEnumerable<ICouncilAgent> agents,
-        AgentContext context,
-        TimeSpan timeoutPerAgent,
-        CancellationToken cancellationToken) =>
-        RunRoundAsync(agents, context, timeoutPerAgent, onAgentCompleted: null, cancellationToken);
+    private readonly IReadOnlyList<ICouncilAgent> _agents;
+    private readonly ITruthMapRepository _truthMapRepository;
+    private readonly IEventBroadcaster _broadcaster;
+    private readonly int _agentTimeoutSeconds;
+    private readonly ILogger<AgentRunner>? _logger;
 
-    public async Task<IReadOnlyList<AgentExecutionResult>> RunRoundAsync(
-        IEnumerable<ICouncilAgent> agents,
-        AgentContext context,
-        TimeSpan timeoutPerAgent,
-        Func<AgentExecutionResult, CancellationToken, Task>? onAgentCompleted,
+    public AgentRunner(
+        IReadOnlyList<ICouncilAgent> agents,
+        ITruthMapRepository truthMapRepository,
+        IEventBroadcaster broadcaster,
+        int agentTimeoutSeconds = 90,
+        ILogger<AgentRunner>? logger = null)
+    {
+        _agents = agents;
+        _truthMapRepository = truthMapRepository;
+        _broadcaster = broadcaster;
+        _agentTimeoutSeconds = agentTimeoutSeconds;
+        _logger = logger;
+    }
+
+    // ── Public API ────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Dispatches all council agents in parallel for the Analysis Round.
+    /// Applies valid patches sequentially (alphabetical order) then updates token budget.
+    /// </summary>
+    public async Task<IReadOnlyList<AgentResponse>> RunAnalysisRoundAsync(
+        SessionState state,
         CancellationToken cancellationToken)
     {
-        var agentList = agents.ToList();
-        logger.LogInformation(
-            "Running agent round. SessionId={SessionId} Round={Round} Phase={Phase} AgentCount={AgentCount} CorrelationId={CorrelationId}",
-            context.SessionId,
-            context.Round,
-            context.Phase,
-            agentList.Count,
-            context.CorrelationId);
-
-        var pendingTasks = agentList
-            .Select(agent => ExecuteAgentAsync(agent, context, timeoutPerAgent, cancellationToken))
+        var contexts = _agents.Select(a =>
+            AgentContext.ForAnalysis(
+                state.SessionId,
+                state.TruthMap,
+                state.FrictionLevel,
+                state.CurrentRound,
+                state.ResearchToolsEnabled))
             .ToList();
-        var results = new List<AgentExecutionResult>(pendingTasks.Count);
 
-        while (pendingTasks.Count > 0)
+        var responses = await DispatchParallelAsync(_agents, contexts, cancellationToken);
+        await ApplyPatchesAsync(state, responses, cancellationToken);
+        AccumulateTokens(state, responses);
+        return responses;
+    }
+
+    /// <summary>
+    /// Dispatches all council agents in parallel for the Critique Round.
+    /// Each agent receives the MESSAGEs of the other two agents (never its own).
+    /// </summary>
+    public async Task<IReadOnlyList<AgentResponse>> RunCritiqueRoundAsync(
+        SessionState state,
+        CancellationToken cancellationToken)
+    {
+        var allAgentIds = _agents.Select(a => a.AgentId).ToList();
+
+        var contexts = _agents.Select(a =>
         {
-            var completedTask = await Task.WhenAny(pendingTasks);
-            pendingTasks.Remove(completedTask);
-            var result = await completedTask;
-            results.Add(result);
+            var targets = GetCritiqueTargetMessages(a.AgentId, allAgentIds, state.LastRoundMessages);
+            return AgentContext.ForCritique(
+                state.SessionId,
+                state.TruthMap,
+                state.FrictionLevel,
+                state.CurrentRound,
+                targets,
+                state.ResearchToolsEnabled);
+        }).ToList();
 
-            if (onAgentCompleted is null)
+        var responses = await DispatchParallelAsync(_agents, contexts, cancellationToken);
+        await ApplyPatchesAsync(state, responses, cancellationToken);
+        AccumulateTokens(state, responses);
+        return responses;
+    }
+
+    /// <summary>
+    /// Dispatches the Synthesizer agent for the Synthesis phase.
+    /// </summary>
+    public async Task<AgentResponse> RunSynthesisAsync(
+        SessionState state,
+        CancellationToken cancellationToken)
+    {
+        var synthesizer = _agents.FirstOrDefault(a =>
+            a.AgentId == Domain.Agents.AgentId.Synthesizer);
+
+        if (synthesizer is null)
+            throw new InvalidOperationException("Synthesizer agent is not registered.");
+
+        var context = AgentContext.ForAnalysis(
+            state.SessionId,
+            state.TruthMap,
+            state.FrictionLevel,
+            state.CurrentRound,
+            state.ResearchToolsEnabled);
+
+        var response = await RunWithTimeoutAsync(synthesizer, context, cancellationToken);
+
+        if (response.HasPatch)
+            await ApplyPatchesAsync(state, [response], cancellationToken);
+
+        AccumulateTokens(state, [response]);
+        return response;
+    }
+
+    /// <summary>
+    /// Dispatches only the specified agent IDs for a Targeted Loop.
+    /// </summary>
+    public async Task<IReadOnlyList<AgentResponse>> RunTargetedLoopAsync(
+        SessionState state,
+        IReadOnlyList<string> targetAgentIds,
+        string microDirective,
+        CancellationToken cancellationToken)
+    {
+        var targeted = _agents
+            .Where(a => targetAgentIds.Contains(a.AgentId))
+            .ToList();
+
+        var contexts = targeted.Select(_ =>
+            AgentContext.ForTargetedLoop(
+                state.SessionId,
+                state.TruthMap,
+                state.FrictionLevel,
+                state.CurrentRound,
+                microDirective,
+                state.ResearchToolsEnabled))
+            .ToList();
+
+        var responses = await DispatchParallelAsync(targeted, contexts, cancellationToken);
+        await ApplyPatchesAsync(state, responses, cancellationToken);
+        AccumulateTokens(state, responses);
+        return responses;
+    }
+
+    // ── Internals ─────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Dispatches all agents concurrently. Each call has its own per-agent timeout.
+    /// </summary>
+    private async Task<IReadOnlyList<AgentResponse>> DispatchParallelAsync(
+        IReadOnlyList<ICouncilAgent> agents,
+        IReadOnlyList<AgentContext> contexts,
+        CancellationToken sessionCancellationToken)
+    {
+        var tasks = agents.Select((agent, i) =>
+            RunWithTimeoutAsync(agent, contexts[i], sessionCancellationToken)).ToList();
+
+        return await Task.WhenAll(tasks);
+    }
+
+    /// <summary>
+    /// Wraps a single agent call with a per-agent timeout linked to the session token.
+    /// Timed-out agents return a <see cref="AgentResponse.TimedOut"/> stub.
+    /// </summary>
+    private async Task<AgentResponse> RunWithTimeoutAsync(
+        ICouncilAgent agent,
+        AgentContext context,
+        CancellationToken sessionCancellationToken)
+    {
+        using var agentTimeout = new CancellationTokenSource(
+            TimeSpan.FromSeconds(_agentTimeoutSeconds));
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(
+            agentTimeout.Token, sessionCancellationToken);
+
+        try
+        {
+            return await agent.RunAsync(context, linked.Token);
+        }
+        catch (OperationCanceledException ex) when (agentTimeout.IsCancellationRequested)
+        {
+            _logger?.LogWarning(
+                ex,
+                "Agent {AgentId} timed out after {TimeoutSeconds}s",
+                agent.AgentId, _agentTimeoutSeconds);
+            return AgentResponse.CreateTimedOut(agent.AgentId);
+        }
+    }
+
+    /// <summary>
+    /// Applies valid patches from the responses to the Truth Map in alphabetical agent-ID order.
+    /// Invalid patches are logged and skipped.
+    /// </summary>
+    private async Task ApplyPatchesAsync(
+        SessionState state,
+        IReadOnlyList<AgentResponse> responses,
+        CancellationToken cancellationToken)
+    {
+        var orderedWithPatches = responses
+            .Where(r => r.HasPatch && !r.TimedOut)
+            .OrderBy(r => r.AgentId, StringComparer.Ordinal);
+
+        foreach (var response in orderedWithPatches)
+        {
+            var patch = response.Patch!;
+            var validationResult = Domain.TruthMap.PatchValidator.Validate(patch, state.TruthMap);
+
+            if (!validationResult.IsValid)
             {
+                _logger?.LogWarning(
+                    "Patch from agent {AgentId} rejected: {Reason}",
+                    response.AgentId, validationResult.Reason);
                 continue;
             }
 
-            try
-            {
-                await onAgentCompleted(result, cancellationToken);
-            }
-            catch (Exception exception)
-            {
-                logger.LogError(
-                    exception,
-                    "Per-agent completion callback failed. SessionId={SessionId} Round={Round} AgentId={AgentId} CorrelationId={CorrelationId}",
-                    context.SessionId,
-                    context.Round,
-                    result.AgentId,
-                    context.CorrelationId);
-            }
-        }
+            state.TruthMap = await _truthMapRepository.ApplyPatchAsync(
+                state.SessionId, patch, cancellationToken);
 
-        logger.LogInformation(
-            "Completed agent round. SessionId={SessionId} Round={Round} TimedOut={TimedOutCount} Failed={FailedCount} CorrelationId={CorrelationId}",
-            context.SessionId,
-            context.Round,
-            results.Count(result => result.TimedOut),
-            results.Count(result => result.Error is not null && result.Error != "timeout"),
-            context.CorrelationId);
-
-        return results;
-    }
-
-    public async Task ApplyValidatedPatchesAsync(
-        Guid sessionId,
-        IEnumerable<AgentExecutionResult> results,
-        CancellationToken cancellationToken)
-    {
-        foreach (var result in results
-                     .Where(result => !result.TimedOut && result.Patch is not null)
-                     .OrderBy(result => result.AgentId, StringComparer.Ordinal))
-        {
-            await truthMapRepository.ApplyPatchAsync(sessionId, result.Patch!, cancellationToken);
-            var updatedMap = await truthMapRepository.GetAsync(sessionId, cancellationToken);
-            var version = updatedMap?.Version ?? 0;
-            await eventBroadcaster.TruthMapPatchedAsync(sessionId, result.Patch!, version, cancellationToken);
-            logger.LogInformation(
-                "Applied validated patch. SessionId={SessionId} Agent={Agent} Version={Version}",
-                sessionId,
-                result.AgentId,
-                version);
+            await _broadcaster.SendTruthMapPatchAsync(
+                state.SessionId, patch, state.TruthMap.Version, cancellationToken);
         }
     }
 
-    private async Task<AgentExecutionResult> ExecuteAgentAsync(
-        ICouncilAgent agent,
-        AgentContext context,
-        TimeSpan timeoutPerAgent,
-        CancellationToken cancellationToken)
+    private static void AccumulateTokens(SessionState state, IReadOnlyList<AgentResponse> responses)
     {
-        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        Task<AgentResponse> runTask;
-        try
-        {
-            runTask = agent.RunAsync(context, timeoutCts.Token);
-        }
-        catch (Exception exception)
-        {
-            logger.LogError(
-                exception,
-                "Agent failed synchronously before task creation. SessionId={SessionId} Round={Round} AgentId={AgentId} CorrelationId={CorrelationId}",
-                context.SessionId,
-                context.Round,
-                agent.AgentId,
-                context.CorrelationId);
-            return AgentExecutionResult.Failed(agent.AgentId, exception.Message);
-        }
+        foreach (var r in responses)
+            state.TokensUsed += r.TokensUsed;
+    }
 
-        var timeoutTask = Task.Delay(timeoutPerAgent, cancellationToken);
-
-        var completed = await Task.WhenAny(runTask, timeoutTask);
-        if (completed != runTask)
-        {
-            timeoutCts.Cancel();
-            logger.LogWarning(
-                "Agent timed out. SessionId={SessionId} Round={Round} AgentId={AgentId} TimeoutMs={TimeoutMs} CorrelationId={CorrelationId}",
-                context.SessionId,
-                context.Round,
-                agent.AgentId,
-                timeoutPerAgent.TotalMilliseconds,
-                context.CorrelationId);
-            return AgentExecutionResult.Timeout(agent.AgentId);
-        }
-
-        try
-        {
-            var response = await runTask;
-            logger.LogInformation(
-                "Agent completed. SessionId={SessionId} Round={Round} AgentId={AgentId} HasPatch={HasPatch} CorrelationId={CorrelationId}",
-                context.SessionId,
-                context.Round,
-                agent.AgentId,
-                response.Patch is not null,
-                context.CorrelationId);
-            return AgentExecutionResult.Success(agent.AgentId, response.Patch, response.Message);
-        }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-        {
-            logger.LogWarning(
-                "Agent canceled due to timeout. SessionId={SessionId} Round={Round} AgentId={AgentId} CorrelationId={CorrelationId}",
-                context.SessionId,
-                context.Round,
-                agent.AgentId,
-                context.CorrelationId);
-            return AgentExecutionResult.Timeout(agent.AgentId);
-        }
-        catch (Exception exception)
-        {
-            logger.LogError(
-                exception,
-                "Agent failed. SessionId={SessionId} Round={Round} AgentId={AgentId} CorrelationId={CorrelationId}",
-                context.SessionId,
-                context.Round,
-                agent.AgentId,
-                context.CorrelationId);
-            return AgentExecutionResult.Failed(agent.AgentId, exception.Message);
-        }
+    /// <summary>
+    /// Returns the prior-round messages for the agents that the given agent should critique.
+    /// The calling agent's own message is excluded.
+    /// </summary>
+    private static IReadOnlyList<AgentMessage> GetCritiqueTargetMessages(
+        string agentId,
+        IReadOnlyList<string> allAgentIds,
+        Dictionary<string, string> lastRoundMessages)
+    {
+        return allAgentIds
+            .Where(id => id != agentId && lastRoundMessages.ContainsKey(id))
+            .OrderBy(id => id, StringComparer.Ordinal)
+            .Select(id => new AgentMessage(id, lastRoundMessages[id]))
+            .ToList();
     }
 }

@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFramework>net9.0</TargetFramework>
@@ -8,17 +8,21 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Agon.Application\Agon.Application.csproj" />
-    <ProjectReference Include="..\Agon.Domain\Agon.Domain.csproj" />
   </ItemGroup>
 
   <ItemGroup>
-    <FrameworkReference Include="Microsoft.AspNetCore.App" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <PackageReference Include="Anthropic" Version="12.8.0" />
-    <PackageReference Include="Google_GenerativeAI.Microsoft" Version="3.6.3" />
-    <PackageReference Include="Microsoft.Extensions.AI.OpenAI" Version="10.3.0" />
+    <PackageReference Include="Microsoft.AspNetCore.SignalR.Core" Version="1.2.9" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="9.0.0">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+    <PackageReference Include="Microsoft.Agents.AI" Version="1.0.0-rc2" />
+    <PackageReference Include="Microsoft.Extensions.AI.OpenAI" Version="9.0.1-preview.1.25179.4" />
+    <PackageReference Include="Anthropic.SDK" Version="0.2.3" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.3" />
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="9.0.2" />
+    <PackageReference Include="StackExchange.Redis" Version="2.11.8" />
+    <PackageReference Include="System.Text.Json" Version="10.0.3" />
   </ItemGroup>
 
 </Project>

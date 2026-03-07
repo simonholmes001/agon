@@ -7,11 +7,10 @@ public enum ConfidenceTransitionReason
     ManualOverride
 }
 
-public class ConfidenceTransition
-{
-    public required string ClaimId { get; init; }
-    public int Round { get; init; }
-    public float From { get; init; }
-    public float To { get; init; }
-    public ConfidenceTransitionReason Reason { get; init; }
-}
+public sealed record ConfidenceTransition(
+    string ClaimId,
+    float FromConfidence,
+    float ToConfidence,
+    ConfidenceTransitionReason Reason,
+    int Round,
+    DateTimeOffset OccurredAt);

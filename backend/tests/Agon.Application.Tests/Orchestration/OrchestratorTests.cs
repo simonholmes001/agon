@@ -1,406 +1,490 @@
+using Agon.Application.Models;
 using Agon.Application.Orchestration;
-using Agon.Application.Sessions;
+using Agon.Application.Services;
+using Agon.Domain.Agents;
 using Agon.Domain.Sessions;
-using Agon.Domain.TruthMap;
 using Agon.Domain.TruthMap.Entities;
 using FluentAssertions;
+using NSubstitute;
+using TruthMapModel = Agon.Domain.TruthMap.TruthMap;
 
 namespace Agon.Application.Tests.Orchestration;
 
 public class OrchestratorTests
 {
-    private readonly Orchestrator _sut = new();
+    private static readonly Guid SessionId = Guid.NewGuid();
 
-    #region StartClarification Tests
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    private static TruthMapModel EmptyMap() => TruthMapModel.Empty(SessionId);
+
+    private static SessionState BuildState(
+        SessionPhase phase = SessionPhase.Intake,
+        int frictionLevel = 50,
+        int tokensUsed = 0)
+    {
+        var state = SessionState.Create(SessionId, frictionLevel, false, EmptyMap());
+        state.Phase = phase;
+        state.TokensUsed = tokensUsed;
+        return state;
+    }
+
+    private static RoundPolicy DefaultPolicy() => RoundPolicy.Default();
+
+    private static RoundPolicy ExhaustedBudgetPolicy() =>
+        new() { MaxSessionBudgetTokens = 100 };
+
+    private static IAgentRunner StubRunner(
+        AgentResponse? synthesisResponse = null,
+        IReadOnlyList<AgentResponse>? roundResponses = null)
+    {
+        var runner = Substitute.For<IAgentRunner>();
+        var responses = roundResponses ?? [
+            new AgentResponse(AgentId.ClaudeAgent, "Claude msg", null, 100, false, null),
+            new AgentResponse(AgentId.GeminiAgent, "Gemini msg", null, 100, false, null),
+            new AgentResponse(AgentId.GptAgent, "GPT msg", null, 100, false, null)
+        ];
+
+        runner.RunAnalysisRoundAsync(Arg.Any<SessionState>(), Arg.Any<CancellationToken>())
+              .Returns(Task.FromResult((IReadOnlyList<AgentResponse>)responses));
+
+        runner.RunCritiqueRoundAsync(Arg.Any<SessionState>(), Arg.Any<CancellationToken>())
+              .Returns(Task.FromResult((IReadOnlyList<AgentResponse>)responses));
+
+        runner.RunTargetedLoopAsync(
+                Arg.Any<SessionState>(), Arg.Any<IReadOnlyList<string>>(),
+                Arg.Any<string>(), Arg.Any<CancellationToken>())
+              .Returns(Task.FromResult((IReadOnlyList<AgentResponse>)responses));
+
+        var synthResponse = synthesisResponse ??
+            new AgentResponse(AgentId.Synthesizer, "Synthesis msg", null, 200, false, null);
+        runner.RunSynthesisAsync(Arg.Any<SessionState>(), Arg.Any<CancellationToken>())
+              .Returns(Task.FromResult(synthResponse));
+
+        return runner;
+    }
+
+    private static ISessionService StubSessionService()
+    {
+        var svc = Substitute.For<ISessionService>();
+        svc.AdvancePhaseAsync(Arg.Any<SessionState>(), Arg.Any<SessionPhase>(), Arg.Any<CancellationToken>())
+           .Returns(Task.CompletedTask);
+        svc.RecordRoundSnapshotAsync(Arg.Any<SessionState>(), Arg.Any<CancellationToken>())
+           .Returns(Task.CompletedTask);
+        return svc;
+    }
+
+    private static Orchestrator BuildOrchestrator(
+        IAgentRunner? runner = null,
+        ISessionService? sessionService = null,
+        RoundPolicy? policy = null)
+    {
+        return new Orchestrator(
+            runner ?? StubRunner(),
+            sessionService ?? StubSessionService(),
+            policy ?? DefaultPolicy());
+    }
+
+    // ── StartSessionAsync ─────────────────────────────────────────────────────
 
     [Fact]
-    public void StartClarification_TransitionsToClarification_FromIntake()
+    public async Task StartSessionAsync_AdvancesToClarification()
     {
-        var session = CreateSession(phase: SessionPhase.Intake);
+        var sessionService = StubSessionService();
+        var orchestrator = BuildOrchestrator(sessionService: sessionService);
+        var state = BuildState(SessionPhase.Intake);
 
-        var updated = _sut.StartClarification(session);
+        await orchestrator.StartSessionAsync(state, CancellationToken.None);
 
-        updated.Phase.Should().Be(SessionPhase.Clarification);
-        updated.RoundNumber.Should().Be(0);
+        await sessionService.Received(1).AdvancePhaseAsync(
+            state, SessionPhase.Clarification, Arg.Any<CancellationToken>());
     }
+
+    // ── SignalClarificationCompleteAsync ──────────────────────────────────────
 
     [Fact]
-    public void StartClarification_IsIdempotent_FromClarification()
+    public async Task SignalClarificationCompleteAsync_StoresBriefAndAdvancesToAnalysis()
     {
-        var session = CreateSession(phase: SessionPhase.Clarification);
+        var sessionService = StubSessionService();
+        var orchestrator = BuildOrchestrator(sessionService: sessionService);
+        var state = BuildState(SessionPhase.Clarification);
+        var brief = new DebateBrief(
+            "A great idea",
+            new BriefConstraints("$10k", "3 months", [], []),
+            ["Revenue"],
+            "Developer",
+            []);
 
-        var updated = _sut.StartClarification(session);
+        await orchestrator.SignalClarificationCompleteAsync(state, brief, CancellationToken.None);
 
-        updated.Phase.Should().Be(SessionPhase.Clarification);
+        state.DebateBrief.Should().Be(brief);
+        state.ClarificationIncomplete.Should().BeFalse();
+        await sessionService.Received(1).AdvancePhaseAsync(
+            state, SessionPhase.AnalysisRound, Arg.Any<CancellationToken>());
     }
 
-    [Theory]
-    [InlineData(SessionPhase.Construction)]
-    [InlineData(SessionPhase.Critique)]
-    [InlineData(SessionPhase.Synthesis)]
-    [InlineData(SessionPhase.PostDelivery)]
-    public void StartClarification_ThrowsInvalidOperationException_FromInvalidPhase(SessionPhase invalidPhase)
-    {
-        var session = CreateSession(phase: invalidPhase);
-
-        var act = () => _sut.StartClarification(session);
-
-        act.Should().Throw<InvalidOperationException>()
-            .WithMessage($"*{invalidPhase}*");
-    }
-
-    #endregion
-
-    #region TransitionToConstruction Tests
+    // ── SignalClarificationTimedOutAsync ──────────────────────────────────────
 
     [Fact]
-    public void TransitionToConstruction_TransitionsCorrectly_FromClarification()
+    public async Task SignalClarificationTimedOutAsync_FlagsClarificationIncompleteAndAdvances()
     {
-        var session = CreateSession(phase: SessionPhase.Clarification);
+        var sessionService = StubSessionService();
+        var orchestrator = BuildOrchestrator(sessionService: sessionService);
+        var state = BuildState(SessionPhase.Clarification);
+        var partialBrief = new DebateBrief(
+            "Incomplete idea",
+            new BriefConstraints("unknown", "unknown", [], []),
+            [],
+            "",
+            []);
 
-        var updated = _sut.TransitionToConstruction(session);
+        await orchestrator.SignalClarificationTimedOutAsync(state, partialBrief, CancellationToken.None);
 
-        updated.Phase.Should().Be(SessionPhase.Construction);
-        updated.RoundNumber.Should().Be(1);
+        state.ClarificationIncomplete.Should().BeTrue();
+        state.DebateBrief.Should().Be(partialBrief);
+        await sessionService.Received(1).AdvancePhaseAsync(
+            state, SessionPhase.AnalysisRound, Arg.Any<CancellationToken>());
     }
 
-    [Theory]
-    [InlineData(SessionPhase.Intake)]
-    [InlineData(SessionPhase.Construction)]
-    [InlineData(SessionPhase.Critique)]
-    [InlineData(SessionPhase.Synthesis)]
-    public void TransitionToConstruction_ThrowsInvalidOperationException_FromInvalidPhase(SessionPhase invalidPhase)
-    {
-        var session = CreateSession(phase: invalidPhase);
-
-        var act = () => _sut.TransitionToConstruction(session);
-
-        act.Should().Throw<InvalidOperationException>()
-            .WithMessage($"*{invalidPhase}*");
-    }
-
-    #endregion
-
-    #region TransitionToCritique Tests
+    // ── RunAnalysisRoundAsync ─────────────────────────────────────────────────
 
     [Fact]
-    public void TransitionToCritique_TransitionsCorrectly_FromConstruction()
+    public async Task RunAnalysisRoundAsync_DelegatesDispatchToAgentRunner()
     {
-        var session = CreateSession(phase: SessionPhase.Construction);
+        var runner = StubRunner();
+        var orchestrator = BuildOrchestrator(runner: runner);
+        var state = BuildState(SessionPhase.AnalysisRound);
 
-        var updated = _sut.TransitionToCritique(session);
+        await orchestrator.RunAnalysisRoundAsync(state, CancellationToken.None);
 
-        updated.Phase.Should().Be(SessionPhase.Critique);
-    }
-
-    [Fact]
-    public void TransitionToCritique_TransitionsCorrectly_FromRefinement()
-    {
-        var session = CreateSession(phase: SessionPhase.Refinement);
-
-        var updated = _sut.TransitionToCritique(session);
-
-        updated.Phase.Should().Be(SessionPhase.Critique);
-    }
-
-    [Theory]
-    [InlineData(SessionPhase.Clarification)]
-    [InlineData(SessionPhase.Critique)]
-    [InlineData(SessionPhase.Synthesis)]
-    [InlineData(SessionPhase.Deliver)]
-    public void TransitionToCritique_ThrowsInvalidOperationException_FromInvalidPhase(SessionPhase invalidPhase)
-    {
-        var session = CreateSession(phase: invalidPhase);
-
-        var act = () => _sut.TransitionToCritique(session);
-
-        act.Should().Throw<InvalidOperationException>()
-            .WithMessage($"*{invalidPhase}*");
-    }
-
-    #endregion
-
-    #region TransitionToRefinement Tests
-
-    [Fact]
-    public void TransitionToRefinement_TransitionsCorrectly_FromCritique()
-    {
-        var session = CreateSession(phase: SessionPhase.Critique);
-
-        var updated = _sut.TransitionToRefinement(session);
-
-        updated.Phase.Should().Be(SessionPhase.Refinement);
-        updated.RefinementIterationCount.Should().Be(1);
-    }
-
-    [Theory]
-    [InlineData(SessionPhase.Clarification)]
-    [InlineData(SessionPhase.Construction)]
-    [InlineData(SessionPhase.Refinement)]
-    [InlineData(SessionPhase.Synthesis)]
-    public void TransitionToRefinement_ThrowsInvalidOperationException_FromInvalidPhase(SessionPhase invalidPhase)
-    {
-        var session = CreateSession(phase: invalidPhase);
-
-        var act = () => _sut.TransitionToRefinement(session);
-
-        act.Should().Throw<InvalidOperationException>()
-            .WithMessage($"*{invalidPhase}*");
-    }
-
-    #endregion
-
-    #region ShouldContinueRefinement Tests
-
-    [Fact]
-    public void ShouldContinueRefinement_ReturnsFalse_WhenMaxIterationsReached()
-    {
-        var session = CreateSession();
-        session.RoundPolicy = new RoundPolicy { MaxDebateRounds = 2 };
-        session.RefinementIterationCount = 2;
-
-        var result = _sut.ShouldContinueRefinement(session);
-
-        result.Should().BeFalse();
+        await runner.Received(1).RunAnalysisRoundAsync(state, Arg.Any<CancellationToken>());
     }
 
     [Fact]
-    public void ShouldContinueRefinement_ReturnsTrue_WhenIterationsRemain()
+    public async Task RunAnalysisRoundAsync_CachesAgentMessagesForCritiquePhase()
     {
-        var session = CreateSession();
-        session.RoundPolicy = new RoundPolicy { MaxDebateRounds = 2 };
-        session.RefinementIterationCount = 1;
-
-        var result = _sut.ShouldContinueRefinement(session);
-
-        result.Should().BeTrue();
-    }
-
-    #endregion
-
-    #region TransitionToSynthesis Tests
-
-    [Fact]
-    public void TransitionToSynthesis_TransitionsToSynthesis_FromCritique()
-    {
-        var session = CreateSession(phase: SessionPhase.Critique);
-
-        var updated = _sut.TransitionToSynthesis(session);
-
-        updated.Phase.Should().Be(SessionPhase.Synthesis);
-    }
-
-    [Fact]
-    public void TransitionToSynthesis_TransitionsToSynthesis_FromRefinement()
-    {
-        var session = CreateSession(phase: SessionPhase.Refinement);
-
-        var updated = _sut.TransitionToSynthesis(session);
-
-        updated.Phase.Should().Be(SessionPhase.Synthesis);
-    }
-
-    [Fact]
-    public void TransitionToSynthesis_TransitionsToSynthesis_FromTargetedLoop()
-    {
-        var session = CreateSession(phase: SessionPhase.TargetedLoop);
-
-        var updated = _sut.TransitionToSynthesis(session);
-
-        updated.Phase.Should().Be(SessionPhase.Synthesis);
-    }
-
-    [Theory]
-    [InlineData(SessionPhase.Construction)]
-    [InlineData(SessionPhase.Synthesis)]
-    [InlineData(SessionPhase.Deliver)]
-    [InlineData(SessionPhase.PostDelivery)]
-    public void TransitionToSynthesis_ThrowsInvalidOperationException_FromInvalidPhase(SessionPhase invalidPhase)
-    {
-        var session = CreateSession(phase: invalidPhase);
-
-        var act = () => _sut.TransitionToSynthesis(session);
-
-        act.Should().Throw<InvalidOperationException>()
-            .WithMessage($"*{invalidPhase}*");
-    }
-
-    #endregion
-
-    #region TransitionFromSynthesis Tests
-
-    [Fact]
-    public void TransitionFromSynthesis_GoesToDeliver_WhenConvergedWithoutBlockingQuestions()
-    {
-        var session = CreateSession(phase: SessionPhase.Synthesis, targetedLoopCount: 0, friction: 50);
-        var map = TruthMapState.CreateNew(session.SessionId);
-        SetHighConvergence(map);
-
-        var updated = _sut.TransitionFromSynthesis(session, map);
-
-        updated.Phase.Should().Be(SessionPhase.Deliver);
-        updated.Status.Should().Be(SessionStatus.Complete);
-    }
-
-    [Fact]
-    public void TransitionFromSynthesis_GoesToTargetedLoop_WhenNotConvergedAndLoopsRemain()
-    {
-        var session = CreateSession(phase: SessionPhase.Synthesis, targetedLoopCount: 1, friction: 50);
-        var map = TruthMapState.CreateNew(session.SessionId);
-
-        var updated = _sut.TransitionFromSynthesis(session, map);
-
-        updated.Phase.Should().Be(SessionPhase.TargetedLoop);
-        updated.TargetedLoopCount.Should().Be(2);
-        updated.Status.Should().Be(SessionStatus.Active);
-    }
-
-    [Fact]
-    public void TransitionFromSynthesis_GoesToDeliverWithGaps_WhenLoopsExhausted()
-    {
-        var session = CreateSession(phase: SessionPhase.Synthesis, targetedLoopCount: 2, friction: 50);
-        session.RoundPolicy = new RoundPolicy { MaxTargetedLoops = 2 };
-        var map = TruthMapState.CreateNew(session.SessionId);
-
-        var updated = _sut.TransitionFromSynthesis(session, map);
-
-        updated.Phase.Should().Be(SessionPhase.DeliverWithGaps);
-        updated.Status.Should().Be(SessionStatus.CompleteWithGaps);
-    }
-
-    [Fact]
-    public void TransitionFromSynthesis_GoesToTargetedLoop_WhenConvergedButHasBlockingQuestions()
-    {
-        var session = CreateSession(phase: SessionPhase.Synthesis, targetedLoopCount: 0, friction: 50);
-        var map = TruthMapState.CreateNew(session.SessionId);
-        SetHighConvergence(map);
-        map.OpenQuestions.Add(new OpenQuestion
+        var responses = new List<AgentResponse>
         {
-            Id = Guid.NewGuid().ToString(),
-            Text = "What is the deployment strategy?",
-            Blocking = true,
-            RaisedBy = "synthesizer"
-        });
-
-        var updated = _sut.TransitionFromSynthesis(session, map);
-
-        updated.Phase.Should().Be(SessionPhase.TargetedLoop);
-        updated.Status.Should().Be(SessionStatus.Active);
-    }
-
-    [Fact]
-    public void TransitionFromSynthesis_GoesToDeliver_WhenConvergedWithNonBlockingQuestions()
-    {
-        var session = CreateSession(phase: SessionPhase.Synthesis, targetedLoopCount: 0, friction: 50);
-        var map = TruthMapState.CreateNew(session.SessionId);
-        SetHighConvergence(map);
-        map.OpenQuestions.Add(new OpenQuestion
-        {
-            Id = Guid.NewGuid().ToString(),
-            Text = "Nice to have feature?",
-            Blocking = false,
-            RaisedBy = "synthesizer"
-        });
-
-        var updated = _sut.TransitionFromSynthesis(session, map);
-
-        updated.Phase.Should().Be(SessionPhase.Deliver);
-        updated.Status.Should().Be(SessionStatus.Complete);
-    }
-
-    [Fact]
-    public void TransitionFromSynthesis_ThrowsInvalidOperationException_FromNonSynthesisPhase()
-    {
-        var session = CreateSession(phase: SessionPhase.Critique);
-        var map = TruthMapState.CreateNew(session.SessionId);
-
-        var act = () => _sut.TransitionFromSynthesis(session, map);
-
-        act.Should().Throw<InvalidOperationException>()
-            .WithMessage("*Critique*");
-    }
-
-    [Fact]
-    public void TransitionFromSynthesis_RespectsHighFrictionThresholds()
-    {
-        var session = CreateSession(phase: SessionPhase.Synthesis, targetedLoopCount: 0, friction: 85);
-        var map = TruthMapState.CreateNew(session.SessionId);
-        // Set convergence that would pass standard threshold but not high friction
-        map.Convergence.ClaritySpecificity = 0.75f;
-        map.Convergence.Feasibility = 0.75f;
-        map.Convergence.RiskCoverage = 0.75f;
-        map.Convergence.AssumptionExplicitness = 0.75f;
-        map.Convergence.Coherence = 0.85f;
-        map.Convergence.Actionability = 0.75f;
-        map.Convergence.EvidenceQuality = 0.65f;
-
-        var updated = _sut.TransitionFromSynthesis(session, map);
-
-        updated.Phase.Should().Be(SessionPhase.TargetedLoop);
-    }
-
-    #endregion
-
-    #region GetNextPhase Tests
-
-    [Theory]
-    [InlineData(SessionPhase.Intake, SessionPhase.Clarification)]
-    [InlineData(SessionPhase.Clarification, SessionPhase.Construction)]
-    [InlineData(SessionPhase.Construction, SessionPhase.Critique)]
-    [InlineData(SessionPhase.Critique, SessionPhase.Refinement)]
-    [InlineData(SessionPhase.Refinement, SessionPhase.Synthesis)]
-    [InlineData(SessionPhase.TargetedLoop, SessionPhase.Synthesis)]
-    public void GetNextPhase_ReturnsCorrectNextPhase(SessionPhase current, SessionPhase expected)
-    {
-        var result = Orchestrator.GetNextPhase(current);
-
-        result.Should().Be(expected);
-    }
-
-    [Theory]
-    [InlineData(SessionPhase.Synthesis)]
-    [InlineData(SessionPhase.Deliver)]
-    [InlineData(SessionPhase.DeliverWithGaps)]
-    [InlineData(SessionPhase.PostDelivery)]
-    public void GetNextPhase_ThrowsInvalidOperationException_ForTerminalPhases(SessionPhase terminalPhase)
-    {
-        var act = () => Orchestrator.GetNextPhase(terminalPhase);
-
-        act.Should().Throw<InvalidOperationException>()
-            .WithMessage($"*{terminalPhase}*");
-    }
-
-    #endregion
-
-    #region Helpers
-
-    private static SessionState CreateSession(
-        SessionPhase phase = SessionPhase.Clarification,
-        int targetedLoopCount = 0,
-        int friction = 50)
-    {
-        return new SessionState
-        {
-            SessionId = Guid.NewGuid(),
-            Phase = phase,
-            Status = SessionStatus.Active,
-            Mode = SessionMode.Deep,
-            FrictionLevel = friction,
-            RoundPolicy = new RoundPolicy(),
-            TargetedLoopCount = targetedLoopCount
+            new(AgentId.ClaudeAgent, "Claude's analysis", null, 100, false, null),
+            new(AgentId.GeminiAgent, "Gemini's analysis", null, 100, false, null),
         };
+        var runner = StubRunner(roundResponses: responses);
+        var orchestrator = BuildOrchestrator(runner: runner);
+        var state = BuildState(SessionPhase.AnalysisRound);
+
+        await orchestrator.RunAnalysisRoundAsync(state, CancellationToken.None);
+
+        state.LastRoundMessages[AgentId.ClaudeAgent].Should().Be("Claude's analysis");
+        state.LastRoundMessages[AgentId.GeminiAgent].Should().Be("Gemini's analysis");
     }
 
-    private static void SetHighConvergence(TruthMapState map)
+    [Fact]
+    public async Task RunAnalysisRoundAsync_DoesNotCacheTimedOutAgentMessages()
     {
-        map.Convergence.ClaritySpecificity = 0.9f;
-        map.Convergence.Feasibility = 0.9f;
-        map.Convergence.RiskCoverage = 0.9f;
-        map.Convergence.AssumptionExplicitness = 0.9f;
-        map.Convergence.Coherence = 0.9f;
-        map.Convergence.Actionability = 0.9f;
-        map.Convergence.EvidenceQuality = 0.9f;
+        var responses = new List<AgentResponse>
+        {
+            new(AgentId.ClaudeAgent, "Claude's analysis", null, 100, false, null),
+            AgentResponse.CreateTimedOut(AgentId.GptAgent),
+        };
+        var runner = StubRunner(roundResponses: responses);
+        var orchestrator = BuildOrchestrator(runner: runner);
+        var state = BuildState(SessionPhase.AnalysisRound);
+
+        await orchestrator.RunAnalysisRoundAsync(state, CancellationToken.None);
+
+        state.LastRoundMessages.Should().ContainKey(AgentId.ClaudeAgent);
+        state.LastRoundMessages.Should().NotContainKey(AgentId.GptAgent);
     }
 
-    #endregion
+    [Fact]
+    public async Task RunAnalysisRoundAsync_RecordsRoundSnapshot()
+    {
+        var sessionService = StubSessionService();
+        var orchestrator = BuildOrchestrator(sessionService: sessionService);
+        var state = BuildState(SessionPhase.AnalysisRound);
+
+        await orchestrator.RunAnalysisRoundAsync(state, CancellationToken.None);
+
+        await sessionService.Received(1).RecordRoundSnapshotAsync(state, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task RunAnalysisRoundAsync_AdvancesToCritique_WhenBudgetNotExhausted()
+    {
+        var sessionService = StubSessionService();
+        var orchestrator = BuildOrchestrator(sessionService: sessionService);
+        var state = BuildState(SessionPhase.AnalysisRound);
+
+        await orchestrator.RunAnalysisRoundAsync(state, CancellationToken.None);
+
+        await sessionService.Received(1).AdvancePhaseAsync(
+            state, SessionPhase.Critique, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task RunAnalysisRoundAsync_TerminatesWithGaps_WhenBudgetExhausted()
+    {
+        var sessionService = StubSessionService();
+        // 300 tokens used by the 3 agent responses, budget is 100 — exhausted
+        var policy = ExhaustedBudgetPolicy();
+        var orchestrator = BuildOrchestrator(sessionService: sessionService, policy: policy);
+        var state = BuildState(SessionPhase.AnalysisRound, tokensUsed: 200);
+
+        await orchestrator.RunAnalysisRoundAsync(state, CancellationToken.None);
+
+        state.Status.Should().Be(SessionStatus.CompleteWithGaps);
+        await sessionService.Received(1).AdvancePhaseAsync(
+            state, SessionPhase.DeliverWithGaps, Arg.Any<CancellationToken>());
+    }
+
+    // ── RunCritiqueRoundAsync ─────────────────────────────────────────────────
+
+    [Fact]
+    public async Task RunCritiqueRoundAsync_DelegatesDispatchToAgentRunner()
+    {
+        var runner = StubRunner();
+        var orchestrator = BuildOrchestrator(runner: runner);
+        var state = BuildState(SessionPhase.Critique);
+
+        await orchestrator.RunCritiqueRoundAsync(state, CancellationToken.None);
+
+        await runner.Received(1).RunCritiqueRoundAsync(state, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task RunCritiqueRoundAsync_RecordsRoundSnapshot()
+    {
+        var sessionService = StubSessionService();
+        var orchestrator = BuildOrchestrator(sessionService: sessionService);
+        var state = BuildState(SessionPhase.Critique);
+
+        await orchestrator.RunCritiqueRoundAsync(state, CancellationToken.None);
+
+        await sessionService.Received(1).RecordRoundSnapshotAsync(state, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task RunCritiqueRoundAsync_AdvancesToSynthesis_WhenBudgetNotExhausted()
+    {
+        var sessionService = StubSessionService();
+        var orchestrator = BuildOrchestrator(sessionService: sessionService);
+        var state = BuildState(SessionPhase.Critique);
+
+        await orchestrator.RunCritiqueRoundAsync(state, CancellationToken.None);
+
+        await sessionService.Received(1).AdvancePhaseAsync(
+            state, SessionPhase.Synthesis, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task RunCritiqueRoundAsync_TerminatesWithGaps_WhenBudgetExhausted()
+    {
+        var sessionService = StubSessionService();
+        var orchestrator = BuildOrchestrator(
+            sessionService: sessionService,
+            policy: ExhaustedBudgetPolicy());
+        var state = BuildState(SessionPhase.Critique, tokensUsed: 200);
+
+        await orchestrator.RunCritiqueRoundAsync(state, CancellationToken.None);
+
+        state.Status.Should().Be(SessionStatus.CompleteWithGaps);
+        await sessionService.Received(1).AdvancePhaseAsync(
+            state, SessionPhase.DeliverWithGaps, Arg.Any<CancellationToken>());
+    }
+
+    // ── RunSynthesisAsync ─────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task RunSynthesisAsync_DelegatesDispatchToAgentRunner()
+    {
+        var runner = StubRunner();
+        var orchestrator = BuildOrchestrator(runner: runner);
+        var state = BuildState(SessionPhase.Synthesis);
+
+        await orchestrator.RunSynthesisAsync(state, CancellationToken.None);
+
+        await runner.Received(1).RunSynthesisAsync(state, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task RunSynthesisAsync_AdvancesToDeliver_WhenConverged()
+    {
+        var sessionService = StubSessionService();
+        var orchestrator = BuildOrchestrator(sessionService: sessionService);
+
+        // Build a map with convergence scores above all thresholds
+        var convergedMap = EmptyMap() with
+        {
+            Convergence = new Domain.TruthMap.Entities.Convergence(
+                ClaritySpecificity: 0.9f, Feasibility: 0.9f, RiskCoverage: 0.9f,
+                AssumptionExplicitness: 0.9f, Coherence: 0.9f, Actionability: 0.9f,
+                EvidenceQuality: 0.9f, Overall: 0.9f,
+                Threshold: 0.75f, Status: ConvergenceStatus.Converged)
+        };
+        var state = BuildState(SessionPhase.Synthesis);
+        state.TruthMap = convergedMap;
+
+        await orchestrator.RunSynthesisAsync(state, CancellationToken.None);
+
+        state.Status.Should().Be(SessionStatus.Complete);
+        await sessionService.Received(1).AdvancePhaseAsync(
+            state, SessionPhase.Deliver, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task RunSynthesisAsync_AdvancesToTargetedLoop_WhenNotConvergedAndLoopBudgetAvailable()
+    {
+        var sessionService = StubSessionService();
+        var policy = new RoundPolicy { MaxTargetedLoops = 2 };
+        var orchestrator = BuildOrchestrator(sessionService: sessionService, policy: policy);
+
+        // Map with low convergence scores
+        var lowConvergenceMap = EmptyMap() with
+        {
+            Convergence = new Domain.TruthMap.Entities.Convergence(
+                ClaritySpecificity: 0.4f, Feasibility: 0.4f, RiskCoverage: 0.4f,
+                AssumptionExplicitness: 0.4f, Coherence: 0.4f, Actionability: 0.4f,
+                EvidenceQuality: 0.4f, Overall: 0.4f,
+                Threshold: 0.75f, Status: ConvergenceStatus.GapsRemain)
+        };
+        var state = BuildState(SessionPhase.Synthesis);
+        state.TruthMap = lowConvergenceMap;
+        state.TargetedLoopCount = 0;
+
+        await orchestrator.RunSynthesisAsync(state, CancellationToken.None);
+
+        await sessionService.Received(1).AdvancePhaseAsync(
+            state, SessionPhase.TargetedLoop, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task RunSynthesisAsync_TerminatesWithGaps_WhenMaxLoopsExhausted()
+    {
+        var sessionService = StubSessionService();
+        var policy = new RoundPolicy { MaxTargetedLoops = 2 };
+        var orchestrator = BuildOrchestrator(sessionService: sessionService, policy: policy);
+
+        var lowConvergenceMap = EmptyMap() with
+        {
+            Convergence = new Domain.TruthMap.Entities.Convergence(
+                ClaritySpecificity: 0.4f, Feasibility: 0.4f, RiskCoverage: 0.4f,
+                AssumptionExplicitness: 0.4f, Coherence: 0.4f, Actionability: 0.4f,
+                EvidenceQuality: 0.4f, Overall: 0.4f,
+                Threshold: 0.75f, Status: ConvergenceStatus.GapsRemain)
+        };
+        var state = BuildState(SessionPhase.Synthesis);
+        state.TruthMap = lowConvergenceMap;
+        state.TargetedLoopCount = 2; // already at max
+
+        await orchestrator.RunSynthesisAsync(state, CancellationToken.None);
+
+        state.Status.Should().Be(SessionStatus.CompleteWithGaps);
+        await sessionService.Received(1).AdvancePhaseAsync(
+            state, SessionPhase.DeliverWithGaps, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task RunSynthesisAsync_TerminatesWithGaps_WhenBudgetExhausted()
+    {
+        var sessionService = StubSessionService();
+        var orchestrator = BuildOrchestrator(
+            sessionService: sessionService,
+            policy: ExhaustedBudgetPolicy());
+        var state = BuildState(SessionPhase.Synthesis, tokensUsed: 200);
+
+        await orchestrator.RunSynthesisAsync(state, CancellationToken.None);
+
+        state.Status.Should().Be(SessionStatus.CompleteWithGaps);
+        await sessionService.Received(1).AdvancePhaseAsync(
+            state, SessionPhase.DeliverWithGaps, Arg.Any<CancellationToken>());
+    }
+
+    // ── RunTargetedLoopAsync ──────────────────────────────────────────────────
+
+    [Fact]
+    public async Task RunTargetedLoopAsync_DelegatesDispatchToAgentRunner()
+    {
+        var runner = StubRunner();
+        var orchestrator = BuildOrchestrator(runner: runner);
+        var state = BuildState(SessionPhase.TargetedLoop);
+
+        await orchestrator.RunTargetedLoopAsync(
+            state, [AgentId.GptAgent], "Address feasibility gap.", CancellationToken.None);
+
+        await runner.Received(1).RunTargetedLoopAsync(
+            state,
+            Arg.Is<IReadOnlyList<string>>(ids => ids.Contains(AgentId.GptAgent)),
+            "Address feasibility gap.",
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task RunTargetedLoopAsync_IncrementsTargetedLoopCounter()
+    {
+        var orchestrator = BuildOrchestrator();
+        var state = BuildState(SessionPhase.TargetedLoop);
+        state.TargetedLoopCount = 1;
+
+        await orchestrator.RunTargetedLoopAsync(
+            state, [AgentId.ClaudeAgent], "Fix coherence.", CancellationToken.None);
+
+        state.TargetedLoopCount.Should().Be(2);
+    }
+
+    [Fact]
+    public async Task RunTargetedLoopAsync_IncrementsRoundCounter()
+    {
+        var orchestrator = BuildOrchestrator();
+        var state = BuildState(SessionPhase.TargetedLoop);
+        state.CurrentRound = 3;
+
+        await orchestrator.RunTargetedLoopAsync(
+            state, [AgentId.ClaudeAgent], "Fix coherence.", CancellationToken.None);
+
+        state.CurrentRound.Should().Be(4);
+    }
+
+    [Fact]
+    public async Task RunTargetedLoopAsync_RecordsSnapshot()
+    {
+        var sessionService = StubSessionService();
+        var orchestrator = BuildOrchestrator(sessionService: sessionService);
+        var state = BuildState(SessionPhase.TargetedLoop);
+
+        await orchestrator.RunTargetedLoopAsync(
+            state, [AgentId.GptAgent], "Gap directive.", CancellationToken.None);
+
+        await sessionService.Received(1).RecordRoundSnapshotAsync(state, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task RunTargetedLoopAsync_AdvancesToSynthesisAfterCompletion()
+    {
+        var sessionService = StubSessionService();
+        var orchestrator = BuildOrchestrator(sessionService: sessionService);
+        var state = BuildState(SessionPhase.TargetedLoop);
+
+        await orchestrator.RunTargetedLoopAsync(
+            state, [AgentId.GptAgent], "Gap directive.", CancellationToken.None);
+
+        await sessionService.Received(1).AdvancePhaseAsync(
+            state, SessionPhase.Synthesis, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task RunTargetedLoopAsync_TerminatesWithGaps_WhenBudgetExhausted()
+    {
+        var sessionService = StubSessionService();
+        var orchestrator = BuildOrchestrator(
+            sessionService: sessionService,
+            policy: ExhaustedBudgetPolicy());
+        var state = BuildState(SessionPhase.TargetedLoop, tokensUsed: 200);
+
+        await orchestrator.RunTargetedLoopAsync(
+            state, [AgentId.GptAgent], "Gap directive.", CancellationToken.None);
+
+        state.Status.Should().Be(SessionStatus.CompleteWithGaps);
+        await sessionService.Received(1).AdvancePhaseAsync(
+            state, SessionPhase.DeliverWithGaps, Arg.Any<CancellationToken>());
+    }
 }

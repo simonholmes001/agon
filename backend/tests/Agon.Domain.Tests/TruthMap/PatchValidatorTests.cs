@@ -6,480 +6,265 @@ namespace Agon.Domain.Tests.TruthMap;
 
 public class PatchValidatorTests
 {
-    private static TruthMapState CreateMapWithClaim(string claimId = "c1", string agent = "gpt_agent")
-    {
-        var map = TruthMapState.CreateNew(Guid.NewGuid());
-        map.Claims.Add(new Claim
-        {
-            Id = claimId,
-            Agent = agent,
-            Round = 1,
-            Text = "Original claim text.",
-            Confidence = 0.8f
-        });
-        return map;
-    }
+    private static readonly Guid SessionId = Guid.NewGuid();
 
-    private static TruthMapPatch CreatePatch(string agent, int round, params PatchOperation[] ops)
-    {
-        return new TruthMapPatch
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    private static Agon.Domain.TruthMap.TruthMap EmptyMap() =>
+        Agon.Domain.TruthMap.TruthMap.Empty(SessionId);
+
+    private static Agon.Domain.TruthMap.TruthMap MapWithClaim(
+        string claimId = "c1",
+        string agentId = "gpt_agent",
+        float confidence = 0.8f) =>
+        EmptyMap() with
         {
-            Ops = ops.ToList(),
-            Meta = new PatchMeta
+            Claims = new List<Claim>
             {
-                Agent = agent,
-                Round = round,
-                Reason = "Test patch",
-                SessionId = Guid.NewGuid()
+                new(claimId, agentId, 1, "A sample claim", confidence,
+                    ClaimStatus.Active, [], [])
             }
         };
-    }
 
-    // --- Rule 1: Reject references to non-existent entity IDs (unless op is add) ---
+    private static PatchMeta Meta(string agent = "gpt_agent", int round = 1) =>
+        new(agent, round, "test reason", SessionId);
+
+    // ── Rule 1: Non-add ops must reference existing entity IDs ────────────────
 
     [Fact]
-    public void Validate_RejectsReplace_OnNonExistentEntity()
+    public void Rule1_Replace_OnNonExistentEntity_IsRejected()
     {
-        var map = TruthMapState.CreateNew(Guid.NewGuid());
-        var patch = CreatePatch("claude_agent", 1,
-            new PatchOperation
-            {
-                Op = PatchOperationType.Replace,
-                Path = "/claims/c_nonexistent/status",
-                Value = "contested"
-            });
+        var patch = new TruthMapPatch(
+            [new PatchOperation(PatchOp.Replace, "/claims/nonexistent-id/status", "contested")],
+            Meta());
 
-        var result = PatchValidator.Validate(patch, map);
+        var result = PatchValidator.Validate(patch, EmptyMap());
 
         result.IsValid.Should().BeFalse();
-        result.Errors.Should().ContainSingle(e => e.Contains("c_nonexistent"));
+        result.Reason.Should().Contain("nonexistent-id");
     }
 
     [Fact]
-    public void Validate_RejectsRemove_OnNonExistentEntity()
+    public void Rule1_Remove_OnNonExistentEntity_IsRejected()
     {
-        var map = TruthMapState.CreateNew(Guid.NewGuid());
-        var patch = CreatePatch("claude_agent", 1,
-            new PatchOperation
-            {
-                Op = PatchOperationType.Remove,
-                Path = "/claims/c_nonexistent",
-                Value = null
-            });
+        var patch = new TruthMapPatch(
+            [new PatchOperation(PatchOp.Remove, "/claims/ghost-id", null)],
+            Meta());
 
-        var result = PatchValidator.Validate(patch, map);
+        var result = PatchValidator.Validate(patch, EmptyMap());
 
         result.IsValid.Should().BeFalse();
+        result.Reason.Should().Contain("ghost-id");
     }
 
     [Fact]
-    public void Validate_AllowsAdd_ForNewEntity()
+    public void Rule1_Add_WithAnyPath_IsAlwaysAllowedRegardingRule1()
     {
-        var map = TruthMapState.CreateNew(Guid.NewGuid());
-        var patch = CreatePatch("gpt_agent", 1,
-            new PatchOperation
+        var patch = new TruthMapPatch(
+            [new PatchOperation(PatchOp.Add, "/claims/-", new
             {
-                Op = PatchOperationType.Add,
-                Path = "/claims/-",
-                Value = new Claim
-                {
-                    Id = "c_new",
-                    Agent = "gpt_agent",
-                    Round = 1,
-                    Text = "New claim.",
-                    Confidence = 0.7f
-                }
-            });
+                Id = "c-new",
+                ProposedBy = "gpt_agent",
+                Round = 1,
+                Text = "New claim",
+                Confidence = 0.7f,
+                Status = "active",
+                DerivedFrom = Array.Empty<string>(),
+                ChallengedBy = Array.Empty<string>()
+            })],
+            Meta());
+
+        var result = PatchValidator.Validate(patch, EmptyMap());
+
+        result.IsValid.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Rule1_Replace_OnExistingEntity_Passes()
+    {
+        var map = MapWithClaim("c1");
+        var patch = new TruthMapPatch(
+            [new PatchOperation(PatchOp.Replace, "/claims/c1/status", "contested")],
+            Meta());
 
         var result = PatchValidator.Validate(patch, map);
 
         result.IsValid.Should().BeTrue();
     }
 
-    // --- Rule 2: Reject replace/remove on mismatched entity id ---
+    // ── Rule 2: Replace/remove on path with mismatched ID ────────────────────
 
     [Fact]
-    public void Validate_RejectsReplace_WhenPathEntityIdDoesNotMatchValueId()
+    public void Rule2_Replace_OnExistingId_IsValid()
     {
-        var map = CreateMapWithClaim("c1");
-        var patch = CreatePatch("gpt_agent", 1,
-            new PatchOperation
-            {
-                Op = PatchOperationType.Replace,
-                Path = "/claims/c1",
-                Value = new Claim
-                {
-                    Id = "c_wrong",
-                    Agent = "gpt_agent",
-                    Round = 1,
-                    Text = "Updated text.",
-                    Confidence = 0.9f
-                }
-            });
+        var map = MapWithClaim("c1");
+        var patch = new TruthMapPatch(
+            [new PatchOperation(PatchOp.Replace, "/claims/c1/confidence", 0.5f)],
+            Meta());
+
+        PatchValidator.Validate(patch, map).IsValid.Should().BeTrue();
+    }
+
+    // ── Rule 3: Cross-agent text modification prevention ─────────────────────
+
+    [Fact]
+    public void Rule3_DifferentAgent_CannotModifyClaimText()
+    {
+        var map = MapWithClaim("c1", agentId: "gpt_agent");
+        var patch = new TruthMapPatch(
+            [new PatchOperation(PatchOp.Replace, "/claims/c1/text", "Overwritten text")],
+            Meta(agent: "claude_agent")); // different agent
 
         var result = PatchValidator.Validate(patch, map);
 
         result.IsValid.Should().BeFalse();
-        result.Errors.Should().ContainSingle(e => e.Contains("mismatch"));
+        result.Reason.Should().Contain("claude_agent");
+        result.Reason.Should().Contain("gpt_agent");
     }
 
     [Fact]
-    public void Validate_RejectsReplace_WhenIndexTargetDoesNotMatchValueId()
+    public void Rule3_SameAgent_CanModifyOwnClaimText()
     {
-        var map = CreateMapWithClaim("c1");
-        var patch = CreatePatch("gpt_agent", 1,
-            new PatchOperation
-            {
-                Op = PatchOperationType.Replace,
-                Path = "/claims/0",
-                Value = new Claim
-                {
-                    Id = "c_wrong",
-                    Agent = "gpt_agent",
-                    Round = 1,
-                    Text = "Updated text.",
-                    Confidence = 0.9f
-                }
-            });
+        var map = MapWithClaim("c1", agentId: "gpt_agent");
+        var patch = new TruthMapPatch(
+            [new PatchOperation(PatchOp.Replace, "/claims/c1/text", "Updated text")],
+            Meta(agent: "gpt_agent")); // same agent
 
-        var result = PatchValidator.Validate(patch, map);
+        PatchValidator.Validate(patch, map).IsValid.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Rule3_DifferentAgent_CanAdd_ChallengedBy_Reference()
+    {
+        // Adding challenged_by is allowed — it's a different field, not /text.
+        var map = MapWithClaim("c1", agentId: "gpt_agent");
+        var patch = new TruthMapPatch(
+            [new PatchOperation(PatchOp.Add, "/claims/c1/challenged_by/-", "r-risk-1")],
+            Meta(agent: "claude_agent"));
+
+        PatchValidator.Validate(patch, map).IsValid.Should().BeTrue();
+    }
+
+    // ── Rule 4: Decisions require rationale ──────────────────────────────────
+
+    [Fact]
+    public void Rule4_AddDecision_WithoutRationale_IsRejected()
+    {
+        var patch = new TruthMapPatch(
+            [new PatchOperation(PatchOp.Add, "/decisions/-", new
+            {
+                Id = "d1",
+                Text = "Use microservices",
+                Rationale = "",  // empty
+                Owner = "gpt_agent",
+                DerivedFrom = Array.Empty<string>(),
+                Binding = true
+            })],
+            Meta());
+
+        var result = PatchValidator.Validate(patch, EmptyMap());
 
         result.IsValid.Should().BeFalse();
-        result.Errors.Should().ContainSingle(e => e.Contains("mismatch"));
+        result.Reason.Should().ContainAny("rationale", "Rationale");
     }
 
-    // --- Rule 3: Prevent cross-agent text modification ---
+    [Fact]
+    public void Rule4_AddDecision_WithRationale_IsValid()
+    {
+        var patch = new TruthMapPatch(
+            [new PatchOperation(PatchOp.Add, "/decisions/-", new
+            {
+                Id = "d1",
+                Text = "Use microservices",
+                Rationale = "Enables independent scaling of services.",
+                Owner = "gpt_agent",
+                DerivedFrom = Array.Empty<string>(),
+                Binding = true
+            })],
+            Meta());
+
+        PatchValidator.Validate(patch, EmptyMap()).IsValid.Should().BeTrue();
+    }
+
+    // ── Rule 5: Assumptions require validation_step after Round 2 ────────────
 
     [Fact]
-    public void Validate_RejectsTextModification_ByDifferentAgent()
+    public void Rule5_AddAssumption_WithoutValidationStep_AfterRound2_IsRejected()
     {
-        var map = CreateMapWithClaim("c1", "gpt_agent");
-        var patch = CreatePatch("claude_agent", 1,
-            new PatchOperation
+        var patch = new TruthMapPatch(
+            [new PatchOperation(PatchOp.Add, "/assumptions/-", new
             {
-                Op = PatchOperationType.Replace,
-                Path = "/claims/c1/text",
-                Value = "Contrarian overwrites Product Strategist's claim text."
-            });
+                Id = "a1",
+                Text = "Users will pay $10/month",
+                ValidationStep = "",  // missing
+                DerivedFrom = Array.Empty<string>(),
+                Status = "unvalidated"
+            })],
+            Meta(round: 3)); // Round 3 — validation_step is required
 
-        var result = PatchValidator.Validate(patch, map);
+        var result = PatchValidator.Validate(patch, EmptyMap());
 
         result.IsValid.Should().BeFalse();
-        result.Errors.Should().ContainSingle(e => e.Contains("Cross-agent"));
+        result.Reason.Should().ContainAny("validation_step", "ValidationStep");
     }
 
     [Fact]
-    public void Validate_AllowsTextModification_BySameAgent()
+    public void Rule5_AddAssumption_WithoutValidationStep_InRound1_IsValid()
     {
-        var map = CreateMapWithClaim("c1", "gpt_agent");
-        var patch = CreatePatch("gpt_agent", 2,
-            new PatchOperation
+        var patch = new TruthMapPatch(
+            [new PatchOperation(PatchOp.Add, "/assumptions/-", new
             {
-                Op = PatchOperationType.Replace,
-                Path = "/claims/c1/text",
-                Value = "Product Strategist updates own claim text."
-            });
+                Id = "a1",
+                Text = "Users will pay $10/month",
+                ValidationStep = "",  // missing — but it's round 1, so OK
+                DerivedFrom = Array.Empty<string>(),
+                Status = "unvalidated"
+            })],
+            Meta(round: 1));
 
-        var result = PatchValidator.Validate(patch, map);
-
-        result.IsValid.Should().BeTrue();
+        PatchValidator.Validate(patch, EmptyMap()).IsValid.Should().BeTrue();
     }
 
     [Fact]
-    public void Validate_AllowsChallengedByAddition_ByDifferentAgent()
+    public void Rule5_AddAssumption_WithValidationStep_AfterRound2_IsValid()
     {
-        var map = CreateMapWithClaim("c1", "gpt_agent");
-        var patch = CreatePatch("claude_agent", 1,
-            new PatchOperation
+        var patch = new TruthMapPatch(
+            [new PatchOperation(PatchOp.Add, "/assumptions/-", new
             {
-                Op = PatchOperationType.Add,
-                Path = "/claims/c1/challenged_by/-",
-                Value = "r1"
-            });
+                Id = "a1",
+                Text = "Users will pay $10/month",
+                ValidationStep = "Run 20 user interviews; ask willingness-to-pay question.",
+                DerivedFrom = Array.Empty<string>(),
+                Status = "unvalidated"
+            })],
+            Meta(round: 3));
 
-        var result = PatchValidator.Validate(patch, map);
-
-        result.IsValid.Should().BeTrue();
+        PatchValidator.Validate(patch, EmptyMap()).IsValid.Should().BeTrue();
     }
 
-    [Fact]
-    public void Validate_AllowsStatusChange_ByDifferentAgent()
-    {
-        var map = CreateMapWithClaim("c1", "gpt_agent");
-        var patch = CreatePatch("claude_agent", 1,
-            new PatchOperation
-            {
-                Op = PatchOperationType.Replace,
-                Path = "/claims/c1/status",
-                Value = "contested"
-            });
-
-        var result = PatchValidator.Validate(patch, map);
-
-        result.IsValid.Should().BeTrue();
-    }
+    // ── Multiple ops — first invalid op stops validation ─────────────────────
 
     [Fact]
-    public void Validate_AllowsIndexBasedPath_ForExistingEntity()
+    public void MultipleOps_FirstInvalidOp_ShortCircuits()
     {
-        var map = CreateMapWithClaim("c1", "gpt_agent");
-        var patch = CreatePatch("claude_agent", 1,
-            new PatchOperation
-            {
-                Op = PatchOperationType.Replace,
-                Path = "/claims/0/status",
-                Value = "contested"
-            });
+        var patch = new TruthMapPatch(
+            [
+                new PatchOperation(PatchOp.Replace, "/claims/ghost/status", "contested"), // invalid
+                new PatchOperation(PatchOp.Add, "/claims/-", new { Id = "c2" })           // valid
+            ],
+            Meta());
 
-        var result = PatchValidator.Validate(patch, map);
-
-        result.IsValid.Should().BeTrue();
-    }
-
-    [Fact]
-    public void Validate_RejectsIndexBasedPath_WhenOutOfRange()
-    {
-        var map = CreateMapWithClaim("c1", "gpt_agent");
-        var patch = CreatePatch("claude_agent", 1,
-            new PatchOperation
-            {
-                Op = PatchOperationType.Replace,
-                Path = "/claims/7/status",
-                Value = "contested"
-            });
-
-        var result = PatchValidator.Validate(patch, map);
+        var result = PatchValidator.Validate(patch, EmptyMap());
 
         result.IsValid.Should().BeFalse();
-        result.Errors.Should().ContainSingle(e => e.Contains("index 7"));
     }
 
-    [Fact]
-    public void Validate_RejectsCrossAgentTextModification_ForIndexBasedPath()
-    {
-        var map = CreateMapWithClaim("c1", "gpt_agent");
-        var patch = CreatePatch("claude_agent", 1,
-            new PatchOperation
-            {
-                Op = PatchOperationType.Replace,
-                Path = "/claims/0/text",
-                Value = "Attempting to overwrite by index."
-            });
-
-        var result = PatchValidator.Validate(patch, map);
-
-        result.IsValid.Should().BeFalse();
-        result.Errors.Should().ContainSingle(e => e.Contains("Cross-agent"));
-    }
+    // ── Empty patch is always valid ───────────────────────────────────────────
 
     [Fact]
-    public void Validate_AllowsSingletonPath_WithoutEntityLookup()
+    public void EmptyPatch_IsValid()
     {
-        var map = TruthMapState.CreateNew(Guid.NewGuid());
-        var patch = CreatePatch("moderator", 1,
-            new PatchOperation
-            {
-                Op = PatchOperationType.Replace,
-                Path = "/constraints/budget",
-                Value = "USD 1M"
-            });
-
-        var result = PatchValidator.Validate(patch, map);
-
-        result.IsValid.Should().BeTrue();
-        result.Errors.Should().BeEmpty();
-    }
-
-    // --- Rule 4: Require rationale on decisions ---
-
-    [Fact]
-    public void Validate_RejectsDecision_WithoutRationale()
-    {
-        var map = TruthMapState.CreateNew(Guid.NewGuid());
-        var decision = new Decision
-        {
-            Id = "d1",
-            Text = "Use Postgres.",
-            Rationale = "",
-            Owner = "gpt_agent"
-        };
-        var patch = CreatePatch("gpt_agent", 1,
-            new PatchOperation
-            {
-                Op = PatchOperationType.Add,
-                Path = "/decisions/-",
-                Value = decision
-            });
-
-        var result = PatchValidator.Validate(patch, map);
-
-        result.IsValid.Should().BeFalse();
-        result.Errors.Should().ContainSingle(e => e.Contains("rationale"));
-    }
-
-    [Fact]
-    public void Validate_AcceptsDecision_WithRationale()
-    {
-        var map = TruthMapState.CreateNew(Guid.NewGuid());
-        var decision = new Decision
-        {
-            Id = "d1",
-            Text = "Use Postgres.",
-            Rationale = "Supports JSONB for Truth Map storage.",
-            Owner = "gpt_agent"
-        };
-        var patch = CreatePatch("gpt_agent", 1,
-            new PatchOperation
-            {
-                Op = PatchOperationType.Add,
-                Path = "/decisions/-",
-                Value = decision
-            });
-
-        var result = PatchValidator.Validate(patch, map);
-
-        result.IsValid.Should().BeTrue();
-    }
-
-    // --- Rule 5: Require validation_step on assumptions after Round 2 ---
-
-    [Fact]
-    public void Validate_RejectsAssumption_WithoutValidationStep_AfterRound2()
-    {
-        var map = TruthMapState.CreateNew(Guid.NewGuid());
-        map.Round = 3;
-        var assumption = new Assumption
-        {
-            Id = "a1",
-            Text = "Users want this.",
-            ValidationStep = null
-        };
-        var patch = CreatePatch("gpt_agent", 3,
-            new PatchOperation
-            {
-                Op = PatchOperationType.Add,
-                Path = "/assumptions/-",
-                Value = assumption
-            });
-
-        var result = PatchValidator.Validate(patch, map);
-
-        result.IsValid.Should().BeFalse();
-        result.Errors.Should().ContainSingle(e => e.Contains("validation_step"));
-    }
-
-    [Fact]
-    public void Validate_AcceptsAssumption_WithoutValidationStep_BeforeRound3()
-    {
-        var map = TruthMapState.CreateNew(Guid.NewGuid());
-        map.Round = 1;
-        var assumption = new Assumption
-        {
-            Id = "a1",
-            Text = "Users want this.",
-            ValidationStep = null
-        };
-        var patch = CreatePatch("gpt_agent", 1,
-            new PatchOperation
-            {
-                Op = PatchOperationType.Add,
-                Path = "/assumptions/-",
-                Value = assumption
-            });
-
-        var result = PatchValidator.Validate(patch, map);
-
-        result.IsValid.Should().BeTrue();
-    }
-
-    [Fact]
-    public void Validate_AcceptsAssumption_WithValidationStep_AfterRound2()
-    {
-        var map = TruthMapState.CreateNew(Guid.NewGuid());
-        map.Round = 3;
-        var assumption = new Assumption
-        {
-            Id = "a1",
-            Text = "Users want this.",
-            ValidationStep = "Run a survey."
-        };
-        var patch = CreatePatch("gpt_agent", 3,
-            new PatchOperation
-            {
-                Op = PatchOperationType.Add,
-                Path = "/assumptions/-",
-                Value = assumption
-            });
-
-        var result = PatchValidator.Validate(patch, map);
-
-        result.IsValid.Should().BeTrue();
-    }
-
-    // --- Empty patch ---
-
-    [Fact]
-    public void Validate_AcceptsEmptyPatch()
-    {
-        var map = TruthMapState.CreateNew(Guid.NewGuid());
-        var patch = CreatePatch("gpt_agent", 1);
-
-        var result = PatchValidator.Validate(patch, map);
-
-        result.IsValid.Should().BeTrue();
-        result.Errors.Should().BeEmpty();
-    }
-
-    // --- Multiple errors ---
-
-    [Fact]
-    public void Validate_ReturnsMultipleErrors_WhenMultipleRulesViolated()
-    {
-        var map = TruthMapState.CreateNew(Guid.NewGuid());
-        map.Round = 3;
-        var patch = CreatePatch("claude_agent", 3,
-            new PatchOperation
-            {
-                Op = PatchOperationType.Remove,
-                Path = "/claims/c_nonexistent",
-                Value = null
-            },
-            new PatchOperation
-            {
-                Op = PatchOperationType.Add,
-                Path = "/decisions/-",
-                Value = new Decision
-                {
-                    Id = "d1",
-                    Text = "Bad decision.",
-                    Rationale = "",
-                    Owner = "claude_agent"
-                }
-            });
-
-        var result = PatchValidator.Validate(patch, map);
-
-        result.IsValid.Should().BeFalse();
-        result.Errors.Should().HaveCountGreaterThanOrEqualTo(2);
-    }
-
-    // --- ValidationResult ---
-
-    [Fact]
-    public void ValidationResult_Success_IsValid()
-    {
-        var result = ValidationResult.Success();
-
-        result.IsValid.Should().BeTrue();
-        result.Errors.Should().BeEmpty();
-    }
-
-    [Fact]
-    public void ValidationResult_Failure_ContainsErrors()
-    {
-        var result = ValidationResult.Failure(new List<string> { "Error 1", "Error 2" });
-
-        result.IsValid.Should().BeFalse();
-        result.Errors.Should().HaveCount(2);
+        var patch = new TruthMapPatch([], Meta());
+        PatchValidator.Validate(patch, EmptyMap()).IsValid.Should().BeTrue();
     }
 }

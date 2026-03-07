@@ -1,98 +1,39 @@
 using Microsoft.AspNetCore.SignalR;
-using Microsoft.Extensions.Logging;
 
 namespace Agon.Infrastructure.SignalR;
 
-public class DebateHub(ILogger<DebateHub> logger) : Hub
+/// <summary>
+/// SignalR Hub for real-time debate session communication.
+/// Clients connect to this hub and join session-specific groups to receive updates.
+/// The SignalREventBroadcaster uses this hub's context to broadcast events.
+/// </summary>
+public sealed class DebateHub : Hub
 {
-    private const string SessionGroupPrefix = "session:";
-
-    public static string SessionGroupName(Guid sessionId) => $"{SessionGroupPrefix}{sessionId:D}";
-
-    public override async Task OnConnectedAsync()
+    /// <summary>
+    /// Called when a client connects and wants to join a specific session.
+    /// Adds the connection to the session-specific group.
+    /// </summary>
+    public async Task JoinSession(Guid sessionId)
     {
-        logger.LogInformation(
-            "SignalR client connected. ConnectionId={ConnectionId}",
-            Context.ConnectionId);
-        await base.OnConnectedAsync();
+        await Groups.AddToGroupAsync(Context.ConnectionId, $"session:{sessionId}");
     }
 
-    public override async Task OnDisconnectedAsync(Exception? exception)
+    /// <summary>
+    /// Called when a client leaves a session.
+    /// Removes the connection from the session-specific group.
+    /// </summary>
+    public async Task LeaveSession(Guid sessionId)
     {
-        if (exception is null)
-        {
-            logger.LogInformation(
-                "SignalR client disconnected cleanly. ConnectionId={ConnectionId}",
-                Context.ConnectionId);
-        }
-        else
-        {
-            logger.LogWarning(
-                exception,
-                "SignalR client disconnected with error. ConnectionId={ConnectionId}",
-                Context.ConnectionId);
-        }
-
-        await base.OnDisconnectedAsync(exception);
+        await Groups.RemoveFromGroupAsync(Context.ConnectionId, $"session:{sessionId}");
     }
 
-    public async Task JoinSession(string sessionId)
+    /// <summary>
+    /// Automatically called when a client disconnects.
+    /// SignalR handles group cleanup automatically.
+    /// </summary>
+    public override Task OnDisconnectedAsync(Exception? exception)
     {
-        if (!Guid.TryParse(sessionId, out var parsedSessionId))
-        {
-            logger.LogWarning(
-                "Rejecting join for invalid session id. ConnectionId={ConnectionId} SessionId={SessionId}",
-                Context.ConnectionId,
-                sessionId);
-            throw new HubException("Invalid session id.");
-        }
-
-        try
-        {
-            await Groups.AddToGroupAsync(Context.ConnectionId, SessionGroupName(parsedSessionId));
-            logger.LogInformation(
-                "SignalR client joined session group. ConnectionId={ConnectionId} SessionId={SessionId}",
-                Context.ConnectionId,
-                parsedSessionId);
-        }
-        catch (Exception exception)
-        {
-            logger.LogError(
-                exception,
-                "Failed to add SignalR client to session group. ConnectionId={ConnectionId} SessionId={SessionId}",
-                Context.ConnectionId,
-                parsedSessionId);
-            throw;
-        }
-    }
-
-    public async Task LeaveSession(string sessionId)
-    {
-        if (!Guid.TryParse(sessionId, out var parsedSessionId))
-        {
-            logger.LogWarning(
-                "Rejecting leave for invalid session id. ConnectionId={ConnectionId} SessionId={SessionId}",
-                Context.ConnectionId,
-                sessionId);
-            return;
-        }
-
-        try
-        {
-            await Groups.RemoveFromGroupAsync(Context.ConnectionId, SessionGroupName(parsedSessionId));
-            logger.LogInformation(
-                "SignalR client left session group. ConnectionId={ConnectionId} SessionId={SessionId}",
-                Context.ConnectionId,
-                parsedSessionId);
-        }
-        catch (Exception exception)
-        {
-            logger.LogError(
-                exception,
-                "Failed to remove SignalR client from session group. ConnectionId={ConnectionId} SessionId={SessionId}",
-                Context.ConnectionId,
-                parsedSessionId);
-            throw;
-        }
+        // SignalR automatically removes the connection from all groups
+        return base.OnDisconnectedAsync(exception);
     }
 }

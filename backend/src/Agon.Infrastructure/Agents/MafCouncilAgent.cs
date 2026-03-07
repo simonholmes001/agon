@@ -1,126 +1,157 @@
-using System.Diagnostics;
-using System.Runtime.CompilerServices;
 using Agon.Application.Interfaces;
-using Agon.Application.Orchestration;
-using Microsoft.Extensions.AI;
-using Microsoft.Extensions.Logging;
+using Microsoft.Agents.AI;
+using System.Text;
+using System.Text.Json;
+using AgonAgentResponse = Agon.Application.Models.AgentResponse;
+using AgonAgentContext = Agon.Application.Models.AgentContext;
+using TruthMapModel = Agon.Domain.TruthMap.TruthMap;
 
 namespace Agon.Infrastructure.Agents;
 
 /// <summary>
-/// Provider-agnostic council agent backed by <see cref="IChatClient"/> from Microsoft.Extensions.AI.
-/// All provider differences (OpenAI, Anthropic, Gemini, DeepSeek) are handled by the
-/// <see cref="IChatClient"/> implementation injected at DI registration time.
-/// This class contains zero provider-specific code.
+/// Adapter that wraps MAF's native AIAgent and provides our application-specific
+/// context building (AgentContext → prompt) and response parsing (raw text → AgentResponse).
 /// </summary>
-public sealed class MafCouncilAgent(
-    string agentId,
-    string modelProvider,
-    IChatClient chatClient,
-    int maxOutputTokens,
-    ILogger<MafCouncilAgent> logger) : ICouncilAgent
+public sealed class MafCouncilAgent : ICouncilAgent
 {
-    public string AgentId { get; } = agentId;
-    public string ModelProvider { get; } = modelProvider;
+    private readonly IAgentResponseParser _parser;
 
-    public async Task<AgentResponse> RunAsync(AgentContext context, CancellationToken cancellationToken)
+    public string AgentId { get; }
+    public string ModelProvider { get; }
+    public AIAgent UnderlyingAgent { get; }
+
+    public MafCouncilAgent(
+        string agentId,
+        string modelProvider,
+        AIAgent underlyingAgent,
+        IAgentResponseParser parser)
     {
-        var startedAt = Stopwatch.StartNew();
-        var prompt = AgentPromptComposer.ComposePrompt(agentId, context);
-        var messages = new List<ChatMessage>
-        {
-            new(ChatRole.User, prompt)
-        };
-        var options = new ChatOptions { MaxOutputTokens = maxOutputTokens };
+        AgentId = agentId ?? throw new ArgumentNullException(nameof(agentId));
+        ModelProvider = modelProvider ?? throw new ArgumentNullException(nameof(modelProvider));
+        UnderlyingAgent = underlyingAgent ?? throw new ArgumentNullException(nameof(underlyingAgent));
+        _parser = parser ?? throw new ArgumentNullException(nameof(parser));
+    }
 
+    public async Task<AgonAgentResponse> RunAsync(AgonAgentContext context, CancellationToken cancellationToken)
+    {
         try
         {
-            var response = await chatClient.GetResponseAsync(messages, options, cancellationToken);
-            var text = response.Text ?? string.Empty;
-            var parsed = AgentResponseParser.Parse(text);
+            var prompt = BuildPrompt(context);
+            // MAF AIAgent.RunAsync signature: RunAsync(string message, AgentSession? session, AgentRunOptions? options, CancellationToken ct)
+            var result = await UnderlyingAgent.RunAsync(prompt, session: null, options: null, cancellationToken);
 
-            logger.LogInformation(
-                "Agent call succeeded. SessionId={SessionId} Round={Round} AgentId={AgentId} Provider={Provider} LatencyMs={LatencyMs} CorrelationId={CorrelationId}",
-                context.SessionId,
-                context.Round,
-                agentId,
-                modelProvider,
-                startedAt.ElapsedMilliseconds,
-                context.CorrelationId);
-
-            return new AgentResponse
-            {
-                Message = parsed.Message,
-                Patch = parsed.Patch,
-                RawOutput = text
-            };
+            var rawResponse = result.ToString() ?? string.Empty;
+            return _parser.Parse(rawResponse, AgentId);
         }
-        catch (Exception exception)
+        catch (OperationCanceledException)
         {
-            logger.LogError(
-                exception,
-                "Agent call failed. SessionId={SessionId} Round={Round} AgentId={AgentId} Provider={Provider} LatencyMs={LatencyMs} CorrelationId={CorrelationId}",
-                context.SessionId,
-                context.Round,
-                agentId,
-                modelProvider,
-                startedAt.ElapsedMilliseconds,
-                context.CorrelationId);
-            throw;
+            return AgonAgentResponse.CreateTimedOut(AgentId);
+        }
+        catch (Exception ex)
+        {
+            // Log exception in production
+            return new AgonAgentResponse(
+                AgentId: AgentId,
+                Message: $"[ERROR] Agent failed: {ex.Message}",
+                Patch: null,
+                TokensUsed: 0,
+                TimedOut: false,
+                RawOutput: null);
         }
     }
 
     public async IAsyncEnumerable<string> RunStreamingAsync(
-        AgentContext context,
-        [EnumeratorCancellation] CancellationToken cancellationToken)
+        AgonAgentContext context,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        var startedAt = Stopwatch.StartNew();
-        var prompt = AgentPromptComposer.ComposePrompt(agentId, context);
-        var messages = new List<ChatMessage>
+        var prompt = BuildPrompt(context);
+        
+        // MAF AIAgent.RunStreamingAsync returns IAsyncEnumerable<AgentResponseUpdate>
+        await foreach (var update in UnderlyingAgent.RunStreamingAsync(prompt, session: null, options: null, cancellationToken))
         {
-            new(ChatRole.User, prompt)
-        };
-        var options = new ChatOptions { MaxOutputTokens = maxOutputTokens };
+            // AgentResponseUpdate has .Text property and .ToString() method
+            var text = update.Text;
+            if (!string.IsNullOrEmpty(text))
+            {
+                yield return text;
+            }
+        }
+    }
 
-        var succeeded = false;
+    private string BuildPrompt(AgonAgentContext context)
+    {
+        var sb = new StringBuilder();
 
+        sb.AppendLine("# Session Context");
+        sb.AppendLine($"Session ID: {context.SessionId}");
+        sb.AppendLine($"Round: {context.RoundNumber}");
+        sb.AppendLine($"Phase: {context.Phase}");
+        sb.AppendLine($"Friction Level: {context.FrictionLevel}");
+        sb.AppendLine();
+
+        sb.AppendLine("# Current Truth Map");
+        sb.AppendLine("```json");
+        sb.AppendLine(SerializeTruthMap(context.TruthMap));
+        sb.AppendLine("```");
+        sb.AppendLine();
+
+        if (!string.IsNullOrWhiteSpace(context.MicroDirective))
+        {
+            sb.AppendLine("# Task Directive");
+            sb.AppendLine(context.MicroDirective);
+            sb.AppendLine();
+        }
+
+        if (context.CritiqueTargetMessages.Count > 0)
+        {
+            sb.AppendLine("# Critique Targets");
+            sb.AppendLine("You are assigned to critique the following agent responses:");
+            foreach (var targetMessage in context.CritiqueTargetMessages)
+            {
+                sb.AppendLine($"## {targetMessage.AgentId}");
+                sb.AppendLine(targetMessage.Message);
+                sb.AppendLine();
+            }
+        }
+
+        sb.AppendLine("# Required Output Format");
+        sb.AppendLine("Your response MUST include both sections:");
+        sb.AppendLine();
+        sb.AppendLine("## MESSAGE");
+        sb.AppendLine("Your analysis in Markdown format.");
+        sb.AppendLine();
+        sb.AppendLine("## PATCH");
+        sb.AppendLine("```json");
+        sb.AppendLine("{");
+        sb.AppendLine("  \"ops\": [");
+        sb.AppendLine("    {\"op\": \"add\", \"path\": \"/claims/-\", \"value\": {...}}");
+        sb.AppendLine("  ],");
+        sb.AppendLine("  \"meta\": {");
+        sb.AppendLine($"    \"agent\": \"{AgentId}\",");
+        sb.AppendLine($"    \"round\": {context.RoundNumber},");
+        sb.AppendLine($"    \"reason\": \"Brief explanation\",");
+        sb.AppendLine($"    \"session_id\": \"{context.SessionId}\"");
+        sb.AppendLine("  }");
+        sb.AppendLine("}");
+        sb.AppendLine("```");
+
+        return sb.ToString();
+    }
+
+    private static string SerializeTruthMap(TruthMapModel map)
+    {
         try
         {
-            await foreach (var update in chatClient.GetStreamingResponseAsync(messages, options, cancellationToken))
+            var options = new JsonSerializerOptions
             {
-                var token = update.Text ?? string.Empty;
-                if (!string.IsNullOrWhiteSpace(token))
-                {
-                    yield return token;
-                }
-            }
-
-            succeeded = true;
+                WriteIndented = true,
+                PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower
+            };
+            return JsonSerializer.Serialize(map, options);
         }
-        finally
+        catch
         {
-            if (succeeded)
-            {
-                logger.LogInformation(
-                    "Agent streaming call succeeded. SessionId={SessionId} Round={Round} AgentId={AgentId} Provider={Provider} LatencyMs={LatencyMs} CorrelationId={CorrelationId}",
-                    context.SessionId,
-                    context.Round,
-                    agentId,
-                    modelProvider,
-                    startedAt.ElapsedMilliseconds,
-                    context.CorrelationId);
-            }
-            else
-            {
-                logger.LogError(
-                    "Agent streaming call failed. SessionId={SessionId} Round={Round} AgentId={AgentId} Provider={Provider} LatencyMs={LatencyMs} CorrelationId={CorrelationId}",
-                    context.SessionId,
-                    context.Round,
-                    agentId,
-                    modelProvider,
-                    startedAt.ElapsedMilliseconds,
-                    context.CorrelationId);
-            }
+            return "{}";
         }
     }
 }
