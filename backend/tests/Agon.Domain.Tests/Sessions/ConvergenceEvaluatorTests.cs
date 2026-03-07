@@ -6,159 +6,167 @@ namespace Agon.Domain.Tests.Sessions;
 
 public class ConvergenceEvaluatorTests
 {
-    private static readonly RoundPolicy DefaultPolicy = new();
+    private static ConvergenceEvaluator BuildEvaluator(RoundPolicy? policy = null) =>
+        new(policy ?? RoundPolicy.Default());
 
-    // --- Overall score calculation ---
+    private static ConvergenceInput AllHighInput(
+        int frictionLevel = 40,
+        bool hasBlocking = false,
+        bool researchEnabled = true) =>
+        new(
+            ClaritySpecificity: 0.90f,
+            Feasibility: 0.90f,
+            RiskCoverage: 0.90f,
+            AssumptionExplicitness: 0.90f,
+            Coherence: 0.90f,
+            Actionability: 0.90f,
+            EvidenceQuality: 0.90f,
+            HasBlockingOpenQuestions: hasBlocking,
+            FrictionLevel: frictionLevel,
+            ResearchToolsEnabled: researchEnabled);
 
-    [Fact]
-    public void CalculateOverall_ReturnsWeightedAverage()
-    {
-        var convergence = new Convergence
-        {
-            ClaritySpecificity = 0.8f,
-            Feasibility = 0.7f,
-            RiskCoverage = 0.6f,
-            AssumptionExplicitness = 0.75f,
-            Coherence = 0.85f,
-            Actionability = 0.7f,
-            EvidenceQuality = 0.5f
-        };
-
-        var overall = ConvergenceEvaluator.CalculateOverall(convergence);
-
-        // Equally weighted average: (0.8 + 0.7 + 0.6 + 0.75 + 0.85 + 0.7 + 0.5) / 7 ≈ 0.7
-        overall.Should().BeApproximately(0.7f, 0.01f);
-    }
+    // ── Convergence status ────────────────────────────────────────────────────
 
     [Fact]
-    public void CalculateOverall_ReturnsZero_WhenAllDimensionsAreZero()
+    public void Evaluate_AllHighScores_NoBlocking_Converges()
     {
-        var convergence = new Convergence();
-
-        var overall = ConvergenceEvaluator.CalculateOverall(convergence);
-
-        overall.Should().Be(0.0f);
-    }
-
-    [Fact]
-    public void CalculateOverall_ReturnsOne_WhenAllDimensionsAreOne()
-    {
-        var convergence = new Convergence
-        {
-            ClaritySpecificity = 1.0f,
-            Feasibility = 1.0f,
-            RiskCoverage = 1.0f,
-            AssumptionExplicitness = 1.0f,
-            Coherence = 1.0f,
-            Actionability = 1.0f,
-            EvidenceQuality = 1.0f
-        };
-
-        var overall = ConvergenceEvaluator.CalculateOverall(convergence);
-
-        overall.Should().Be(1.0f);
-    }
-
-    // --- Evaluate convergence status ---
-
-    [Fact]
-    public void Evaluate_ReturnsConverged_WhenOverallExceedsStandardThreshold()
-    {
-        var convergence = AllDimensionsAt(0.8f);
-
-        var result = ConvergenceEvaluator.Evaluate(convergence, frictionLevel: 50, DefaultPolicy);
+        var result = BuildEvaluator().Evaluate(AllHighInput());
 
         result.Status.Should().Be(ConvergenceStatus.Converged);
-        result.Overall.Should().BeApproximately(0.8f, 0.01f);
-        result.Threshold.Should().Be(0.75f);
+        result.Overall.Should().BeGreaterThanOrEqualTo(0.75f);
     }
 
     [Fact]
-    public void Evaluate_ReturnsGapsRemain_WhenOverallBelowStandardThreshold()
+    public void Evaluate_BlockingOpenQuestion_IsNotConverged()
     {
-        var convergence = AllDimensionsAt(0.5f);
-
-        var result = ConvergenceEvaluator.Evaluate(convergence, frictionLevel: 50, DefaultPolicy);
+        var result = BuildEvaluator().Evaluate(AllHighInput(hasBlocking: true));
 
         result.Status.Should().Be(ConvergenceStatus.GapsRemain);
     }
 
     [Fact]
-    public void Evaluate_UsesHighFrictionThreshold_WhenFrictionAboveCutoff()
+    public void Evaluate_LowOverall_IsNotConverged()
     {
-        // 0.8 passes standard (0.75) but fails high-friction (0.85)
-        var convergence = AllDimensionsAt(0.8f);
+        var low = new ConvergenceInput(0.3f, 0.3f, 0.3f, 0.3f, 0.3f, 0.3f, 0.3f,
+            HasBlockingOpenQuestions: false, FrictionLevel: 40, ResearchToolsEnabled: true);
 
-        var result = ConvergenceEvaluator.Evaluate(convergence, frictionLevel: 80, DefaultPolicy);
+        var result = BuildEvaluator().Evaluate(low);
 
         result.Status.Should().Be(ConvergenceStatus.GapsRemain);
-        result.Threshold.Should().Be(0.85f);
+        result.Overall.Should().BeLessThan(0.75f);
+    }
+
+    // ── High-friction threshold ───────────────────────────────────────────────
+
+    [Fact]
+    public void Evaluate_HighFriction_HigherThresholdApplied()
+    {
+        // overall ~0.80 — passes standard (0.75) but not high-friction (0.85)
+        var input = new ConvergenceInput(0.80f, 0.80f, 0.80f, 0.82f, 0.82f, 0.80f, 0.80f,
+            HasBlockingOpenQuestions: false, FrictionLevel: 70, ResearchToolsEnabled: true);
+
+        var result = BuildEvaluator().Evaluate(input);
+
+        result.Threshold.Should().BeApproximately(0.85f, 0.001f);
+        result.Status.Should().Be(ConvergenceStatus.GapsRemain);
     }
 
     [Fact]
-    public void Evaluate_Converges_WithHighFriction_WhenScoreExceedsHighThreshold()
+    public void Evaluate_HighFriction_ConvergesWhenAboveHighThreshold()
     {
-        var convergence = AllDimensionsAt(0.9f);
+        var input = new ConvergenceInput(0.95f, 0.95f, 0.95f, 0.90f, 0.95f, 0.90f, 0.90f,
+            HasBlockingOpenQuestions: false, FrictionLevel: 70, ResearchToolsEnabled: true);
 
-        var result = ConvergenceEvaluator.Evaluate(convergence, frictionLevel: 80, DefaultPolicy);
+        var result = BuildEvaluator().Evaluate(input);
 
         result.Status.Should().Be(ConvergenceStatus.Converged);
     }
 
+    // ── Evidence quality cap when research tools disabled ────────────────────
+
     [Fact]
-    public void Evaluate_SetsThresholdOnResult()
+    public void Evaluate_ResearchToolsDisabled_EvidenceQualityCappedAt06()
     {
-        var convergence = AllDimensionsAt(0.5f);
+        var input = AllHighInput(researchEnabled: false) with { EvidenceQuality = 1.0f };
 
-        var result = ConvergenceEvaluator.Evaluate(convergence, frictionLevel: 50, DefaultPolicy);
+        var result = BuildEvaluator().Evaluate(input);
 
-        result.Threshold.Should().Be(0.75f);
+        result.EvidenceQuality.Should().BeApproximately(0.6f, 0.001f);
     }
 
-    // --- Weak dimensions ---
+    [Fact]
+    public void Evaluate_ResearchToolsEnabled_EvidenceQualityNotCapped()
+    {
+        var input = AllHighInput(researchEnabled: true) with { EvidenceQuality = 1.0f };
+
+        var result = BuildEvaluator().Evaluate(input);
+
+        result.EvidenceQuality.Should().BeApproximately(1.0f, 0.001f);
+    }
+
+    // ── Weighted overall score ────────────────────────────────────────────────
 
     [Fact]
-    public void GetWeakDimensions_ReturnsNames_BelowThreshold()
+    public void Evaluate_Overall_IsWeightedAverage()
     {
-        var convergence = new Convergence
+        // All dimensions 1.0 → overall = sum of weights = 1.0
+        var input = AllHighInput() with
         {
-            ClaritySpecificity = 0.9f,
-            Feasibility = 0.9f,
-            RiskCoverage = 0.3f,   // weak
-            AssumptionExplicitness = 0.9f,
-            Coherence = 0.9f,
-            Actionability = 0.2f,  // weak
-            EvidenceQuality = 0.9f
+            ClaritySpecificity = 1f,
+            Feasibility = 1f,
+            RiskCoverage = 1f,
+            AssumptionExplicitness = 1f,
+            Coherence = 1f,
+            Actionability = 1f,
+            EvidenceQuality = 1f
         };
 
-        var weak = ConvergenceEvaluator.GetWeakDimensions(convergence, threshold: 0.75f);
+        var result = BuildEvaluator().Evaluate(input);
 
-        weak.Should().Contain("RiskCoverage");
-        weak.Should().Contain("Actionability");
-        weak.Should().HaveCount(2);
+        result.Overall.Should().BeApproximately(1.0f, 0.001f);
     }
 
     [Fact]
-    public void GetWeakDimensions_ReturnsEmpty_WhenAllAboveThreshold()
+    public void Evaluate_AllZero_OverallIsZero()
     {
-        var convergence = AllDimensionsAt(0.9f);
+        var input = new ConvergenceInput(0f, 0f, 0f, 0f, 0f, 0f, 0f,
+            false, 40, true);
 
-        var weak = ConvergenceEvaluator.GetWeakDimensions(convergence, threshold: 0.75f);
+        var result = BuildEvaluator().Evaluate(input);
 
-        weak.Should().BeEmpty();
+        result.Overall.Should().BeApproximately(0f, 0.001f);
     }
 
-    private static Convergence AllDimensionsAt(float value)
+    // ── GetGapDimensions ──────────────────────────────────────────────────────
+
+    [Fact]
+    public void GetGapDimensions_ReturnsLowScoringDimensions()
     {
-        return new Convergence
-        {
-            ClaritySpecificity = value,
-            Feasibility = value,
-            RiskCoverage = value,
-            AssumptionExplicitness = value,
-            Coherence = value,
-            Actionability = value,
-            EvidenceQuality = value
-        };
+        var evaluator = BuildEvaluator();
+        var convergence = evaluator.Evaluate(new ConvergenceInput(
+            0.50f, // ClaritySpecificity — gap (< 0.70)
+            0.85f, // Feasibility — ok
+            0.50f, // RiskCoverage — gap (< 0.70)
+            0.80f, // AssumptionExplicitness
+            0.85f, // Coherence
+            0.85f, // Actionability
+            0.60f, // EvidenceQuality
+            false, 40, true));
+
+        var gaps = evaluator.GetGapDimensions(convergence, frictionLevel: 40);
+
+        gaps.Should().Contain(nameof(convergence.ClaritySpecificity));
+        gaps.Should().Contain(nameof(convergence.RiskCoverage));
+        gaps.Should().NotContain(nameof(convergence.Feasibility));
+    }
+
+    [Fact]
+    public void GetGapDimensions_Empty_WhenAllDimensionsPass()
+    {
+        var evaluator = BuildEvaluator();
+        var convergence = evaluator.Evaluate(AllHighInput());
+
+        evaluator.GetGapDimensions(convergence, frictionLevel: 40)
+            .Should().BeEmpty();
     }
 }

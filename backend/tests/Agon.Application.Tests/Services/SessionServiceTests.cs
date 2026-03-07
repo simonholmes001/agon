@@ -1,710 +1,252 @@
 using Agon.Application.Interfaces;
-using Agon.Application.Orchestration;
-using Agon.Application.Sessions;
+using Agon.Application.Models;
 using Agon.Application.Services;
 using Agon.Domain.Sessions;
-using Agon.Domain.TruthMap;
+using Agon.Domain.Snapshots;
 using FluentAssertions;
-using Microsoft.Extensions.Logging;
 using NSubstitute;
+using TruthMapModel = Agon.Domain.TruthMap.TruthMap;
 
 namespace Agon.Application.Tests.Services;
 
 public class SessionServiceTests
 {
-    [Fact]
-    public async Task CreateSessionAsync_CreatesActiveSession_AndSeedsTruthMap()
+    private static readonly Guid SessionId = Guid.NewGuid();
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    private static TruthMapModel EmptyMap(Guid? id = null) =>
+        TruthMapModel.Empty(id ?? SessionId);
+
+    private static SessionState BuildState(
+        Guid? sessionId = null,
+        SessionPhase phase = SessionPhase.Intake,
+        int frictionLevel = 50)
     {
-        var sessionRepository = Substitute.For<ISessionRepository>();
-        var truthMapRepository = Substitute.For<ITruthMapRepository>();
-        var transcriptRepository = Substitute.For<ITranscriptRepository>();
-        var eventBroadcaster = Substitute.For<IEventBroadcaster>();
-        var orchestrator = new Orchestrator();
-        var runnerLogger = Substitute.For<ILogger<AgentRunner>>();
-        var agentRunner = new AgentRunner(truthMapRepository, eventBroadcaster, runnerLogger);
-        var logger = Substitute.For<ILogger<SessionService>>();
-        var sut = new SessionService(
-            sessionRepository,
-            truthMapRepository,
-            transcriptRepository,
-            orchestrator,
-            agentRunner,
-            [],
-            eventBroadcaster,
-            logger);
-
-        var session = await sut.CreateSessionAsync(
-            idea: "A platform to stress-test startup ideas.",
-            mode: SessionMode.Deep,
-            frictionLevel: 55,
-            CancellationToken.None);
-
-        session.Status.Should().Be(SessionStatus.Active);
-        session.Phase.Should().Be(SessionPhase.Clarification);
-        session.Mode.Should().Be(SessionMode.Deep);
-        session.FrictionLevel.Should().Be(55);
-
-        await sessionRepository.Received(1).CreateAsync(session, Arg.Any<CancellationToken>());
-        await truthMapRepository.Received(1).CreateAsync(
-            Arg.Is<TruthMapState>(map =>
-                map.SessionId == session.SessionId
-                && map.CoreIdea == "A platform to stress-test startup ideas."),
-            Arg.Any<CancellationToken>());
+        var id = sessionId ?? SessionId;
+        var state = SessionState.Create(id, frictionLevel, false, EmptyMap(id));
+        state.Phase = phase;
+        return state;
     }
 
-    [Fact]
-    public async Task CreateSessionAsync_Throws_ForTooShortIdea()
+    private static ISessionRepository StubSessionRepo(SessionState? returns = null)
     {
-        var sessionRepository = Substitute.For<ISessionRepository>();
-        var truthMapRepository = Substitute.For<ITruthMapRepository>();
-        var transcriptRepository = Substitute.For<ITranscriptRepository>();
-        var eventBroadcaster = Substitute.For<IEventBroadcaster>();
-        var orchestrator = new Orchestrator();
-        var runnerLogger = Substitute.For<ILogger<AgentRunner>>();
-        var agentRunner = new AgentRunner(truthMapRepository, eventBroadcaster, runnerLogger);
-        var logger = Substitute.For<ILogger<SessionService>>();
-        var sut = new SessionService(
-            sessionRepository,
-            truthMapRepository,
-            transcriptRepository,
-            orchestrator,
-            agentRunner,
-            [],
-            eventBroadcaster,
-            logger);
-
-        var act = () => sut.CreateSessionAsync("short", SessionMode.Quick, 50, CancellationToken.None);
-
-        await act.Should().ThrowAsync<ArgumentException>();
-    }
-
-    [Fact]
-    public async Task CreateSessionAsync_Throws_ForOutOfRangeFrictionLevel()
-    {
-        var sessionRepository = Substitute.For<ISessionRepository>();
-        var truthMapRepository = Substitute.For<ITruthMapRepository>();
-        var transcriptRepository = Substitute.For<ITranscriptRepository>();
-        var eventBroadcaster = Substitute.For<IEventBroadcaster>();
-        var orchestrator = new Orchestrator();
-        var runnerLogger = Substitute.For<ILogger<AgentRunner>>();
-        var agentRunner = new AgentRunner(truthMapRepository, eventBroadcaster, runnerLogger);
-        var logger = Substitute.For<ILogger<SessionService>>();
-        var sut = new SessionService(
-            sessionRepository,
-            truthMapRepository,
-            transcriptRepository,
-            orchestrator,
-            agentRunner,
-            [],
-            eventBroadcaster,
-            logger);
-
-        var actLow = () => sut.CreateSessionAsync("A valid enough idea text.", SessionMode.Deep, -1, CancellationToken.None);
-        var actHigh = () => sut.CreateSessionAsync("A valid enough idea text.", SessionMode.Deep, 101, CancellationToken.None);
-
-        await actLow.Should().ThrowAsync<ArgumentOutOfRangeException>();
-        await actHigh.Should().ThrowAsync<ArgumentOutOfRangeException>();
-    }
-
-    [Fact]
-    public async Task StartSessionAsync_TransitionsFromClarificationToDebateRound1()
-    {
-        var sessionId = Guid.NewGuid();
-        var session = new SessionState
+        var repo = Substitute.For<ISessionRepository>();
+        if (returns is not null)
         {
-            SessionId = sessionId,
-            Phase = SessionPhase.Clarification,
-            Status = SessionStatus.Active,
-            Mode = SessionMode.Deep,
-            FrictionLevel = 45,
-            RoundPolicy = new RoundPolicy()
-        };
-
-        var map = TruthMapState.CreateNew(sessionId);
-
-        var sessionRepository = Substitute.For<ISessionRepository>();
-        sessionRepository.GetAsync(sessionId, Arg.Any<CancellationToken>()).Returns(session);
-
-        var truthMapRepository = Substitute.For<ITruthMapRepository>();
-        truthMapRepository.GetAsync(sessionId, Arg.Any<CancellationToken>()).Returns(map);
-        var transcriptRepository = Substitute.For<ITranscriptRepository>();
-        var eventBroadcaster = Substitute.For<IEventBroadcaster>();
-
-        var orchestrator = new Orchestrator();
-        var runnerLogger = Substitute.For<ILogger<AgentRunner>>();
-        var agentRunner = new AgentRunner(truthMapRepository, eventBroadcaster, runnerLogger);
-        var logger = Substitute.For<ILogger<SessionService>>();
-        var sut = new SessionService(
-            sessionRepository,
-            truthMapRepository,
-            transcriptRepository,
-            orchestrator,
-            agentRunner,
-            [],
-            eventBroadcaster,
-            logger);
-
-        var updated = await sut.StartSessionAsync(sessionId, CancellationToken.None);
-
-        updated.Phase.Should().Be(SessionPhase.DebateRound1);
-        updated.RoundNumber.Should().Be(1);
-        await sessionRepository.Received(1).UpdateAsync(updated, Arg.Any<CancellationToken>());
-        await eventBroadcaster.Received(1)
-            .RoundProgressAsync(sessionId, SessionPhase.DebateRound1, Arg.Any<CancellationToken>());
-        await transcriptRepository.Received(1).AppendAsync(
-            sessionId,
-            Arg.Is<TranscriptMessage>(message =>
-                message.Type == TranscriptMessageType.System
-                && message.AgentId == null
-                && message.Content.Contains("Round 1 started", StringComparison.Ordinal)),
-            Arg.Any<CancellationToken>());
-    }
-
-    [Fact]
-    public async Task StartSessionAsync_Throws_WhenSessionIsMissing()
-    {
-        var sessionId = Guid.NewGuid();
-        var sessionRepository = Substitute.For<ISessionRepository>();
-        sessionRepository.GetAsync(sessionId, Arg.Any<CancellationToken>()).Returns((SessionState?)null);
-        var truthMapRepository = Substitute.For<ITruthMapRepository>();
-        var transcriptRepository = Substitute.For<ITranscriptRepository>();
-        var eventBroadcaster = Substitute.For<IEventBroadcaster>();
-        var orchestrator = new Orchestrator();
-        var runnerLogger = Substitute.For<ILogger<AgentRunner>>();
-        var agentRunner = new AgentRunner(truthMapRepository, eventBroadcaster, runnerLogger);
-        var logger = Substitute.For<ILogger<SessionService>>();
-        var sut = new SessionService(
-            sessionRepository,
-            truthMapRepository,
-            transcriptRepository,
-            orchestrator,
-            agentRunner,
-            [],
-            eventBroadcaster,
-            logger);
-
-        var act = () => sut.StartSessionAsync(sessionId, CancellationToken.None);
-
-        await act.Should().ThrowAsync<KeyNotFoundException>();
-    }
-
-    [Fact]
-    public async Task StartSessionAsync_Throws_WhenTruthMapIsMissing()
-    {
-        var sessionId = Guid.NewGuid();
-        var sessionRepository = Substitute.For<ISessionRepository>();
-        sessionRepository.GetAsync(sessionId, Arg.Any<CancellationToken>()).Returns(new SessionState
-        {
-            SessionId = sessionId,
-            Phase = SessionPhase.Clarification,
-            Status = SessionStatus.Active,
-            Mode = SessionMode.Deep,
-            FrictionLevel = 50,
-            RoundPolicy = new RoundPolicy()
-        });
-        var truthMapRepository = Substitute.For<ITruthMapRepository>();
-        truthMapRepository.GetAsync(sessionId, Arg.Any<CancellationToken>()).Returns((TruthMapState?)null);
-        var transcriptRepository = Substitute.For<ITranscriptRepository>();
-        var eventBroadcaster = Substitute.For<IEventBroadcaster>();
-        var orchestrator = new Orchestrator();
-        var runnerLogger = Substitute.For<ILogger<AgentRunner>>();
-        var agentRunner = new AgentRunner(truthMapRepository, eventBroadcaster, runnerLogger);
-        var logger = Substitute.For<ILogger<SessionService>>();
-        var sut = new SessionService(
-            sessionRepository,
-            truthMapRepository,
-            transcriptRepository,
-            orchestrator,
-            agentRunner,
-            [],
-            eventBroadcaster,
-            logger);
-
-        var act = () => sut.StartSessionAsync(sessionId, CancellationToken.None);
-
-        await act.Should().ThrowAsync<KeyNotFoundException>();
-    }
-
-    [Fact]
-    public async Task StartSessionAsync_RunsCouncilRound_AndStoresAgentMessages()
-    {
-        var sessionId = Guid.NewGuid();
-        var session = new SessionState
-        {
-            SessionId = sessionId,
-            Phase = SessionPhase.Clarification,
-            Status = SessionStatus.Active,
-            Mode = SessionMode.Deep,
-            FrictionLevel = 50,
-            RoundPolicy = new RoundPolicy()
-        };
-        var map = TruthMapState.CreateNew(sessionId);
-
-        var sessionRepository = Substitute.For<ISessionRepository>();
-        sessionRepository.GetAsync(sessionId, Arg.Any<CancellationToken>()).Returns(session);
-
-        var truthMapRepository = Substitute.For<ITruthMapRepository>();
-        truthMapRepository.GetAsync(sessionId, Arg.Any<CancellationToken>()).Returns(map);
-
-        var transcriptRepository = Substitute.For<ITranscriptRepository>();
-        var eventBroadcaster = Substitute.For<IEventBroadcaster>();
-        var orchestrator = new Orchestrator();
-        var runnerLogger = Substitute.For<ILogger<AgentRunner>>();
-        var agentRunner = new AgentRunner(truthMapRepository, eventBroadcaster, runnerLogger);
-        var councilAgents = new ICouncilAgent[]
-        {
-            new StaticAgent("product_strategist", "A concise product strategy message.")
-        };
-        var logger = Substitute.For<ILogger<SessionService>>();
-
-        var sut = new SessionService(
-            sessionRepository,
-            truthMapRepository,
-            transcriptRepository,
-            orchestrator,
-            agentRunner,
-            councilAgents,
-            eventBroadcaster,
-            logger);
-
-        await sut.StartSessionAsync(sessionId, CancellationToken.None);
-
-        await transcriptRepository.Received(3).AppendAsync(
-            sessionId,
-            Arg.Any<TranscriptMessage>(),
-            Arg.Any<CancellationToken>());
-        await transcriptRepository.Received(1).AppendAsync(
-            sessionId,
-            Arg.Is<TranscriptMessage>(message =>
-                message.Type == TranscriptMessageType.System
-                && message.AgentId == null
-                && message.Content.Contains("Round 1 started", StringComparison.Ordinal)),
-            Arg.Any<CancellationToken>());
-        await transcriptRepository.Received(1).AppendAsync(
-            sessionId,
-            Arg.Is<TranscriptMessage>(message =>
-                message.AgentId == "product-strategist"
-                && message.Content == "A concise product strategy message."
-                && message.Round == 1),
-            Arg.Any<CancellationToken>());
-        await transcriptRepository.Received(1).AppendAsync(
-            sessionId,
-            Arg.Is<TranscriptMessage>(message =>
-                message.Type == TranscriptMessageType.System
-                && message.Content.Contains("Round 1 complete", StringComparison.Ordinal)),
-            Arg.Any<CancellationToken>());
-    }
-
-    [Fact]
-    public async Task StartSessionAsync_DoesNotDispatchCouncil_WhenPhaseIsNotClarification()
-    {
-        var sessionId = Guid.NewGuid();
-        var session = new SessionState
-        {
-            SessionId = sessionId,
-            Phase = SessionPhase.DebateRound1,
-            Status = SessionStatus.Active,
-            Mode = SessionMode.Deep,
-            FrictionLevel = 50,
-            RoundPolicy = new RoundPolicy(),
-            RoundNumber = 1
-        };
-
-        var sessionRepository = Substitute.For<ISessionRepository>();
-        sessionRepository.GetAsync(sessionId, Arg.Any<CancellationToken>()).Returns(session);
-        var truthMapRepository = Substitute.For<ITruthMapRepository>();
-        truthMapRepository.GetAsync(sessionId, Arg.Any<CancellationToken>()).Returns(TruthMapState.CreateNew(sessionId));
-        var transcriptRepository = Substitute.For<ITranscriptRepository>();
-        var eventBroadcaster = Substitute.For<IEventBroadcaster>();
-        var orchestrator = new Orchestrator();
-        var runnerLogger = Substitute.For<ILogger<AgentRunner>>();
-        var agentRunner = new AgentRunner(truthMapRepository, eventBroadcaster, runnerLogger);
-        var logger = Substitute.For<ILogger<SessionService>>();
-        var sut = new SessionService(
-            sessionRepository,
-            truthMapRepository,
-            transcriptRepository,
-            orchestrator,
-            agentRunner,
-            [new StaticAgent("product_strategist", "message")],
-            eventBroadcaster,
-            logger);
-
-        var updated = await sut.StartSessionAsync(sessionId, CancellationToken.None);
-
-        updated.Phase.Should().Be(SessionPhase.DebateRound1);
-        await eventBroadcaster.DidNotReceive().RoundProgressAsync(
-            Arg.Any<Guid>(),
-            Arg.Any<SessionPhase>(),
-            Arg.Any<CancellationToken>());
-        await transcriptRepository.DidNotReceive().AppendAsync(
-            Arg.Any<Guid>(),
-            Arg.Any<TranscriptMessage>(),
-            Arg.Any<CancellationToken>());
-        await sessionRepository.Received(1).UpdateAsync(updated, Arg.Any<CancellationToken>());
-    }
-
-    [Fact]
-    public async Task StartSessionAsync_BroadcastsTranscriptMessages_WhenRoundMessagesAreStored()
-    {
-        var sessionId = Guid.NewGuid();
-        var session = new SessionState
-        {
-            SessionId = sessionId,
-            Phase = SessionPhase.Clarification,
-            Status = SessionStatus.Active,
-            Mode = SessionMode.Deep,
-            FrictionLevel = 50,
-            RoundPolicy = new RoundPolicy()
-        };
-        var map = TruthMapState.CreateNew(sessionId);
-
-        var sessionRepository = Substitute.For<ISessionRepository>();
-        sessionRepository.GetAsync(sessionId, Arg.Any<CancellationToken>()).Returns(session);
-
-        var truthMapRepository = Substitute.For<ITruthMapRepository>();
-        truthMapRepository.GetAsync(sessionId, Arg.Any<CancellationToken>()).Returns(map);
-
-        var transcriptRepository = Substitute.For<ITranscriptRepository>();
-        var eventBroadcaster = Substitute.For<IEventBroadcaster>();
-        var orchestrator = new Orchestrator();
-        var runnerLogger = Substitute.For<ILogger<AgentRunner>>();
-        var agentRunner = new AgentRunner(truthMapRepository, eventBroadcaster, runnerLogger);
-        var councilAgents = new ICouncilAgent[]
-        {
-            new StaticAgent("product_strategist", "A concise product strategy message.")
-        };
-        var logger = Substitute.For<ILogger<SessionService>>();
-
-        var sut = new SessionService(
-            sessionRepository,
-            truthMapRepository,
-            transcriptRepository,
-            orchestrator,
-            agentRunner,
-            councilAgents,
-            eventBroadcaster,
-            logger);
-
-        await sut.StartSessionAsync(sessionId, CancellationToken.None);
-
-        await eventBroadcaster.Received(1).TranscriptMessageAppendedAsync(
-            sessionId,
-            Arg.Is<TranscriptMessage>(message =>
-                message.Type == TranscriptMessageType.System
-                && message.Content.Contains("Round 1 started", StringComparison.Ordinal)),
-            Arg.Any<CancellationToken>());
-
-        await eventBroadcaster.Received().TranscriptMessageAppendedAsync(
-            sessionId,
-            Arg.Is<TranscriptMessage>(message =>
-                message.AgentId == "product-strategist"
-                && message.Content == "A concise product strategy message."),
-            Arg.Any<CancellationToken>());
-    }
-
-    [Fact]
-    public async Task StartSessionAsync_AppendsSystemFailureMessage_WhenAgentFails()
-    {
-        var sessionId = Guid.NewGuid();
-        var session = new SessionState
-        {
-            SessionId = sessionId,
-            Phase = SessionPhase.Clarification,
-            Status = SessionStatus.Active,
-            Mode = SessionMode.Deep,
-            FrictionLevel = 50,
-            RoundPolicy = new RoundPolicy()
-        };
-        var map = TruthMapState.CreateNew(sessionId);
-
-        var sessionRepository = Substitute.For<ISessionRepository>();
-        sessionRepository.GetAsync(sessionId, Arg.Any<CancellationToken>()).Returns(session);
-
-        var truthMapRepository = Substitute.For<ITruthMapRepository>();
-        truthMapRepository.GetAsync(sessionId, Arg.Any<CancellationToken>()).Returns(map);
-
-        var transcriptRepository = Substitute.For<ITranscriptRepository>();
-        var eventBroadcaster = Substitute.For<IEventBroadcaster>();
-        var orchestrator = new Orchestrator();
-        var runnerLogger = Substitute.For<ILogger<AgentRunner>>();
-        var agentRunner = new AgentRunner(truthMapRepository, eventBroadcaster, runnerLogger);
-        var councilAgents = new ICouncilAgent[]
-        {
-            new FailingAgent("product_strategist", "missing api key")
-        };
-        var logger = Substitute.For<ILogger<SessionService>>();
-
-        var sut = new SessionService(
-            sessionRepository,
-            truthMapRepository,
-            transcriptRepository,
-            orchestrator,
-            agentRunner,
-            councilAgents,
-            eventBroadcaster,
-            logger);
-
-        await sut.StartSessionAsync(sessionId, CancellationToken.None);
-
-        await transcriptRepository.Received(1).AppendAsync(
-            sessionId,
-            Arg.Is<TranscriptMessage>(message =>
-                message.Type == TranscriptMessageType.System
-                && message.Content.Contains("product-strategist")
-                && message.Content.Contains("missing api key")),
-            Arg.Any<CancellationToken>());
-    }
-
-    [Fact]
-    public async Task StartSessionAsync_PropagatesCorrelationId_ToAgentContext()
-    {
-        var sessionId = Guid.NewGuid();
-        var session = new SessionState
-        {
-            SessionId = sessionId,
-            Phase = SessionPhase.Clarification,
-            Status = SessionStatus.Active,
-            Mode = SessionMode.Deep,
-            FrictionLevel = 50,
-            RoundPolicy = new RoundPolicy()
-        };
-        var map = TruthMapState.CreateNew(sessionId);
-
-        var sessionRepository = Substitute.For<ISessionRepository>();
-        sessionRepository.GetAsync(sessionId, Arg.Any<CancellationToken>()).Returns(session);
-
-        var truthMapRepository = Substitute.For<ITruthMapRepository>();
-        truthMapRepository.GetAsync(sessionId, Arg.Any<CancellationToken>()).Returns(map);
-
-        var transcriptRepository = Substitute.For<ITranscriptRepository>();
-        var eventBroadcaster = Substitute.For<IEventBroadcaster>();
-        var orchestrator = new Orchestrator();
-        var runnerLogger = Substitute.For<ILogger<AgentRunner>>();
-        var agentRunner = new AgentRunner(truthMapRepository, eventBroadcaster, runnerLogger);
-        var capturingAgent = new ContextCapturingAgent("product_strategist", "message");
-        var logger = Substitute.For<ILogger<SessionService>>();
-
-        var sut = new SessionService(
-            sessionRepository,
-            truthMapRepository,
-            transcriptRepository,
-            orchestrator,
-            agentRunner,
-            [capturingAgent],
-            eventBroadcaster,
-            logger);
-
-        await sut.StartSessionAsync(sessionId, CancellationToken.None, "corr-start-123");
-
-        capturingAgent.LastContext.Should().NotBeNull();
-        capturingAgent.LastContext!.CorrelationId.Should().Be("corr-start-123");
-    }
-
-    [Fact]
-    public async Task StartSessionAsync_UsesDefaultCorrelationId_WhenCorrelationIdIsBlank()
-    {
-        var sessionId = Guid.NewGuid();
-        var session = new SessionState
-        {
-            SessionId = sessionId,
-            Phase = SessionPhase.Clarification,
-            Status = SessionStatus.Active,
-            Mode = SessionMode.Deep,
-            FrictionLevel = 50,
-            RoundPolicy = new RoundPolicy()
-        };
-        var map = TruthMapState.CreateNew(sessionId);
-
-        var sessionRepository = Substitute.For<ISessionRepository>();
-        sessionRepository.GetAsync(sessionId, Arg.Any<CancellationToken>()).Returns(session);
-        var truthMapRepository = Substitute.For<ITruthMapRepository>();
-        truthMapRepository.GetAsync(sessionId, Arg.Any<CancellationToken>()).Returns(map);
-        var transcriptRepository = Substitute.For<ITranscriptRepository>();
-        var eventBroadcaster = Substitute.For<IEventBroadcaster>();
-        var orchestrator = new Orchestrator();
-        var runnerLogger = Substitute.For<ILogger<AgentRunner>>();
-        var agentRunner = new AgentRunner(truthMapRepository, eventBroadcaster, runnerLogger);
-        var capturingAgent = new ContextCapturingAgent("product_strategist", "message");
-        var logger = Substitute.For<ILogger<SessionService>>();
-        var sut = new SessionService(
-            sessionRepository,
-            truthMapRepository,
-            transcriptRepository,
-            orchestrator,
-            agentRunner,
-            [capturingAgent],
-            eventBroadcaster,
-            logger);
-
-        await sut.StartSessionAsync(sessionId, CancellationToken.None, "   ");
-
-        capturingAgent.LastContext.Should().NotBeNull();
-        capturingAgent.LastContext!.CorrelationId.Should().Be("n/a");
-    }
-
-    [Fact]
-    public async Task StartSessionAsync_TrimsLongAgentErrors_InSystemFailureMessage()
-    {
-        var sessionId = Guid.NewGuid();
-        var session = new SessionState
-        {
-            SessionId = sessionId,
-            Phase = SessionPhase.Clarification,
-            Status = SessionStatus.Active,
-            Mode = SessionMode.Deep,
-            FrictionLevel = 50,
-            RoundPolicy = new RoundPolicy()
-        };
-        var map = TruthMapState.CreateNew(sessionId);
-        var longError = new string('x', 260);
-        var trimmedError = longError[..180];
-
-        var sessionRepository = Substitute.For<ISessionRepository>();
-        sessionRepository.GetAsync(sessionId, Arg.Any<CancellationToken>()).Returns(session);
-        var truthMapRepository = Substitute.For<ITruthMapRepository>();
-        truthMapRepository.GetAsync(sessionId, Arg.Any<CancellationToken>()).Returns(map);
-        var transcriptRepository = Substitute.For<ITranscriptRepository>();
-        var eventBroadcaster = Substitute.For<IEventBroadcaster>();
-        var orchestrator = new Orchestrator();
-        var runnerLogger = Substitute.For<ILogger<AgentRunner>>();
-        var agentRunner = new AgentRunner(truthMapRepository, eventBroadcaster, runnerLogger);
-        var logger = Substitute.For<ILogger<SessionService>>();
-        var sut = new SessionService(
-            sessionRepository,
-            truthMapRepository,
-            transcriptRepository,
-            orchestrator,
-            agentRunner,
-            [new FailingAgent("product_strategist", longError)],
-            eventBroadcaster,
-            logger);
-
-        await sut.StartSessionAsync(sessionId, CancellationToken.None);
-
-        await transcriptRepository.Received().AppendAsync(
-            sessionId,
-            Arg.Is<TranscriptMessage>(message =>
-                message.Type == TranscriptMessageType.System
-                && message.Content.Contains("product-strategist")
-                && message.Content.Contains(trimmedError)
-                && !message.Content.Contains(longError)),
-            Arg.Any<CancellationToken>());
-    }
-
-    [Fact]
-    public async Task GetTranscriptAsync_ReturnsMessagesFromRepository()
-    {
-        var sessionId = Guid.NewGuid();
-        var expected = new[]
-        {
-            new TranscriptMessage
-            {
-                Id = Guid.NewGuid(),
-                SessionId = sessionId,
-                Type = TranscriptMessageType.Agent,
-                AgentId = "socratic-clarifier",
-                Content = "Kickoff transcript",
-                Round = 1,
-                IsStreaming = false,
-                CreatedAtUtc = DateTimeOffset.UtcNow
-            }
-        };
-
-        var sessionRepository = Substitute.For<ISessionRepository>();
-        var truthMapRepository = Substitute.For<ITruthMapRepository>();
-        var transcriptRepository = Substitute.For<ITranscriptRepository>();
-        transcriptRepository
-            .GetBySessionAsync(sessionId, Arg.Any<CancellationToken>())
-            .Returns(expected);
-        var eventBroadcaster = Substitute.For<IEventBroadcaster>();
-        var orchestrator = new Orchestrator();
-        var runnerLogger = Substitute.For<ILogger<AgentRunner>>();
-        var agentRunner = new AgentRunner(truthMapRepository, eventBroadcaster, runnerLogger);
-        var logger = Substitute.For<ILogger<SessionService>>();
-        var sut = new SessionService(
-            sessionRepository,
-            truthMapRepository,
-            transcriptRepository,
-            orchestrator,
-            agentRunner,
-            [],
-            eventBroadcaster,
-            logger);
-
-        var transcript = await sut.GetTranscriptAsync(sessionId, CancellationToken.None);
-
-        transcript.Should().BeEquivalentTo(expected);
-    }
-
-    private sealed class StaticAgent(string agentId, string message) : ICouncilAgent
-    {
-        public string AgentId { get; } = agentId;
-        public string ModelProvider => "test";
-
-        public Task<AgentResponse> RunAsync(AgentContext context, CancellationToken cancellationToken)
-        {
-            return Task.FromResult(new AgentResponse
-            {
-                Message = message,
-                Patch = null,
-                RawOutput = message
-            });
+            repo.GetAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>())
+                .Returns(Task.FromResult<SessionState?>(returns));
         }
-
-        public async IAsyncEnumerable<string> RunStreamingAsync(
-            AgentContext context,
-            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
-        {
-            await Task.Yield();
-            yield return message;
-        }
+        repo.CreateAsync(Arg.Any<SessionState>(), Arg.Any<CancellationToken>())
+            .Returns(call => Task.FromResult(call.ArgAt<SessionState>(0)));
+        repo.UpdateAsync(Arg.Any<SessionState>(), Arg.Any<CancellationToken>())
+            .Returns(Task.CompletedTask);
+        return repo;
     }
 
-    private sealed class FailingAgent(string agentId, string error) : ICouncilAgent
+    private static ITruthMapRepository StubTruthMapRepo(TruthMapModel? map = null)
     {
-        public string AgentId { get; } = agentId;
-        public string ModelProvider => "test";
-
-        public Task<AgentResponse> RunAsync(AgentContext context, CancellationToken cancellationToken)
-        {
-            throw new InvalidOperationException(error);
-        }
-
-        public async IAsyncEnumerable<string> RunStreamingAsync(
-            AgentContext context,
-            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
-        {
-            await Task.Yield();
-            throw new InvalidOperationException(error);
-#pragma warning disable CS0162
-            yield break;
-#pragma warning restore CS0162
-        }
+        var repo = Substitute.For<ITruthMapRepository>();
+        var m = map ?? EmptyMap();
+        repo.GetAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<TruthMapModel?>(m));
+        repo.SaveAsync(Arg.Any<TruthMapModel>(), Arg.Any<CancellationToken>())
+            .Returns(Task.CompletedTask);
+        return repo;
     }
 
-    private sealed class ContextCapturingAgent(string agentId, string message) : ICouncilAgent
+    private static ISnapshotStore StubSnapshotStore()
     {
-        public string AgentId { get; } = agentId;
-        public string ModelProvider => "test";
-        public AgentContext? LastContext { get; private set; }
+        var store = Substitute.For<ISnapshotStore>();
+        store.SaveAsync(Arg.Any<SessionSnapshot>(), Arg.Any<CancellationToken>())
+             .Returns(call => Task.FromResult(call.ArgAt<SessionSnapshot>(0)));
+        store.ListBySessionAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>())
+             .Returns(Task.FromResult<IReadOnlyList<SessionSnapshot>>([]));
+        return store;
+    }
 
-        public Task<AgentResponse> RunAsync(AgentContext context, CancellationToken cancellationToken)
-        {
-            LastContext = context;
-            return Task.FromResult(new AgentResponse
-            {
-                Message = message,
-                RawOutput = message
-            });
-        }
+    private static SessionService BuildService(
+        ISessionRepository? sessionRepo = null,
+        ITruthMapRepository? truthMapRepo = null,
+        ISnapshotStore? snapshotStore = null)
+    {
+        return new SessionService(
+            sessionRepo ?? StubSessionRepo(),
+            truthMapRepo ?? StubTruthMapRepo(),
+            snapshotStore ?? StubSnapshotStore());
+    }
 
-        public async IAsyncEnumerable<string> RunStreamingAsync(
-            AgentContext context,
-            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
-        {
-            await Task.Yield();
-            yield return message;
-        }
+    // ── CreateAsync ───────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task CreateAsync_PersistsSessionAndInitialisesIntakePhase()
+    {
+        var sessionRepo = StubSessionRepo();
+        var svc = BuildService(sessionRepo: sessionRepo);
+
+        var result = await svc.CreateAsync(frictionLevel: 50, researchToolsEnabled: false);
+
+        result.Phase.Should().Be(SessionPhase.Intake);
+        result.Status.Should().Be(SessionStatus.Active);
+        result.FrictionLevel.Should().Be(50);
+        await sessionRepo.Received(1).CreateAsync(Arg.Any<SessionState>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task CreateAsync_SeedsEmptyTruthMapInRepository()
+    {
+        var truthMapRepo = StubTruthMapRepo();
+        var svc = BuildService(truthMapRepo: truthMapRepo);
+
+        await svc.CreateAsync(50, false);
+
+        await truthMapRepo.Received(1).SaveAsync(
+            Arg.Is<TruthMapModel>(m => m.Version == 0 && m.Round == 0),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task CreateAsync_GeneratesUniqueSessionId()
+    {
+        var svc = BuildService();
+
+        var first = await svc.CreateAsync(50, false);
+        var second = await svc.CreateAsync(50, false);
+
+        first.SessionId.Should().NotBe(second.SessionId);
+    }
+
+    // ── GetAsync ──────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task GetAsync_ReturnsSessionStateFromRepository()
+    {
+        var expected = BuildState(phase: SessionPhase.Clarification);
+        var svc = BuildService(sessionRepo: StubSessionRepo(expected));
+
+        var result = await svc.GetAsync(SessionId);
+
+        result.Should().NotBeNull();
+        result!.Phase.Should().Be(SessionPhase.Clarification);
+    }
+
+    [Fact]
+    public async Task GetAsync_ReturnsNullWhenSessionNotFound()
+    {
+        var repo = Substitute.For<ISessionRepository>();
+        repo.GetAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<SessionState?>(null));
+
+        var svc = BuildService(sessionRepo: repo);
+        var result = await svc.GetAsync(Guid.NewGuid());
+
+        result.Should().BeNull();
+    }
+
+    // ── AdvancePhaseAsync ─────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task AdvancePhaseAsync_UpdatesPhaseAndPersists()
+    {
+        var state = BuildState(phase: SessionPhase.Clarification);
+        var sessionRepo = StubSessionRepo(state);
+        var svc = BuildService(sessionRepo: sessionRepo);
+
+        await svc.AdvancePhaseAsync(state, SessionPhase.AnalysisRound);
+
+        state.Phase.Should().Be(SessionPhase.AnalysisRound);
+        await sessionRepo.Received(1).UpdateAsync(state, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task AdvancePhaseAsync_BroadcastsRoundProgressEvent()
+    {
+        var state = BuildState(phase: SessionPhase.Clarification);
+        var broadcaster = Substitute.For<IEventBroadcaster>();
+        var svcWithBroadcaster = new SessionService(
+            StubSessionRepo(state),
+            StubTruthMapRepo(),
+            StubSnapshotStore(),
+            broadcaster);
+
+        await svcWithBroadcaster.AdvancePhaseAsync(state, SessionPhase.AnalysisRound);
+
+        await broadcaster.Received(1).SendRoundProgressAsync(
+            state.SessionId,
+            nameof(SessionPhase.AnalysisRound),
+            Arg.Any<string>(),
+            Arg.Any<CancellationToken>());
+    }
+
+    // ── RecordRoundSnapshotAsync ──────────────────────────────────────────────
+
+    [Fact]
+    public async Task RecordRoundSnapshotAsync_SavesSnapshotWithCorrectRound()
+    {
+        var state = BuildState(phase: SessionPhase.AnalysisRound);
+        state.CurrentRound = 2;
+        var snapshotStore = StubSnapshotStore();
+        var svc = BuildService(snapshotStore: snapshotStore);
+
+        await svc.RecordRoundSnapshotAsync(state);
+
+        await snapshotStore.Received(1).SaveAsync(
+            Arg.Is<SessionSnapshot>(s => s.Round == 2 && s.SessionId == state.SessionId),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task RecordRoundSnapshotAsync_SnapshotContainsCurrentTruthMap()
+    {
+        var map = EmptyMap() with { CoreIdea = "Test idea", Version = 5 };
+        var state = BuildState();
+        state.TruthMap = map;
+
+        SessionSnapshot? captured = null;
+        var snapshotStore = Substitute.For<ISnapshotStore>();
+        snapshotStore.SaveAsync(Arg.Do<SessionSnapshot>(s => captured = s), Arg.Any<CancellationToken>())
+                     .Returns(call => Task.FromResult(call.ArgAt<SessionSnapshot>(0)));
+
+        var svc = BuildService(snapshotStore: snapshotStore);
+        await svc.RecordRoundSnapshotAsync(state);
+
+        captured.Should().NotBeNull();
+        captured!.TruthMap.CoreIdea.Should().Be("Test idea");
+        captured.TruthMap.Version.Should().Be(5);
+    }
+
+    [Fact]
+    public async Task RecordRoundSnapshotAsync_SnapshotHasValidIntegrityHash()
+    {
+        var state = BuildState();
+
+        SessionSnapshot? captured = null;
+        var snapshotStore = Substitute.For<ISnapshotStore>();
+        snapshotStore.SaveAsync(Arg.Do<SessionSnapshot>(s => captured = s), Arg.Any<CancellationToken>())
+                     .Returns(call => Task.FromResult(call.ArgAt<SessionSnapshot>(0)));
+
+        var svc = BuildService(snapshotStore: snapshotStore);
+        await svc.RecordRoundSnapshotAsync(state);
+
+        captured!.IsIntact().Should().BeTrue();
+    }
+
+    // ── ListSnapshotsAsync ────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task ListSnapshotsAsync_DelegatesToSnapshotStore()
+    {
+        var snap1 = SessionSnapshot.Create(EmptyMap(), 1);
+        var snap2 = SessionSnapshot.Create(EmptyMap(), 2);
+
+        var snapshotStore = Substitute.For<ISnapshotStore>();
+        snapshotStore.ListBySessionAsync(SessionId, Arg.Any<CancellationToken>())
+                     .Returns(Task.FromResult<IReadOnlyList<SessionSnapshot>>([snap1, snap2]));
+
+        var svc = BuildService(snapshotStore: snapshotStore);
+
+        var result = await svc.ListSnapshotsAsync(SessionId);
+
+        result.Should().HaveCount(2);
     }
 }

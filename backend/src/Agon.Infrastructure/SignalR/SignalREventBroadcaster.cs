@@ -1,109 +1,106 @@
 using Agon.Application.Interfaces;
-using Agon.Application.Sessions;
-using Agon.Domain.Sessions;
-using Agon.Domain.TruthMap;
+using Agon.Domain.TruthMap.Entities;
 using Microsoft.AspNetCore.SignalR;
-using Microsoft.Extensions.Logging;
 
 namespace Agon.Infrastructure.SignalR;
 
-public class SignalREventBroadcaster(
-    IHubContext<DebateHub> hubContext,
-    ILogger<SignalREventBroadcaster> logger) : IEventBroadcaster
+/// <summary>
+/// SignalR-based implementation of IEventBroadcaster.
+/// Sends real-time events to frontend clients connected to the DebateHub.
+/// Uses session-based groups to target specific debate sessions.
+/// </summary>
+public sealed class SignalREventBroadcaster : IEventBroadcaster
 {
-    public async Task RoundProgressAsync(Guid sessionId, SessionPhase phase, CancellationToken cancellationToken)
-    {
-        try
-        {
-            await hubContext.Clients
-                .Group(DebateHub.SessionGroupName(sessionId))
-                .SendAsync("RoundProgress", new RoundProgressEvent(sessionId, phase.ToString()), cancellationToken);
+    private readonly IHubContext<DebateHub> _hubContext;
 
-            logger.LogInformation(
-                "Broadcast RoundProgress event. SessionId={SessionId} Phase={Phase}",
-                sessionId,
-                phase);
-        }
-        catch (Exception exception)
-        {
-            logger.LogError(
-                exception,
-                "Failed to broadcast RoundProgress event. SessionId={SessionId} Phase={Phase}",
-                sessionId,
-                phase);
-        }
+    public SignalREventBroadcaster(IHubContext<DebateHub> hubContext)
+    {
+        _hubContext = hubContext;
     }
 
-    public async Task TruthMapPatchedAsync(Guid sessionId, TruthMapPatch patch, int version, CancellationToken cancellationToken)
+    public async Task SendTokenAsync(
+        Guid sessionId,
+        string agentId,
+        string token,
+        bool isComplete,
+        CancellationToken cancellationToken = default)
     {
-        try
-        {
-            await hubContext.Clients
-                .Group(DebateHub.SessionGroupName(sessionId))
-                .SendAsync("TruthMapPatch", new TruthMapPatchEvent(sessionId, version, patch), cancellationToken);
-
-            logger.LogInformation(
-                "Broadcast TruthMapPatch event. SessionId={SessionId} Version={Version} Agent={Agent}",
-                sessionId,
-                version,
-                patch.Meta.Agent);
-        }
-        catch (Exception exception)
-        {
-            logger.LogError(
-                exception,
-                "Failed to broadcast TruthMapPatch event. SessionId={SessionId} Version={Version} Agent={Agent}",
-                sessionId,
-                version,
-                patch.Meta.Agent);
-        }
+        await _hubContext.Clients
+            .Group($"session:{sessionId}")
+            .SendAsync("AgentToken", agentId, token, isComplete, cancellationToken);
     }
 
-    public async Task TranscriptMessageAppendedAsync(Guid sessionId, TranscriptMessage message, CancellationToken cancellationToken)
+    public async Task SendRoundProgressAsync(
+        Guid sessionId,
+        string phase,
+        string status,
+        CancellationToken cancellationToken = default)
     {
-        try
-        {
-            await hubContext.Clients
-                .Group(DebateHub.SessionGroupName(sessionId))
-                .SendAsync("TranscriptMessage", new TranscriptMessageEvent(
-                    message.Id,
-                    message.Type.ToString().ToLowerInvariant(),
-                    message.AgentId,
-                    message.Content,
-                    message.Round,
-                    message.IsStreaming,
-                    message.CreatedAtUtc), cancellationToken);
-
-            logger.LogInformation(
-                "Broadcast TranscriptMessage event. SessionId={SessionId} MessageId={MessageId} Type={Type} AgentId={AgentId} Round={Round}",
-                sessionId,
-                message.Id,
-                message.Type,
-                message.AgentId ?? "system",
-                message.Round);
-        }
-        catch (Exception exception)
-        {
-            logger.LogError(
-                exception,
-                "Failed to broadcast TranscriptMessage event. SessionId={SessionId} MessageId={MessageId} Type={Type} AgentId={AgentId}",
-                sessionId,
-                message.Id,
-                message.Type,
-                message.AgentId ?? "system");
-        }
+        await _hubContext.Clients
+            .Group($"session:{sessionId}")
+            .SendAsync("RoundProgress", phase, status, cancellationToken);
     }
 
-    private sealed record RoundProgressEvent(Guid SessionId, string Phase);
+    public async Task SendTruthMapPatchAsync(
+        Guid sessionId,
+        object patch,
+        int version,
+        CancellationToken cancellationToken = default)
+    {
+        await _hubContext.Clients
+            .Group($"session:{sessionId}")
+            .SendAsync("TruthMapPatch", patch, version, cancellationToken);
+    }
 
-    private sealed record TruthMapPatchEvent(Guid SessionId, int Version, TruthMapPatch Patch);
+    public async Task SendConfidenceTransitionAsync(
+        Guid sessionId,
+        ConfidenceTransition transition,
+        CancellationToken cancellationToken = default)
+    {
+        await _hubContext.Clients
+            .Group($"session:{sessionId}")
+            .SendAsync("ConfidenceTransition", transition, cancellationToken);
+    }
 
-    private sealed record TranscriptMessageEvent(
-        Guid Id,
-        string Type,
-        string? AgentId,
-        string Content,
-        int Round,
-        bool IsStreaming,
-        DateTimeOffset CreatedAtUtc);
+    public async Task SendConvergenceUpdateAsync(
+        Guid sessionId,
+        object convergence,
+        CancellationToken cancellationToken = default)
+    {
+        await _hubContext.Clients
+            .Group($"session:{sessionId}")
+            .SendAsync("ConvergenceUpdate", convergence, cancellationToken);
+    }
+
+    public async Task SendPendingRevalidationAsync(
+        Guid sessionId,
+        IReadOnlyList<string> entityIds,
+        CancellationToken cancellationToken = default)
+    {
+        await _hubContext.Clients
+            .Group($"session:{sessionId}")
+            .SendAsync("PendingRevalidation", entityIds, cancellationToken);
+    }
+
+    public async Task SendBudgetWarningAsync(
+        Guid sessionId,
+        float percentUsed,
+        string message,
+        CancellationToken cancellationToken = default)
+    {
+        await _hubContext.Clients
+            .Group($"session:{sessionId}")
+            .SendAsync("BudgetWarning", percentUsed, message, cancellationToken);
+    }
+
+    public async Task SendArtifactReadyAsync(
+        Guid sessionId,
+        string artifactType,
+        int version,
+        CancellationToken cancellationToken = default)
+    {
+        await _hubContext.Clients
+            .Group($"session:{sessionId}")
+            .SendAsync("ArtifactReady", artifactType, version, cancellationToken);
+    }
 }

@@ -1,4 +1,5 @@
 using Agon.Domain.Engines;
+using Agon.Domain.TruthMap;
 using Agon.Domain.TruthMap.Entities;
 using FluentAssertions;
 
@@ -6,181 +7,236 @@ namespace Agon.Domain.Tests.Engines;
 
 public class ConfidenceDecayEngineTests
 {
-    private static readonly ConfidenceDecayConfig DefaultConfig = new();
+    private static readonly Guid SessionId = Guid.NewGuid();
 
-    // --- Decay on undefended challenge ---
-
-    [Fact]
-    public void ApplyDecay_ReducesConfidenceByDecayStep()
-    {
-        var claim = CreateClaim(confidence: 0.8f);
-
-        var result = ConfidenceDecayEngine.ApplyDecay(claim, DefaultConfig);
-
-        result.To.Should().BeApproximately(0.65f, 0.001f); // 0.8 - 0.15
-        result.Reason.Should().Be(ConfidenceTransitionReason.ChallengedNoDefense);
-    }
-
-    [Fact]
-    public void ApplyDecay_ClampsToZero()
-    {
-        var claim = CreateClaim(confidence: 0.1f);
-
-        var result = ConfidenceDecayEngine.ApplyDecay(claim, DefaultConfig);
-
-        result.To.Should().Be(0.0f);
-    }
-
-    [Fact]
-    public void ApplyDecay_FromZero_StaysAtZero()
-    {
-        var claim = CreateClaim(confidence: 0.0f);
-
-        var result = ConfidenceDecayEngine.ApplyDecay(claim, DefaultConfig);
-
-        result.To.Should().Be(0.0f);
-    }
-
-    // --- Boost on evidence ---
-
-    [Fact]
-    public void ApplyBoost_IncreasesConfidenceByBoostStep()
-    {
-        var claim = CreateClaim(confidence: 0.6f);
-
-        var result = ConfidenceDecayEngine.ApplyBoost(claim, DefaultConfig);
-
-        result.To.Should().BeApproximately(0.7f, 0.001f); // 0.6 + 0.10
-        result.Reason.Should().Be(ConfidenceTransitionReason.EvidenceCorroboration);
-    }
-
-    [Fact]
-    public void ApplyBoost_ClampsToOne()
-    {
-        var claim = CreateClaim(confidence: 0.95f);
-
-        var result = ConfidenceDecayEngine.ApplyBoost(claim, DefaultConfig);
-
-        result.To.Should().Be(1.0f);
-    }
-
-    [Fact]
-    public void ApplyBoost_FromOne_StaysAtOne()
-    {
-        var claim = CreateClaim(confidence: 1.0f);
-
-        var result = ConfidenceDecayEngine.ApplyBoost(claim, DefaultConfig);
-
-        result.To.Should().Be(1.0f);
-    }
-
-    // --- Contested threshold flagging ---
-
-    [Fact]
-    public void IsContested_ReturnsTrueWhenBelowThreshold()
-    {
-        var result = ConfidenceDecayEngine.IsContested(0.25f, DefaultConfig);
-
-        result.Should().BeTrue();
-    }
-
-    [Fact]
-    public void IsContested_ReturnsFalseWhenAboveThreshold()
-    {
-        var result = ConfidenceDecayEngine.IsContested(0.5f, DefaultConfig);
-
-        result.Should().BeFalse();
-    }
-
-    [Fact]
-    public void IsContested_ReturnsTrueWhenExactlyAtThreshold()
-    {
-        // At threshold (0.30) should be contested — it hasn't cleared the bar
-        var result = ConfidenceDecayEngine.IsContested(0.30f, DefaultConfig);
-
-        result.Should().BeTrue();
-    }
-
-    // --- Transition records ---
-
-    [Fact]
-    public void ApplyDecay_ReturnsCorrectTransition()
-    {
-        var claim = CreateClaim(id: "c1", confidence: 0.8f, round: 2);
-
-        var result = ConfidenceDecayEngine.ApplyDecay(claim, DefaultConfig);
-
-        result.ClaimId.Should().Be("c1");
-        result.From.Should().Be(0.8f);
-        result.Round.Should().Be(2);
-    }
-
-    [Fact]
-    public void ApplyBoost_ReturnsCorrectTransition()
-    {
-        var claim = CreateClaim(id: "c2", confidence: 0.5f, round: 1);
-
-        var result = ConfidenceDecayEngine.ApplyBoost(claim, DefaultConfig);
-
-        result.ClaimId.Should().Be("c2");
-        result.From.Should().Be(0.5f);
-        result.Round.Should().Be(1);
-    }
-
-    // --- Custom config ---
-
-    [Fact]
-    public void ApplyDecay_UsesCustomDecayStep()
-    {
-        var config = new ConfidenceDecayConfig { DecayStep = 0.25f };
-        var claim = CreateClaim(confidence: 0.8f);
-
-        var result = ConfidenceDecayEngine.ApplyDecay(claim, config);
-
-        result.To.Should().BeApproximately(0.55f, 0.001f);
-    }
-
-    [Fact]
-    public void ApplyBoost_UsesCustomBoostStep()
-    {
-        var config = new ConfidenceDecayConfig { BoostStep = 0.20f };
-        var claim = CreateClaim(confidence: 0.6f);
-
-        var result = ConfidenceDecayEngine.ApplyBoost(claim, config);
-
-        result.To.Should().BeApproximately(0.8f, 0.001f);
-    }
-
-    [Fact]
-    public void IsContested_UsesCustomThreshold()
-    {
-        var config = new ConfidenceDecayConfig { ContestedThreshold = 0.50f };
-
-        ConfidenceDecayEngine.IsContested(0.45f, config).Should().BeTrue();
-        ConfidenceDecayEngine.IsContested(0.55f, config).Should().BeFalse();
-    }
-
-    // --- Config defaults ---
-
-    [Fact]
-    public void DefaultConfig_HasCorrectValues()
-    {
-        var config = new ConfidenceDecayConfig();
-
-        config.DecayStep.Should().Be(0.15f);
-        config.BoostStep.Should().Be(0.10f);
-        config.ContestedThreshold.Should().Be(0.30f);
-    }
-
-    private static Claim CreateClaim(float confidence, string id = "c1", int round = 1)
-    {
-        return new Claim
+    private static ConfidenceDecayEngine BuildEngine(
+        float decayStep = 0.15f,
+        float boostStep = 0.10f,
+        float contestedThreshold = 0.30f) =>
+        new(new ConfidenceDecayConfig
         {
-            Id = id,
-            Agent = "product_strategist",
-            Round = round,
-            Text = "Test claim.",
-            Confidence = confidence
+            DecayStep = decayStep,
+            BoostStep = boostStep,
+            ContestedThreshold = contestedThreshold
+        });
+
+    private static Agon.Domain.TruthMap.TruthMap MapWithClaim(
+        string claimId,
+        string agentId,
+        float confidence,
+        ClaimStatus status = ClaimStatus.Active) =>
+        Agon.Domain.TruthMap.TruthMap.Empty(SessionId) with
+        {
+            Round = 2,
+            Claims = new List<Claim>
+            {
+                new(claimId, agentId, 1, "A claim", confidence, status, [], [])
+            }
         };
+
+    private static Agon.Domain.TruthMap.TruthMap MapWithClaimAndEvidence(
+        string claimId,
+        float confidence,
+        string evidenceId) =>
+        Agon.Domain.TruthMap.TruthMap.Empty(SessionId) with
+        {
+            Round = 2,
+            Claims = new List<Claim>
+            {
+                new(claimId, "gpt_agent", 1, "A claim", confidence, ClaimStatus.Active, [], [])
+            },
+            Evidence = new List<Evidence>
+            {
+                new(evidenceId, "Study", "https://example.com", DateTimeOffset.UtcNow,
+                    "Supports claim", Supports: new[] { claimId }, Contradicts: [])
+            }
+        };
+
+    // ── No activity — no change ───────────────────────────────────────────────
+
+    [Fact]
+    public void Apply_NoChallengeNoEvidence_ConfidenceUnchanged()
+    {
+        var map = MapWithClaim("c1", "gpt_agent", 0.80f);
+        var engine = BuildEngine();
+
+        var (updated, transitions) = engine.Apply(map, RoundActivity.Empty());
+
+        updated.Claims[0].Confidence.Should().BeApproximately(0.80f, 0.001f);
+        transitions.Should().BeEmpty();
+    }
+
+    // ── Rule 1: Decay on undefended challenge ─────────────────────────────────
+
+    [Fact]
+    public void Apply_ChallengedWithNoDefense_ConfidenceDecays()
+    {
+        var map = MapWithClaim("c1", "gpt_agent", 0.80f);
+        var activity = new RoundActivity(
+            ChallengedClaimIds: new HashSet<string> { "c1" },
+            DefendedClaimIds: new HashSet<string>(),
+            NewEvidenceIds: new HashSet<string>());
+
+        var (updated, transitions) = BuildEngine().Apply(map, activity);
+
+        updated.Claims[0].Confidence.Should().BeApproximately(0.65f, 0.001f);
+        transitions.Should().HaveCount(1);
+        transitions[0].Reason.Should().Be(ConfidenceTransitionReason.ChallengedNoDefense);
+        transitions[0].FromConfidence.Should().BeApproximately(0.80f, 0.001f);
+        transitions[0].ToConfidence.Should().BeApproximately(0.65f, 0.001f);
+    }
+
+    [Fact]
+    public void Apply_ChallengedButDefended_ConfidenceUnchanged()
+    {
+        var map = MapWithClaim("c1", "gpt_agent", 0.80f);
+        var activity = new RoundActivity(
+            ChallengedClaimIds: new HashSet<string> { "c1" },
+            DefendedClaimIds: new HashSet<string> { "c1" },  // defended
+            NewEvidenceIds: new HashSet<string>());
+
+        var (updated, transitions) = BuildEngine().Apply(map, activity);
+
+        updated.Claims[0].Confidence.Should().BeApproximately(0.80f, 0.001f);
+        transitions.Should().BeEmpty();
+    }
+
+    // ── Rule 2: Boost on supporting evidence ─────────────────────────────────
+
+    [Fact]
+    public void Apply_NewSupportingEvidence_ConfidenceBoosts()
+    {
+        var map = MapWithClaimAndEvidence("c1", 0.70f, "e1");
+        var activity = new RoundActivity(
+            ChallengedClaimIds: new HashSet<string>(),
+            DefendedClaimIds: new HashSet<string>(),
+            NewEvidenceIds: new HashSet<string> { "e1" });
+
+        var (updated, transitions) = BuildEngine().Apply(map, activity);
+
+        updated.Claims[0].Confidence.Should().BeApproximately(0.80f, 0.001f);
+        transitions[0].Reason.Should().Be(ConfidenceTransitionReason.EvidenceCorroboration);
+    }
+
+    // ── Evidence boost overrides unanswered challenge ─────────────────────────
+
+    [Fact]
+    public void Apply_ChallengedAndNewEvidence_EvidenceWins()
+    {
+        var map = MapWithClaimAndEvidence("c1", 0.70f, "e1");
+        var activity = new RoundActivity(
+            ChallengedClaimIds: new HashSet<string> { "c1" },
+            DefendedClaimIds: new HashSet<string>(),
+            NewEvidenceIds: new HashSet<string> { "e1" });
+
+        var (updated, transitions) = BuildEngine().Apply(map, activity);
+
+        // Decay then boost: 0.70 - 0.15 + 0.10 = 0.65 (evidence boost applied last)
+        updated.Claims[0].Confidence.Should().BeApproximately(0.65f, 0.001f);
+        transitions[0].Reason.Should().Be(ConfidenceTransitionReason.EvidenceCorroboration);
+    }
+
+    // ── Rule 3: Clamp at 0 and 1 ─────────────────────────────────────────────
+
+    [Fact]
+    public void Apply_Decay_ClampedAtZero()
+    {
+        var map = MapWithClaim("c1", "gpt_agent", 0.05f); // very low
+        var activity = new RoundActivity(
+            new HashSet<string> { "c1" }, new HashSet<string>(), new HashSet<string>());
+
+        var (updated, _) = BuildEngine(decayStep: 0.15f).Apply(map, activity);
+
+        updated.Claims[0].Confidence.Should().BeGreaterThanOrEqualTo(0f);
+        updated.Claims[0].Confidence.Should().BeApproximately(0f, 0.001f);
+    }
+
+    [Fact]
+    public void Apply_Boost_ClampedAtOne()
+    {
+        var map = MapWithClaimAndEvidence("c1", 0.98f, "e1"); // very high
+        var activity = new RoundActivity(
+            new HashSet<string>(), new HashSet<string>(), new HashSet<string> { "e1" });
+
+        var (updated, _) = BuildEngine(boostStep: 0.10f).Apply(map, activity);
+
+        updated.Claims[0].Confidence.Should().BeLessThanOrEqualTo(1f);
+        updated.Claims[0].Confidence.Should().BeApproximately(1f, 0.001f);
+    }
+
+    // ── Rule 4: Contested threshold ───────────────────────────────────────────
+
+    [Fact]
+    public void Apply_ConfidenceDropsBelowThreshold_MarksContested()
+    {
+        var map = MapWithClaim("c1", "gpt_agent", 0.40f); // will drop to 0.25 after decay
+        var activity = new RoundActivity(
+            new HashSet<string> { "c1" }, new HashSet<string>(), new HashSet<string>());
+
+        var (updated, _) = BuildEngine(decayStep: 0.15f, contestedThreshold: 0.30f)
+            .Apply(map, activity);
+
+        updated.Claims[0].Status.Should().Be(ClaimStatus.Contested);
+    }
+
+    [Fact]
+    public void Apply_ContestedClaimBoosts_RecoveredToActive()
+    {
+        var map = Agon.Domain.TruthMap.TruthMap.Empty(SessionId) with
+        {
+            Round = 2,
+            Claims = new List<Claim>
+            {
+                new("c1", "gpt_agent", 1, "A claim", 0.28f,
+                    ClaimStatus.Contested, // already contested
+                    [], [])
+            },
+            Evidence = new List<Evidence>
+            {
+                new("e1", "Study", "https://example.com", DateTimeOffset.UtcNow,
+                    "Supports", new[] { "c1" }, [])
+            }
+        };
+
+        var activity = new RoundActivity(
+            new HashSet<string>(), new HashSet<string>(), new HashSet<string> { "e1" });
+
+        var (updated, _) = BuildEngine(boostStep: 0.15f, contestedThreshold: 0.30f)
+            .Apply(map, activity);
+
+        // 0.28 + 0.15 = 0.43 — above threshold → recovered
+        updated.Claims[0].Confidence.Should().BeApproximately(0.43f, 0.001f);
+        updated.Claims[0].Status.Should().Be(ClaimStatus.Active);
+    }
+
+    // ── Transitions are appended to map history ───────────────────────────────
+
+    [Fact]
+    public void Apply_Transitions_AppendedToMap()
+    {
+        var map = MapWithClaim("c1", "gpt_agent", 0.80f);
+        var activity = new RoundActivity(
+            new HashSet<string> { "c1" }, new HashSet<string>(), new HashSet<string>());
+
+        var (updated, transitions) = BuildEngine().Apply(map, activity);
+
+        updated.ConfidenceTransitions.Should().HaveCount(1);
+        updated.ConfidenceTransitions[0].ClaimId.Should().Be("c1");
+        transitions.Should().HaveCount(1);
+    }
+
+    // ── Empty map ─────────────────────────────────────────────────────────────
+
+    [Fact]
+    public void Apply_EmptyMap_NoTransitions()
+    {
+        var map = Agon.Domain.TruthMap.TruthMap.Empty(SessionId);
+        var activity = new RoundActivity(
+            new HashSet<string> { "ghost" }, new HashSet<string>(), new HashSet<string>());
+
+        var (updated, transitions) = BuildEngine().Apply(map, activity);
+
+        updated.Claims.Should().BeEmpty();
+        transitions.Should().BeEmpty();
     }
 }

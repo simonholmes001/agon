@@ -3,12 +3,31 @@ using Agon.Domain.TruthMap;
 namespace Agon.Domain.Snapshots;
 
 /// <summary>
-/// Request to fork a session from a prior snapshot (Pause-and-Replay).
+/// A request to initiate a Pause-and-Replay branch from a historical snapshot.
+/// The forked session starts from the snapshot's Truth Map state, with
+/// <see cref="InitialPatches"/> applied before the debate resumes.
 /// </summary>
-public class ForkRequest
+public sealed record ForkRequest(
+    Guid ParentSessionId,
+    Guid SnapshotId,
+    IReadOnlyList<TruthMapPatch> InitialPatches,
+    string Label)
 {
-    public required Guid ParentSessionId { get; init; }
-    public required Guid SnapshotId { get; init; }
-    public required string Label { get; init; }
-    public List<TruthMapPatch> InitialPatches { get; init; } = new();
+    /// <summary>
+    /// Validates the fork request.
+    /// Returns an error message if invalid, null if valid.
+    /// </summary>
+    public string? Validate()
+    {
+        if (ParentSessionId == Guid.Empty)
+            return "ParentSessionId must not be empty.";
+
+        if (SnapshotId == Guid.Empty)
+            return "SnapshotId must not be empty.";
+
+        if (string.IsNullOrWhiteSpace(Label))
+            return "Label must not be empty — it describes the scenario being explored.";
+
+        return null;
+    }
 }

@@ -1,411 +1,372 @@
 using Agon.Application.Interfaces;
+using Agon.Application.Models;
 using Agon.Application.Orchestration;
-using Agon.Application.Sessions;
+using Agon.Domain.Agents;
 using Agon.Domain.Sessions;
 using Agon.Domain.TruthMap;
+using Agon.Domain.TruthMap.Entities;
 using FluentAssertions;
-using Microsoft.Extensions.Logging;
 using NSubstitute;
+using TruthMapModel = Agon.Domain.TruthMap.TruthMap;
 
 namespace Agon.Application.Tests.Orchestration;
 
 public class AgentRunnerTests
 {
-    [Fact]
-    public async Task ApplyValidatedPatchesAsync_AppliesInAlphabeticalAgentOrder()
+    private static readonly Guid SessionId = Guid.NewGuid();
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    private static TruthMapModel EmptyMap() => TruthMapModel.Empty(SessionId);
+
+    private static TruthMapPatch EmptyPatch(string agentId) =>
+        new([], new PatchMeta(agentId, 1, "Test patch", SessionId));
+
+    private static AgentResponse SuccessResponse(string agentId, TruthMapPatch? patch = null) =>
+        new(agentId, $"Message from {agentId}", patch ?? EmptyPatch(agentId), 100, false, null);
+
+    private static ICouncilAgent StubAgent(string agentId, AgentResponse response)
     {
-        var repository = Substitute.For<ITruthMapRepository>();
-        var eventBroadcaster = Substitute.For<IEventBroadcaster>();
-        var logger = Substitute.For<ILogger<AgentRunner>>();
-        var sut = new AgentRunner(repository, eventBroadcaster, logger);
-        var sessionId = Guid.NewGuid();
-
-        var responses = new List<AgentExecutionResult>
-        {
-            AgentExecutionResult.Success("technical_architect", CreatePatch("technical_architect")),
-            AgentExecutionResult.Success("contrarian", CreatePatch("contrarian")),
-            AgentExecutionResult.Success("product_strategist", CreatePatch("product_strategist"))
-        };
-
-        await sut.ApplyValidatedPatchesAsync(sessionId, responses, CancellationToken.None);
-
-        Received.InOrder(() =>
-        {
-            repository.ApplyPatchAsync(sessionId, Arg.Is<TruthMapPatch>(p => p.Meta.Agent == "contrarian"), Arg.Any<CancellationToken>());
-            repository.ApplyPatchAsync(sessionId, Arg.Is<TruthMapPatch>(p => p.Meta.Agent == "product_strategist"), Arg.Any<CancellationToken>());
-            repository.ApplyPatchAsync(sessionId, Arg.Is<TruthMapPatch>(p => p.Meta.Agent == "technical_architect"), Arg.Any<CancellationToken>());
-        });
+        var agent = Substitute.For<ICouncilAgent>();
+        agent.AgentId.Returns(agentId);
+        agent.ModelProvider.Returns("fake/model");
+        agent.RunAsync(Arg.Any<AgentContext>(), Arg.Any<CancellationToken>())
+             .Returns(Task.FromResult(response));
+        return agent;
     }
 
-    [Fact]
-    public async Task ApplyValidatedPatchesAsync_BroadcastsPatchEventsAfterApply()
+    private static ICouncilAgent TimingOutAgent(string agentId, int timeoutSeconds = 1)
     {
-        var repository = Substitute.For<ITruthMapRepository>();
-        var eventBroadcaster = Substitute.For<IEventBroadcaster>();
-        var logger = Substitute.For<ILogger<AgentRunner>>();
-        var sut = new AgentRunner(repository, eventBroadcaster, logger);
-        var sessionId = Guid.NewGuid();
-
-        var mapAfterPatch = TruthMapState.CreateNew(sessionId);
-        mapAfterPatch.IncrementVersion();
-        repository.GetAsync(sessionId, Arg.Any<CancellationToken>()).Returns(mapAfterPatch);
-
-        var responses = new List<AgentExecutionResult>
-        {
-            AgentExecutionResult.Success("contrarian", CreatePatch("contrarian")),
-            AgentExecutionResult.Success("product_strategist", CreatePatch("product_strategist"))
-        };
-
-        await sut.ApplyValidatedPatchesAsync(sessionId, responses, CancellationToken.None);
-
-        await eventBroadcaster.Received(2).TruthMapPatchedAsync(
-            sessionId,
-            Arg.Any<TruthMapPatch>(),
-            Arg.Is(1),
-            Arg.Any<CancellationToken>());
+        var agent = Substitute.For<ICouncilAgent>();
+        agent.AgentId.Returns(agentId);
+        agent.ModelProvider.Returns("fake/model");
+        agent.RunAsync(Arg.Any<AgentContext>(), Arg.Any<CancellationToken>())
+             .Returns(async call =>
+             {
+                 var ct = call.ArgAt<CancellationToken>(1);
+                 await Task.Delay(TimeSpan.FromSeconds(timeoutSeconds + 5), ct);
+                 return SuccessResponse(agentId);
+             });
+        return agent;
     }
 
-    [Fact]
-    public async Task ApplyValidatedPatchesAsync_SkipsTimedOutAndMissingPatchResults()
+    private static ITruthMapRepository StubRepo(TruthMapModel? returnMap = null)
     {
-        var repository = Substitute.For<ITruthMapRepository>();
-        var eventBroadcaster = Substitute.For<IEventBroadcaster>();
-        var logger = Substitute.For<ILogger<AgentRunner>>();
-        var sut = new AgentRunner(repository, eventBroadcaster, logger);
-        var sessionId = Guid.NewGuid();
-
-        var responses = new List<AgentExecutionResult>
-        {
-            AgentExecutionResult.Timeout("contrarian"),
-            AgentExecutionResult.Success("product_strategist", patch: null, message: "no patch"),
-            AgentExecutionResult.Success("technical_architect", CreatePatch("technical_architect"))
-        };
-
-        await sut.ApplyValidatedPatchesAsync(sessionId, responses, CancellationToken.None);
-
-        await repository.Received(1).ApplyPatchAsync(
-            sessionId,
-            Arg.Is<TruthMapPatch>(patch => patch.Meta.Agent == "technical_architect"),
-            Arg.Any<CancellationToken>());
-        await eventBroadcaster.Received(1).TruthMapPatchedAsync(
-            sessionId,
-            Arg.Is<TruthMapPatch>(patch => patch.Meta.Agent == "technical_architect"),
-            Arg.Any<int>(),
-            Arg.Any<CancellationToken>());
+        var repo = Substitute.For<ITruthMapRepository>();
+        var map = returnMap ?? EmptyMap();
+        repo.GetAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<TruthMapModel?>(map));
+        repo.ApplyPatchAsync(Arg.Any<Guid>(), Arg.Any<TruthMapPatch>(), Arg.Any<CancellationToken>())
+            .Returns(_ => Task.FromResult(map with { Version = map.Version + 1 }));
+        return repo;
     }
 
-    [Fact]
-    public async Task ApplyValidatedPatchesAsync_UsesVersionZero_WhenRepositoryReturnsNullMap()
+    private static IEventBroadcaster NullBroadcaster()
     {
-        var repository = Substitute.For<ITruthMapRepository>();
-        repository.GetAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>())
-            .Returns((TruthMapState?)null);
-        var eventBroadcaster = Substitute.For<IEventBroadcaster>();
-        var logger = Substitute.For<ILogger<AgentRunner>>();
-        var sut = new AgentRunner(repository, eventBroadcaster, logger);
-        var sessionId = Guid.NewGuid();
-        var patch = CreatePatch("contrarian");
-
-        await sut.ApplyValidatedPatchesAsync(
-            sessionId,
-            [AgentExecutionResult.Success("contrarian", patch)],
-            CancellationToken.None);
-
-        await eventBroadcaster.Received(1).TruthMapPatchedAsync(
-            sessionId,
-            patch,
-            0,
-            Arg.Any<CancellationToken>());
+        var b = Substitute.For<IEventBroadcaster>();
+        return b;
     }
 
-    [Fact]
-    public async Task RunRoundAsync_MarksTimedOutAgent()
+    private static AgentRunner BuildRunner(
+        IReadOnlyList<ICouncilAgent> agents,
+        ITruthMapRepository? repo = null,
+        IEventBroadcaster? broadcaster = null,
+        int agentTimeoutSeconds = 5)
     {
-        var repository = Substitute.For<ITruthMapRepository>();
-        var eventBroadcaster = Substitute.For<IEventBroadcaster>();
-        var logger = Substitute.For<ILogger<AgentRunner>>();
-        var sut = new AgentRunner(repository, eventBroadcaster, logger);
-        var slowAgent = new SlowAgent("contrarian");
-
-        var context = new AgentContext
-        {
-            SessionId = Guid.NewGuid(),
-            Round = 1,
-            Phase = SessionPhase.DebateRound1,
-            TruthMap = TruthMapState.CreateNew(Guid.NewGuid()),
-            FrictionLevel = 50
-        };
-
-        var results = await sut.RunRoundAsync([slowAgent], context, TimeSpan.FromMilliseconds(50), CancellationToken.None);
-
-        results.Should().ContainSingle();
-        results[0].TimedOut.Should().BeTrue();
-        results[0].Patch.Should().BeNull();
-    }
-
-    [Fact]
-    public async Task RunRoundAsync_ReturnsFailedResult_WhenAgentThrowsSynchronously()
-    {
-        var repository = Substitute.For<ITruthMapRepository>();
-        var eventBroadcaster = Substitute.For<IEventBroadcaster>();
-        var logger = Substitute.For<ILogger<AgentRunner>>();
-        var sut = new AgentRunner(repository, eventBroadcaster, logger);
-        var failingAgent = new SyncFailAgent("product_strategist");
-
-        var context = new AgentContext
-        {
-            SessionId = Guid.NewGuid(),
-            Round = 1,
-            Phase = SessionPhase.DebateRound1,
-            TruthMap = TruthMapState.CreateNew(Guid.NewGuid()),
-            FrictionLevel = 50
-        };
-
-        var results = await sut.RunRoundAsync([failingAgent], context, TimeSpan.FromSeconds(1), CancellationToken.None);
-
-        results.Should().ContainSingle();
-        results[0].TimedOut.Should().BeFalse();
-        results[0].Error.Should().Contain("missing api key");
-    }
-
-    [Fact]
-    public async Task RunRoundAsync_InvokesCompletionCallback_AsEachAgentFinishes()
-    {
-        var repository = Substitute.For<ITruthMapRepository>();
-        var eventBroadcaster = Substitute.For<IEventBroadcaster>();
-        var logger = Substitute.For<ILogger<AgentRunner>>();
-        var sut = new AgentRunner(repository, eventBroadcaster, logger);
-
-        var context = new AgentContext
-        {
-            SessionId = Guid.NewGuid(),
-            Round = 1,
-            Phase = SessionPhase.DebateRound1,
-            TruthMap = TruthMapState.CreateNew(Guid.NewGuid()),
-            FrictionLevel = 50
-        };
-
-        var completedAgentIds = new List<string>();
-        var agents = new ICouncilAgent[]
-        {
-            new DelayedSuccessAgent("slow-agent", TimeSpan.FromMilliseconds(80)),
-            new DelayedSuccessAgent("fast-agent", TimeSpan.FromMilliseconds(10))
-        };
-
-        await sut.RunRoundAsync(
+        return new AgentRunner(
             agents,
-            context,
-            timeoutPerAgent: TimeSpan.FromSeconds(2),
-            async (result, _) =>
+            repo ?? StubRepo(),
+            broadcaster ?? NullBroadcaster(),
+            agentTimeoutSeconds);
+    }
+
+    // ── Analysis Round — all agents called in parallel ────────────────────────
+
+    [Fact]
+    public async Task RunAnalysisRoundAsync_CallsAllCouncilAgents()
+    {
+        var claude = StubAgent(AgentId.ClaudeAgent, SuccessResponse(AgentId.ClaudeAgent));
+        var gemini = StubAgent(AgentId.GeminiAgent, SuccessResponse(AgentId.GeminiAgent));
+        var gpt = StubAgent(AgentId.GptAgent, SuccessResponse(AgentId.GptAgent));
+
+        var runner = BuildRunner([claude, gemini, gpt]);
+        var state = BuildSessionState();
+
+        await runner.RunAnalysisRoundAsync(state, CancellationToken.None);
+
+        await claude.Received(1).RunAsync(Arg.Any<AgentContext>(), Arg.Any<CancellationToken>());
+        await gemini.Received(1).RunAsync(Arg.Any<AgentContext>(), Arg.Any<CancellationToken>());
+        await gpt.Received(1).RunAsync(Arg.Any<AgentContext>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task RunAnalysisRoundAsync_AgentsReceiveAnalysisPhaseContext()
+    {
+        var capturedContexts = new List<AgentContext>();
+        var agent = Substitute.For<ICouncilAgent>();
+        agent.AgentId.Returns(AgentId.GptAgent);
+        agent.RunAsync(Arg.Do<AgentContext>(capturedContexts.Add), Arg.Any<CancellationToken>())
+             .Returns(Task.FromResult(SuccessResponse(AgentId.GptAgent)));
+
+        var runner = BuildRunner([agent]);
+        var state = BuildSessionState(frictionLevel: 40, round: 1);
+
+        await runner.RunAnalysisRoundAsync(state, CancellationToken.None);
+
+        capturedContexts.Should().HaveCount(1);
+        capturedContexts[0].Phase.Should().Be(SessionPhase.AnalysisRound);
+        capturedContexts[0].FrictionLevel.Should().Be(40);
+        capturedContexts[0].RoundNumber.Should().Be(1);
+        capturedContexts[0].CritiqueTargetMessages.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task RunAnalysisRoundAsync_ReturnsResponsesForAllAgents()
+    {
+        var claude = StubAgent(AgentId.ClaudeAgent, SuccessResponse(AgentId.ClaudeAgent));
+        var gemini = StubAgent(AgentId.GeminiAgent, SuccessResponse(AgentId.GeminiAgent));
+        var gpt = StubAgent(AgentId.GptAgent, SuccessResponse(AgentId.GptAgent));
+
+        var runner = BuildRunner([claude, gemini, gpt]);
+        var state = BuildSessionState();
+
+        var responses = await runner.RunAnalysisRoundAsync(state, CancellationToken.None);
+
+        responses.Should().HaveCount(3);
+        responses.Select(r => r.AgentId).Should().BeEquivalentTo(
+            [AgentId.ClaudeAgent, AgentId.GeminiAgent, AgentId.GptAgent]);
+    }
+
+    [Fact]
+    public async Task RunAnalysisRoundAsync_TimedOutAgent_ReturnsTimedOutResponse()
+    {
+        var claude = StubAgent(AgentId.ClaudeAgent, SuccessResponse(AgentId.ClaudeAgent));
+        var slowGpt = TimingOutAgent(AgentId.GptAgent, timeoutSeconds: 1);
+
+        var runner = BuildRunner([claude, slowGpt], agentTimeoutSeconds: 1);
+        var state = BuildSessionState();
+
+        var responses = await runner.RunAnalysisRoundAsync(state, CancellationToken.None);
+
+        var gptResponse = responses.Single(r => r.AgentId == AgentId.GptAgent);
+        gptResponse.TimedOut.Should().BeTrue();
+        var claudeResponse = responses.Single(r => r.AgentId == AgentId.ClaudeAgent);
+        claudeResponse.TimedOut.Should().BeFalse();
+    }
+
+    // ── Critique Round — cross-agent assignment ────────────────────────────────
+
+    [Fact]
+    public async Task RunCritiqueRoundAsync_EachAgentReceivesOtherTwoMessagesOnly()
+    {
+        var capturedContexts = new Dictionary<string, AgentContext>();
+
+        var claude = BuildCapturingAgent(AgentId.ClaudeAgent, capturedContexts);
+        var gemini = BuildCapturingAgent(AgentId.GeminiAgent, capturedContexts);
+        var gpt = BuildCapturingAgent(AgentId.GptAgent, capturedContexts);
+
+        var priorMessages = new Dictionary<string, string>
+        {
+            [AgentId.ClaudeAgent] = "Claude's analysis",
+            [AgentId.GeminiAgent] = "Gemini's analysis",
+            [AgentId.GptAgent] = "GPT's analysis"
+        };
+
+        var runner = BuildRunner([claude, gemini, gpt]);
+        var state = BuildSessionState();
+        state.LastRoundMessages.Clear();
+        foreach (var (k, v) in priorMessages) state.LastRoundMessages[k] = v;
+
+        await runner.RunCritiqueRoundAsync(state, CancellationToken.None);
+
+        // Claude critiques Gemini + GPT — NOT itself
+        capturedContexts[AgentId.ClaudeAgent].CritiqueTargetMessages
+            .Select(m => m.AgentId)
+            .Should().BeEquivalentTo([AgentId.GeminiAgent, AgentId.GptAgent]);
+
+        // Gemini critiques Claude + GPT
+        capturedContexts[AgentId.GeminiAgent].CritiqueTargetMessages
+            .Select(m => m.AgentId)
+            .Should().BeEquivalentTo([AgentId.ClaudeAgent, AgentId.GptAgent]);
+
+        // GPT critiques Claude + Gemini
+        capturedContexts[AgentId.GptAgent].CritiqueTargetMessages
+            .Select(m => m.AgentId)
+            .Should().BeEquivalentTo([AgentId.ClaudeAgent, AgentId.GeminiAgent]);
+    }
+
+    [Fact]
+    public async Task RunCritiqueRoundAsync_AgentsReceiveCritiquePhaseContext()
+    {
+        var capturedContexts = new Dictionary<string, AgentContext>();
+        var gpt = BuildCapturingAgent(AgentId.GptAgent, capturedContexts);
+        var claude = BuildCapturingAgent(AgentId.ClaudeAgent, capturedContexts);
+
+        var runner = BuildRunner([gpt, claude]);
+        var state = BuildSessionState(frictionLevel: 80, round: 2);
+        state.LastRoundMessages[AgentId.GptAgent] = "GPT msg";
+        state.LastRoundMessages[AgentId.ClaudeAgent] = "Claude msg";
+
+        await runner.RunCritiqueRoundAsync(state, CancellationToken.None);
+
+        capturedContexts[AgentId.GptAgent].Phase.Should().Be(SessionPhase.Critique);
+        capturedContexts[AgentId.GptAgent].FrictionLevel.Should().Be(80);
+        capturedContexts[AgentId.GptAgent].RoundNumber.Should().Be(2);
+    }
+
+    // ── Patch application — deterministic order ───────────────────────────────
+
+    [Fact]
+    public async Task RunAnalysisRoundAsync_PatchesAppliedInAlphabeticalAgentIdOrder()
+    {
+        var appliedOrder = new List<string>();
+        var repo = Substitute.For<ITruthMapRepository>();
+        var map = EmptyMap();
+        repo.GetAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<TruthMapModel?>(map));
+        repo.ApplyPatchAsync(Arg.Any<Guid>(), Arg.Any<TruthMapPatch>(), Arg.Any<CancellationToken>())
+            .Returns(call =>
             {
-                completedAgentIds.Add(result.AgentId);
-                await Task.CompletedTask;
-            },
-            CancellationToken.None);
+                var patch = call.ArgAt<TruthMapPatch>(1);
+                appliedOrder.Add(patch.Meta.Agent);
+                return Task.FromResult(map with { Version = map.Version + 1 });
+            });
 
-        completedAgentIds.Should().ContainInOrder("fast-agent", "slow-agent");
+        var claude = StubAgent(AgentId.ClaudeAgent, SuccessResponse(AgentId.ClaudeAgent));
+        var gemini = StubAgent(AgentId.GeminiAgent, SuccessResponse(AgentId.GeminiAgent));
+        var gpt = StubAgent(AgentId.GptAgent, SuccessResponse(AgentId.GptAgent));
+
+        var runner = BuildRunner([gpt, claude, gemini], repo); // intentionally shuffled input
+        var state = BuildSessionState();
+
+        await runner.RunAnalysisRoundAsync(state, CancellationToken.None);
+
+        // Must be alphabetical regardless of input order
+        appliedOrder.Should().Equal(AgentId.ClaudeAgent, AgentId.GeminiAgent, AgentId.GptAgent);
     }
 
     [Fact]
-    public async Task RunRoundAsync_Continues_WhenCompletionCallbackThrows()
+    public async Task RunAnalysisRoundAsync_InvalidPatch_IsRejectedAndNotApplied()
     {
-        var repository = Substitute.For<ITruthMapRepository>();
-        var eventBroadcaster = Substitute.For<IEventBroadcaster>();
-        var logger = Substitute.For<ILogger<AgentRunner>>();
-        var sut = new AgentRunner(repository, eventBroadcaster, logger);
+        // A patch that references a non-existent entity (rule 1 violation)
+        var badPatch = new TruthMapPatch(
+            [new PatchOperation(PatchOp.Replace, "/claims/nonexistent-id/status", "contested")],
+            new PatchMeta(AgentId.GptAgent, 1, "Bad patch", SessionId));
 
-        var context = new AgentContext
-        {
-            SessionId = Guid.NewGuid(),
-            Round = 1,
-            Phase = SessionPhase.DebateRound1,
-            TruthMap = TruthMapState.CreateNew(Guid.NewGuid()),
-            FrictionLevel = 50
-        };
+        var gpt = StubAgent(AgentId.GptAgent, new AgentResponse(
+            AgentId.GptAgent, "Message", badPatch, 100, false, null));
 
-        var results = await sut.RunRoundAsync(
-            [new DelayedSuccessAgent("agent-1", TimeSpan.FromMilliseconds(5))],
-            context,
-            timeoutPerAgent: TimeSpan.FromSeconds(2),
-            (_, _) => throw new InvalidOperationException("callback failed"),
-            CancellationToken.None);
+        var repo = Substitute.For<ITruthMapRepository>();
+        var map = EmptyMap();
+        repo.GetAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<TruthMapModel?>(map));
 
-        results.Should().ContainSingle();
-        results[0].Error.Should().BeNull();
+        var runner = BuildRunner([gpt], repo);
+        var state = BuildSessionState();
+
+        // Should not throw — bad patches are logged and skipped
+        var responses = await runner.RunAnalysisRoundAsync(state, CancellationToken.None);
+
+        await repo.DidNotReceive().ApplyPatchAsync(
+            Arg.Any<Guid>(), Arg.Any<TruthMapPatch>(), Arg.Any<CancellationToken>());
+        responses.Should().HaveCount(1);
     }
 
     [Fact]
-    public async Task RunRoundAsync_ReturnsFailedResult_WhenAgentThrowsAsynchronously()
+    public async Task RunAnalysisRoundAsync_NullPatch_DoesNotCallApplyPatch()
     {
-        var repository = Substitute.For<ITruthMapRepository>();
-        var eventBroadcaster = Substitute.For<IEventBroadcaster>();
-        var logger = Substitute.For<ILogger<AgentRunner>>();
-        var sut = new AgentRunner(repository, eventBroadcaster, logger);
+        var responseWithNoPatch = new AgentResponse(
+            AgentId.GptAgent, "Message only", null, 100, false, null);
 
-        var context = new AgentContext
-        {
-            SessionId = Guid.NewGuid(),
-            Round = 1,
-            Phase = SessionPhase.DebateRound1,
-            TruthMap = TruthMapState.CreateNew(Guid.NewGuid()),
-            FrictionLevel = 50
-        };
+        var gpt = StubAgent(AgentId.GptAgent, responseWithNoPatch);
+        var repo = Substitute.For<ITruthMapRepository>();
+        var map = EmptyMap();
+        repo.GetAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<TruthMapModel?>(map));
 
-        var results = await sut.RunRoundAsync(
-            [new AsyncFailAgent("research_librarian", "upstream 500")],
-            context,
-            TimeSpan.FromSeconds(1),
-            CancellationToken.None);
+        var runner = BuildRunner([gpt], repo);
+        var state = BuildSessionState();
 
-        results.Should().ContainSingle();
-        results[0].TimedOut.Should().BeFalse();
-        results[0].Error.Should().Contain("upstream 500");
+        await runner.RunAnalysisRoundAsync(state, CancellationToken.None);
+
+        await repo.DidNotReceive().ApplyPatchAsync(
+            Arg.Any<Guid>(), Arg.Any<TruthMapPatch>(), Arg.Any<CancellationToken>());
+    }
+
+    // ── Targeted loop ─────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task RunTargetedLoopAsync_AgentsReceiveTargetedLoopPhaseContext()
+    {
+        var capturedContexts = new List<AgentContext>();
+        var agent = Substitute.For<ICouncilAgent>();
+        agent.AgentId.Returns(AgentId.GptAgent);
+        agent.RunAsync(Arg.Do<AgentContext>(capturedContexts.Add), Arg.Any<CancellationToken>())
+             .Returns(Task.FromResult(SuccessResponse(AgentId.GptAgent)));
+
+        var runner = BuildRunner([agent]);
+        var state = BuildSessionState();
+        const string directive = "Revisit feasibility claims.";
+
+        await runner.RunTargetedLoopAsync(state, [AgentId.GptAgent], directive, CancellationToken.None);
+
+        capturedContexts.Should().HaveCount(1);
+        capturedContexts[0].Phase.Should().Be(SessionPhase.TargetedLoop);
+        capturedContexts[0].MicroDirective.Should().Be(directive);
     }
 
     [Fact]
-    public async Task RunRoundAsync_ReturnsTimeout_WhenAgentThrowsOperationCanceledWithoutCallerCancellation()
+    public async Task RunTargetedLoopAsync_OnlyTargetedAgentsAreCalled()
     {
-        var repository = Substitute.For<ITruthMapRepository>();
-        var eventBroadcaster = Substitute.For<IEventBroadcaster>();
-        var logger = Substitute.For<ILogger<AgentRunner>>();
-        var sut = new AgentRunner(repository, eventBroadcaster, logger);
+        var claude = StubAgent(AgentId.ClaudeAgent, SuccessResponse(AgentId.ClaudeAgent));
+        var gpt = StubAgent(AgentId.GptAgent, SuccessResponse(AgentId.GptAgent));
 
-        var context = new AgentContext
-        {
-            SessionId = Guid.NewGuid(),
-            Round = 1,
-            Phase = SessionPhase.DebateRound1,
-            TruthMap = TruthMapState.CreateNew(Guid.NewGuid()),
-            FrictionLevel = 50
-        };
+        var runner = BuildRunner([claude, gpt]);
+        var state = BuildSessionState();
 
-        var results = await sut.RunRoundAsync(
-            [new CanceledAgent("contrarian")],
-            context,
-            TimeSpan.FromSeconds(1),
-            CancellationToken.None);
+        await runner.RunTargetedLoopAsync(
+            state, [AgentId.ClaudeAgent], "Only Claude targeted.", CancellationToken.None);
 
-        results.Should().ContainSingle();
-        results[0].TimedOut.Should().BeTrue();
-        results[0].Error.Should().Be("timeout");
+        await claude.Received(1).RunAsync(Arg.Any<AgentContext>(), Arg.Any<CancellationToken>());
+        await gpt.DidNotReceive().RunAsync(Arg.Any<AgentContext>(), Arg.Any<CancellationToken>());
     }
 
-    private static TruthMapPatch CreatePatch(string agent)
+    // ── Budget tracking ───────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task RunAnalysisRoundAsync_UpdatesTokensUsedOnState()
     {
-        return new TruthMapPatch
-        {
-            Ops = new List<PatchOperation>(),
-            Meta = new PatchMeta
-            {
-                Agent = agent,
-                Round = 1,
-                Reason = "test",
-                SessionId = Guid.NewGuid()
-            }
-        };
+        var claude = StubAgent(AgentId.ClaudeAgent,
+            new AgentResponse(AgentId.ClaudeAgent, "Msg", EmptyPatch(AgentId.ClaudeAgent), 250, false, null));
+        var gpt = StubAgent(AgentId.GptAgent,
+            new AgentResponse(AgentId.GptAgent, "Msg", EmptyPatch(AgentId.GptAgent), 150, false, null));
+
+        var runner = BuildRunner([claude, gpt]);
+        var state = BuildSessionState();
+        state.TokensUsed = 1000;
+
+        await runner.RunAnalysisRoundAsync(state, CancellationToken.None);
+
+        state.TokensUsed.Should().Be(1400); // 1000 + 250 + 150
     }
 
-    private sealed class SlowAgent(string agentId) : ICouncilAgent
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    private static SessionState BuildSessionState(int frictionLevel = 50, int round = 1)
     {
-        public string AgentId { get; } = agentId;
-        public string ModelProvider => "fake";
-
-        public async Task<AgentResponse> RunAsync(AgentContext context, CancellationToken cancellationToken)
-        {
-            await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken);
-            return new AgentResponse { Message = "done" };
-        }
-
-        public async IAsyncEnumerable<string> RunStreamingAsync(AgentContext context, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
-        {
-            await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken);
-            yield return "done";
-        }
+        var state = SessionState.Create(SessionId, frictionLevel, false, EmptyMap());
+        state.CurrentRound = round;
+        return state;
     }
 
-    private sealed class SyncFailAgent(string agentId) : ICouncilAgent
+    private static ICouncilAgent BuildCapturingAgent(
+        string agentId,
+        Dictionary<string, AgentContext> captured)
     {
-        public string AgentId { get; } = agentId;
-        public string ModelProvider => "fake";
-
-        public Task<AgentResponse> RunAsync(AgentContext context, CancellationToken cancellationToken)
-        {
-            throw new InvalidOperationException("missing api key");
-        }
-
-        public async IAsyncEnumerable<string> RunStreamingAsync(AgentContext context, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
-        {
-            await Task.Yield();
-            throw new InvalidOperationException("missing api key");
-#pragma warning disable CS0162
-            yield break;
-#pragma warning restore CS0162
-        }
-    }
-
-    private sealed class DelayedSuccessAgent : ICouncilAgent
-    {
-        private readonly string agentId;
-        private readonly TimeSpan delay;
-
-        public DelayedSuccessAgent(string agentId, TimeSpan delay)
-        {
-            this.agentId = agentId;
-            this.delay = delay;
-        }
-
-        public string AgentId => agentId;
-        public string ModelProvider => "fake";
-
-        public async Task<AgentResponse> RunAsync(AgentContext context, CancellationToken cancellationToken)
-        {
-            await Task.Delay(delay, cancellationToken);
-            return new AgentResponse { Message = $"done-{agentId}" };
-        }
-
-        public async IAsyncEnumerable<string> RunStreamingAsync(AgentContext context, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
-        {
-            await Task.Delay(delay, cancellationToken);
-            yield return $"done-{agentId}";
-        }
-    }
-
-    private sealed class AsyncFailAgent(string agentId, string error) : ICouncilAgent
-    {
-        public string AgentId { get; } = agentId;
-        public string ModelProvider => "fake";
-
-        public async Task<AgentResponse> RunAsync(AgentContext context, CancellationToken cancellationToken)
-        {
-            await Task.Yield();
-            throw new InvalidOperationException(error);
-        }
-
-        public async IAsyncEnumerable<string> RunStreamingAsync(AgentContext context, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
-        {
-            await Task.Yield();
-            throw new InvalidOperationException(error);
-#pragma warning disable CS0162
-            yield break;
-#pragma warning restore CS0162
-        }
-    }
-
-    private sealed class CanceledAgent(string agentId) : ICouncilAgent
-    {
-        public string AgentId { get; } = agentId;
-        public string ModelProvider => "fake";
-
-        public Task<AgentResponse> RunAsync(AgentContext context, CancellationToken cancellationToken) =>
-            Task.FromCanceled<AgentResponse>(new CancellationToken(canceled: true));
-
-        public async IAsyncEnumerable<string> RunStreamingAsync(AgentContext context, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
-        {
-            await Task.Yield();
-            throw new OperationCanceledException();
-#pragma warning disable CS0162
-            yield break;
-#pragma warning restore CS0162
-        }
+        var agent = Substitute.For<ICouncilAgent>();
+        agent.AgentId.Returns(agentId);
+        agent.RunAsync(Arg.Do<AgentContext>(ctx => captured[agentId] = ctx), Arg.Any<CancellationToken>())
+             .Returns(Task.FromResult(SuccessResponse(agentId)));
+        return agent;
     }
 }

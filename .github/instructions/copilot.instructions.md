@@ -109,6 +109,33 @@ Always consult the relevant provider documentation when building or modifying ag
 
 ## Testing Requirements
 
+**Minimum code coverage:** 80% line coverage across all projects (Domain, Application, Infrastructure, API). This is non-negotiable.
+
+**How to check coverage:**
+```bash
+# Run tests with coverage collection
+dotnet test --collect:"XPlat Code Coverage" --results-directory ./TestResults
+
+# Generate human-readable report
+reportgenerator -reports:"./TestResults/*/coverage.cobertura.xml" \
+  -targetdir:"./TestResults/coverage-report" \
+  -reporttypes:"Html;TextSummary"
+
+# View summary
+cat ./TestResults/coverage-report/Summary.txt
+```
+
+**Current coverage status (as of March 7, 2026):**
+- Overall: 76% line coverage (1400/1841 covered lines)
+- Domain: 87.5% ✅
+- Application: 85.3% ✅
+- Infrastructure: 74.6% ⚠️ (below target - needs improvement)
+- API: 49.4% ❌ (below target - needs significant improvement)
+
+**Coverage improvement priorities:**
+1. API layer (currently 49.4%) - add tests for Program.cs startup configuration and middleware
+2. Infrastructure layer (currently 74.6%) - add integration tests for MafCouncilAgent, DebateHub, AgentResponseParserAdapter
+
 **Unit tests** (must have, no exceptions):
 - `PatchValidator` — schema validation, conflict detection, cross-agent text modification prevention
 - `RoundPolicy` — loop termination conditions, budget exhaustion, early convergence

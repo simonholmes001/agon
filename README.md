@@ -20,186 +20,38 @@ Unlike a single-prompt AI chat, Agon maintains a **living Truth Map**: a structu
 
 ---
 
-## Key Concepts
+## Project Overview
 
-| Concept | Description |
-|---|---|
-| **Truth Map** | Shared state graph (claims, assumptions, risks, decisions, evidence) — the single source of truth for the session. Agents propose patches; the Orchestrator validates and applies them. |
-| **Council** | Seven specialist agents: Socratic Clarifier, Framing Challenger, Product Strategist, Technical Architect, Contrarian / Red Team, Research Librarian, Synthesis + Validation. |
-| **Multi-Model** | Agents use multiple providers (GPT-5.2, Gemini 3, Claude Opus 4.6). Technical Architect is temporarily mapped to GPT-5.2 while DeepSeek billing is paused. |
-| **Friction Slider** | User-controlled dial (0–100) that modulates agent tone *and* convergence thresholds — from brainstorm (low friction) to adversarial red-team (high friction). |
-| **Bounded Debate** | Hard-capped rounds and token budgets. Sessions always terminate. Degradation is graceful and surfaced, never silent. |
-| **HITL** | Human-in-the-loop: pause, challenge a claim, force a deep dive, change a constraint mid-session — with full change propagation. |
-| **Pause-and-Replay** | Fork a session from any prior snapshot, change a constraint, and re-run the debate to compare scenarios. |
+Agon is an **agentic idea analysis workspace** — a "living strategy room" where a user brings an idea and a council of specialist AI agents debates, challenges, and develops it into a decision-grade output pack.
+
+Unlike a linear "input → debate → output" pipeline, Agon maintains a continuously updated **Global Workspace** ("Truth Map") that all agents read from and write to. If a constraint changes mid-session, the system updates the state and agents immediately re-evaluate their prior claims.
 
 ---
 
-## Architecture
+## Repository Structure
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│  Frontend — Next.js 16 (App Router) + Tailwind v4 + shadcn/ui  │
-│  Real-time streaming via SignalR                                │
-└──────────────────────────┬──────────────────────────────────────┘
-                           │ HTTPS + WebSockets
-┌──────────────────────────▼──────────────────────────────────────┐
-│  Agon.Api — ASP.NET Core host (thin — routing + DI only)       │
-├─────────────────────────────────────────────────────────────────┤
-│  Agon.Application — Orchestrator (deterministic state machine)  │
-│  AgentRunner · SessionService · SnapshotService                 │
-│  ICouncilAgent · ITruthMapRepository · IEventBroadcaster        │
-├─────────────────────────────────────────────────────────────────┤
-│  Agon.Domain — Pure domain, ZERO framework dependencies         │
-│  TruthMap · PatchValidator · RoundPolicy · ConvergenceEvaluator │
-│  ConfidenceDecayEngine · ChangeImpactCalculator                 │
-│  AgentSystemPrompts · Entity types (Claims, Risks, etc.)        │
-├─────────────────────────────────────────────────────────────────┤
-│  Agon.Infrastructure — MAF agents · DB · SignalR · Blob         │
-│  MafCouncilAgent (wraps ChatClientAgent via IChatClient)        │
-│  FakeCouncilAgent (canned responses for tests)                  │
-└──────┬───────────┬───────────┬───────────┬──────────────────────┘
-       │           │           │           │
-   PostgreSQL   pgvector     Redis    Blob Storage
-   (sessions,   (semantic   (round    (exports,
-    Truth Map,   memory)     state,    snapshots)
-    artifacts)               locks)
-```
-
-### Clean Architecture Layers
-
-Dependencies point **inward** — Domain has zero framework dependencies, Application defines interfaces, Infrastructure implements them.
-
-```
-Agon.Api → Agon.Application, Agon.Infrastructure
-Agon.Infrastructure → Agon.Application
-Agon.Application → Agon.Domain
-Agon.Domain → (nothing)
-```
-
-### MAF Integration Strategy
-
-[Microsoft Agent Framework](https://github.com/microsoft/agent-framework) (`1.0.0-rc1`) is used for the **agent call layer only** — wrapping LLM providers behind `IChatClient` from `Microsoft.Extensions.AI`. MAF's workflow engine (`AgentWorkflowBuilder`, `GroupChatManager`) is **not used** for orchestration because:
-
-1. **Patch-based communication** — Agon agents communicate via structured `TruthMapPatch` operations to a shared Truth Map, not MAF's `ChatMessage` lists.
-2. **Conditional phase transitions** — Our session state machine (INTAKE → CLARIFICATION → DEBATE → SYNTHESIS → DELIVER) has conditional branches, HITL interrupts, and micro-rounds that don't map to `BuildSequential`/`BuildConcurrent`.
-3. **Deterministic orchestration** — MAF's `GroupChatManager` uses an LLM to route between agents, violating our hard rule that LLM outputs cannot trigger state transitions.
-4. **Post-response processing** — After each agent call, the Orchestrator must validate patches, run the Confidence Decay Engine, update convergence scores, and check budget — none of which are MAF primitives.
-
-The custom `Orchestrator` in the Application layer handles all session policy. MAF handles the "how" (making LLM calls); our Orchestrator handles the "what and when" (state machine logic).
-
-Full architecture specification: [`.github/instructions/architecture.instructions.md`](.github/instructions/architecture.instructions.md)
-Full implementation guide: [`.github/instructions/backend-implementation.instructions.md`](.github/instructions/backend-implementation.instructions.md)
-
----
-
-## Tech Stack
-
-### Frontend
-
-| Technology | Purpose |
-|---|---|
-| [Next.js 16](https://nextjs.org) (App Router) | React framework, server components, file-system routing |
-| [React 19](https://react.dev) | UI library |
-| [Tailwind CSS v4](https://tailwindcss.com) | Utility-first styling |
-| [shadcn/ui](https://ui.shadcn.com) | Accessible component primitives (Radix UI) |
-| [Framer Motion](https://www.framer.com/motion/) | Animations |
-| [Lucide React](https://lucide.dev) | Icons |
-| [Vitest](https://vitest.dev) + [Testing Library](https://testing-library.com) | Unit and component tests |
-
-### Backend
-
-| Technology | Purpose |
-|---|---|
-| [ASP.NET Core (.NET 9)](https://dotnet.microsoft.com) | API host and composition root |
-| [Microsoft Agent Framework](https://github.com/microsoft/agent-framework) `1.0.0-rc1` | Agent call layer — `ChatClientAgent`, `IChatClient`, provider adapters |
-| [`IChatClient`](https://learn.microsoft.com/dotnet/api/microsoft.extensions.ai.ichatclient) (`Microsoft.Extensions.AI`) | Provider-agnostic LLM interface (replaces spec's `IChatModelClient`) |
-| `Microsoft.Agents.AI.OpenAI` | OpenAI adapter (GPT-5.2 Thinking) |
-| `Microsoft.Agents.AI.Anthropic` | Anthropic adapter (Claude Opus 4.6) |
-| [PostgreSQL](https://www.postgresql.org) + [pgvector](https://github.com/pgvector/pgvector) | Sessions, Truth Map (JSONB + normalised entities), semantic memory |
-| [Redis](https://redis.io) | Ephemeral round state, locks, rate limits |
-| [SignalR](https://learn.microsoft.com/aspnet/core/signalr) | Real-time streaming (tokens, patches, convergence) |
-| [xUnit](https://xunit.net) + [FluentAssertions](https://fluentassertions.com) | Testing framework |
-
-### Model Providers
-
-| Agent | Primary Model | Provider |
-|---|---|---|
-| Socratic Clarifier | GPT-5.2 Thinking | OpenAI |
-| Framing Challenger | Gemini 3 (thinking: high) | Google |
-| Product Strategist | Claude Opus 4.6 | Anthropic |
-| Technical Architect | GPT-5.2 Thinking (temporary override) | OpenAI |
-| Contrarian / Red Team | Gemini 3 (thinking: high) | Google |
-| Research Librarian | GPT-5.2 Thinking | OpenAI |
-| Synthesis + Validation | GPT-5.2 Thinking | OpenAI |
-
-All providers are accessed via `IChatClient` — interchangeable behind the interface. DeepSeek wiring remains in the codebase and can be restored once billing is enabled.
-
----
-
-## Project Structure
-
-```
-agon/
-├── .github/
-│   └── instructions/               # System specs and coding rules
-│       ├── architecture.instructions.md
-│       ├── backend-implementation.instructions.md
-│       ├── backlog.instructions.md
-│       ├── copilot.instructions.md
-│       ├── prd-agon-core.instructions.md
-│       ├── prompt-engineering-config.instructions.md
-│       ├── round-policy.instructions.md
-│       └── schemas.instructions.md
-├── backend/                         # .NET Clean Architecture
-│   ├── Agon.sln
+Agon/
+├── backend/              # .NET 9 backend
 │   ├── src/
-│   │   ├── Agon.Domain/            # Pure domain — ZERO framework deps
-│   │   │   ├── Agents/             # AgentId, AgentSystemPrompts
-│   │   │   ├── TruthMap/           # TruthMap, PatchValidator, entities
-│   │   │   ├── Sessions/           # SessionPhase, RoundPolicy, ConvergenceEvaluator
-│   │   │   ├── Engines/            # ConfidenceDecayEngine, ChangeImpactCalculator
-│   │   │   └── Snapshots/          # SessionSnapshot, ForkRequest
-│   │   ├── Agon.Application/       # Orchestration use-cases + interfaces
-│   │   │   ├── Orchestration/      # Orchestrator (deterministic transitions), AgentRunner
-│   │   │   ├── Interfaces/         # ICouncilAgent, ITruthMapRepository, ISessionRepository
-│   │   │   └── Services/           # SessionService, SnapshotService
-│   │   ├── Agon.Infrastructure/    # In-memory adapters + SignalR broadcaster
-│   │   │   ├── Agents/             # FakeCouncilAgent
-│   │   │   ├── Persistence/        # InMemorySessionRepository, InMemoryTruthMapRepository
-│   │   │   └── SignalR/            # DebateHub + SignalREventBroadcaster
-│   │   └── Agon.Api/               # Thin host — routing + DI
-│   │       └── Program.cs          # Core session endpoints
-│   └── tests/
-│       ├── Agon.Domain.Tests/       # Unit tests (TDD)
-│       ├── Agon.Application.Tests/  # Orchestration + service tests
-│       ├── Agon.Infrastructure.Tests/ # In-memory adapter tests
-│       └── Agon.Api.Tests/          # API endpoint integration tests
-├── frontend/                        # Next.js application
-│   ├── app/
-│   │   ├── layout.tsx          # Root layout (dark mode, Geist fonts)
-│   │   ├── page.tsx            # Landing page
-│   │   ├── session/
-│   │   │   ├── new/page.tsx    # New session creation
-│   │   │   └── [id]/page.tsx   # Live debate session view
-│   │   └── sessions/page.tsx   # Past sessions list
-│   ├── components/
-│   │   ├── landing/
-│   │   │   └── hero-section.tsx
-│   │   ├── session/
-│   │   │   ├── agent-message-card.tsx
-│   │   │   ├── message-composer.tsx
-│   │   │   ├── session-header.tsx
-│   │   │   ├── thread-view.tsx
-│   │   │   └── truth-map-drawer.tsx
-│   │   └── ui/                 # shadcn/ui primitives
-│   ├── lib/
-│   │   ├── constants.ts        # Agent registry, phase labels, friction config
-│   │   ├── realtime/           # Debate hub client + reconnect/resync wiring
-│   │   ├── utils.ts            # Utilities (cn)
-│   │   └── test-utils.tsx      # Custom test render wrapper
-│   └── types/
-│       └── session.ts          # TypeScript types mirroring backend schemas
-└── README.md
+│   │   ├── Agon.Domain/              # ✅ Pure business logic (66 tests)
+│   │   ├── Agon.Application/         # ✅ Orchestration & use-cases (56 tests)
+│   │   └── Agon.Infrastructure/      # ✅ Persistence, MAF, SignalR (42 tests)
+│   ├── tests/
+│   │   ├── Agon.Domain.Tests/
+│   │   ├── Agon.Application.Tests/
+│   │   └── Agon.Infrastructure.Tests/
+│   └── Agon.sln
+│
+├── frontend/             # Next.js App Router frontend
+│   ├── app/              # App Router pages
+│   ├── components/       # React components (to be created)
+│   └── lib/              # Utilities, logger, API client (to be created)
+│
+└── .github/
+    └── instructions/     # Architecture & coding rules
+
+Total Tests: 164 passing (164/164)
 ```
 
 ---
@@ -208,253 +60,264 @@ agon/
 
 ### Prerequisites
 
-- **Node.js** ≥ 20
-- **npm** ≥ 10
-- **.NET SDK** ≥ 9.0
-
-### Install and Run
-
-```bash
-# Clone the repository
-git clone https://github.com/simonholmes001/agon.git
-cd agon
-
-# Enable pre-commit hooks
-git config core.hooksPath .githooks
-
-# --- Frontend ---
-cd frontend
-npm install
-npm install @microsoft/signalr   # required for live SignalR streaming
-npm run dev
-# Open http://localhost:3000
-
-# --- Backend ---
-cd ../backend
-dotnet restore
-dotnet build
-dotnet test
-dotnet run --project src/Agon.Api
-```
-
-For local frontend-to-backend realtime transport:
-
-```bash
-# frontend/.env.local
-BACKEND_API_BASE_URL=http://localhost:5000
-# Optional override (defaults to BACKEND_API_BASE_URL or http://localhost:5000)
-# NEXT_PUBLIC_DEBATE_HUB_URL=http://localhost:5000/hubs/debate
-
-# project root .env
-OPENAI_KEY=your-openai-api-key
-GEMINI_KEY=your-gemini-api-key
-CLAUDE_KEY=your-anthropic-api-key
-DEEPSEEK_KEY=your-deepseek-api-key
-# Optional model overrides
-OPENAI_MODEL=gpt-5.2
-GEMINI_MODEL=gemini-3.1-pro-preview
-ANTHROPIC_MODEL=claude-opus-4-6
-DEEPSEEK_MODEL=deepseek-chat
-# Optional temperature overrides (0.0 - 2.0, provider defaults when omitted)
-OPENAI_TEMPERATURE=0.4
-GEMINI_TEMPERATURE=0.4
-ANTHROPIC_TEMPERATURE=0.4
-# Optional override for temporary openai-backed technical_architect
-TECHNICAL_ARCHITECT_TEMPERATURE=0.3
-```
-
-`BACKEND_API_BASE_URL` is used by Next.js route handlers under
-`/api/backend/*` to proxy REST calls to ASP.NET Core and avoid CORS and route
-collisions with frontend pages.
-
-`Agon.Api` now auto-loads the nearest `.env` file on startup (walking up from
-`backend/src/Agon.Api`), so local key setup works without manual `source`/`export`.
-Existing process environment variables still take precedence over `.env` values.
-
-If `NEXT_PUBLIC_DEBATE_HUB_URL` is not set, the frontend builds the hub URL
-from `NEXT_PUBLIC_BACKEND_BASE_URL` (fallback: `BACKEND_API_BASE_URL`,
-fallback: `http://localhost:5000`) with `/hubs/debate` appended. This avoids
-WebSocket upgrade issues through Next.js route handlers.
-
-The API now enables CORS for local frontend origins by default:
-`http://localhost:3000` and `https://localhost:3000`. Override via
-`Cors:AllowedOrigins` in backend configuration when needed.
-
-### Available Scripts
-
-**Frontend** — from the `frontend/` directory:
-
-| Command | Description |
-|---|---|
-| `npm run dev` | Start dev server with Turbopack |
-| `npm run build` | Production build |
-| `npm run start` | Start production server |
-| `npm run lint` | Run ESLint |
-| `npm run test` | Run all tests (Vitest) |
-| `npm run test:watch` | Run tests in watch mode |
-
-**Backend** — from the `backend/` directory:
-
-| Command | Description |
-|---|---|
-| `dotnet build` | Build all projects |
-| `dotnet test` | Run all tests (xUnit) |
-| `dotnet run --project src/Agon.Api` | Start API server |
+- **.NET 9.0 SDK** ([download](https://dotnet.microsoft.com/download))
+- **Node.js 20+** ([download](https://nodejs.org/))
+- **PostgreSQL 16+** (for production; tests use in-memory DB)
+- **Redis 7+** (for production; tests use mocked client)
 
 ---
 
-## Testing
+## Backend (.NET)
 
-All code follows strict **Test-Driven Development (TDD)**: Red → Green → Refactor. No production code without a failing test.
+### Architecture
 
-### Frontend
+The backend follows **Clean Architecture** with strict layer separation:
 
-Tests use [Vitest](https://vitest.dev) with [React Testing Library](https://testing-library.com/docs/react-testing-library/intro) and [jsdom](https://github.com/jsdom/jsdom).
-
-```bash
-cd frontend
-npm run test            # Run all tests
-npm run test:watch      # Watch mode
-npx vitest run --coverage  # Coverage report
+```
+┌─────────────────────────────────────┐
+│         API Layer (future)          │  ← HTTP endpoints, middleware
+│  ┌───────────────────────────────┐  │
+│  │   Infrastructure Layer        │  │  ← Database, SignalR, MAF, Redis
+│  │  ┌─────────────────────────┐  │  │
+│  │  │  Application Layer      │  │  │  ← Orchestration, use-cases
+│  │  │  ┌───────────────────┐  │  │  │
+│  │  │  │  Domain Layer     │  │  │  │  ← Pure business logic
+│  │  │  │                   │  │  │  │
+│  │  │  └───────────────────┘  │  │  │
+│  │  └─────────────────────────┘  │  │
+│  └───────────────────────────────┘  │
+└─────────────────────────────────────┘
 ```
 
-### Backend
+**Key principle:** Dependencies point **inward only**. Domain has zero external dependencies.
 
-Tests use [xUnit](https://xunit.net) with [FluentAssertions](https://fluentassertions.com). Domain tests reference only `Agon.Domain` — no mocking frameworks needed. Application tests use [NSubstitute](https://nsubstitute.github.io/) for interface mocking.
+### Running Tests
 
 ```bash
 cd backend
-dotnet test                                      # Run all tests
-dotnet test --collect:"XPlat Code Coverage"      # With coverage
+dotnet test
 ```
 
-**Required test coverage** (non-negotiable):
-- `PatchValidator` — schema validation, conflict detection, cross-agent text modification prevention
-- `RoundPolicy` — loop termination, budget exhaustion, early convergence
-- `ConvergenceEvaluator` — rubric scoring, friction-adjusted thresholds
-- `ConfidenceDecayEngine` — decay on challenge, boost on evidence, clamping, threshold flagging
-- `ChangeImpactCalculator` — `derived_from` graph traversal, impact set correctness
+**Current status:** ✅ 164/164 tests passing
 
-**Current coverage** — the Tests and Coverage badges at the top of this README are updated automatically by CI on every push.
+### Test Coverage
 
----
-
-## Session Flow
-
-A session passes through these phases (enforced by the deterministic Orchestrator state machine):
-
-```
-INTAKE → CLARIFICATION → DEBATE_ROUND_1 (parallel) → DEBATE_ROUND_2 (crossfire)
-  → SYNTHESIS + VALIDATION → [converged?] → DELIVER → POST_DELIVERY
-                            → [gaps?] → TARGETED_LOOP (max 2) → re-enter SYNTHESIS
-```
-
-- **Clarification** — Socratic Clarifier extracts intent, constraints, success metrics (max 2 rounds, 3 questions each)
-- **Round 1 (Divergence)** — All agents analyse in parallel; patches validated and applied in deterministic order
-- **Round 2 (Crossfire)** — Agents must explicitly critique each other's claims by entity ID
-- **Synthesis** — Single agent synthesises + scores via convergence rubric in one pass
-- **Targeted Loop** — If gaps remain, only the responsible agents are dispatched (bounded)
-- **Post-Delivery** — Session remains live for questions, challenges, and constraint changes
-
-Full specification: [`.github/instructions/round-policy.instructions.md`](.github/instructions/round-policy.instructions.md)
-
----
-
-## API Surface
-
-### REST (HTTPS) — Commands and Queries
-
-| Method | Endpoint | Description |
+| Layer | Tests | Status |
 |---|---|---|
-| `POST` | `/sessions` | Create a new session |
-| `GET` | `/sessions/{id}` | Get session state |
-| `POST` | `/sessions/{id}/start` | Transition from clarification to debate round 1 and run a council round |
-| `GET` | `/sessions/{id}/transcript` | Get persisted transcript provenance for the session |
-| `POST` | `/sessions/{id}/messages` | User message (clarification response or post-delivery question) |
-| `POST` | `/sessions/{id}/hitl/challenge` | Challenge a specific claim |
-| `POST` | `/sessions/{id}/hitl/constraint` | Add/modify constraint (triggers change propagation) |
-| `POST` | `/sessions/{id}/hitl/deepdive` | Force deep dive on a claim |
-| `POST` | `/sessions/{id}/fork` | Create forked session from snapshot |
-| `GET` | `/sessions/{id}/truthmap` | Get current Truth Map state |
-| `GET` | `/sessions/{id}/artifacts/{type}` | Retrieve a generated artifact |
-| `GET` | `/sessions/{id}/snapshots` | List available round snapshots |
+| Domain | 66 | ✅ Complete |
+| Application | 56 | ✅ Complete |
+| Infrastructure | 42 | ✅ Complete |
+| - AgentResponseParser | 8 | ✅ |
+| - MafCouncilAgent | 3 | ✅ |
+| - TruthMapRepository | 8 | ✅ |
+| - SessionRepository | 9 | ✅ |
+| - RedisSnapshotStore | 7 | ✅ |
+| - SignalREventBroadcaster | 8 | ✅ |
 
-`POST /sessions/{id}/start` accepts optional `X-Correlation-ID`. When provided,
-the same value is echoed in the response header and included in API +
-orchestration + provider call logs for end-to-end tracing.
+### Key Technologies
 
-### SignalR (WebSockets) — Real-Time Streaming
+- **EF Core 9.0** with PostgreSQL provider (Npgsql)
+- **Microsoft Agent Framework (MAF)** via `Microsoft.Extensions.AI`
+- **StackExchange.Redis 2.11.8** for snapshot storage
+- **SignalR** for real-time UI updates
+- **xUnit + FluentAssertions + NSubstitute** for testing
 
-The frontend connects to `/hubs/debate` for server-pushed updates. Current baseline events:
+### NuGet Packages
 
-`RoundProgress` · `TruthMapPatch` · `TranscriptMessage`
+```bash
+# Domain (no external dependencies)
+dotnet add src/Agon.Domain/Agon.Domain.csproj package <none>
 
-Planned event expansion (next increments):
+# Application (interfaces only)
+dotnet add src/Agon.Application/Agon.Application.csproj package Microsoft.Extensions.AI
 
-`AgentTokens` · `ConfidenceTransition` · `ConvergenceUpdate` · `PendingRevalidation` · `ArtifactReady` · `BudgetWarning`
-
----
-
-## Development Methodology
-
-This project follows strict **Test-Driven Development (TDD)**:
-
-1. **Red** — Write a failing test that describes the desired behaviour.
-2. **Green** — Write the minimum code to make the test pass.
-3. **Refactor** — Clean up while keeping tests green.
-
-No production code without a failing test that motivated it.
-
-See [`.github/instructions/copilot.instructions.md`](.github/instructions/copilot.instructions.md) for the full coding guidelines and [`.github/instructions/backend-implementation.instructions.md`](.github/instructions/backend-implementation.instructions.md) for backend implementation decisions.
+# Infrastructure (all I/O)
+dotnet add src/Agon.Infrastructure/Agon.Infrastructure.csproj package \
+  Microsoft.EntityFrameworkCore \
+  Npgsql.EntityFrameworkCore.PostgreSQL \
+  StackExchange.Redis \
+  Microsoft.AspNetCore.SignalR.Core \
+  Microsoft.Extensions.AI.OpenAI \
+  Anthropic.SDK
+```
 
 ---
 
-## Output Artifacts
+## Frontend (Next.js)
 
-A completed Agon session produces:
+### Tech Stack
 
-| Artifact | Description |
-|---|---|
-| `Verdict.md` | Go / No-Go recommendation with rationale and contested claims |
-| `Plan.md` | Phased plan — MVP / v1 / v2, 30-60-90 day breakdown |
-| `PRD.md` | The idea formalised as a complete product requirements document |
-| `Risk-Registry.md` | All risks with severity, likelihood, mitigation, source agent |
-| `Assumption-Validation.md` | Every assumption with validation steps and confidence |
-| `Architecture.mmd` | Mermaid diagram of proposed system architecture |
-| `.github/copilot-instructions.md` | Repo-specific development rules for the idea |
-| `Scenario-Diff.md` | Decision diff between original and forked scenarios |
+- **Next.js 15** with App Router
+- **TypeScript**
+- **Tailwind CSS**
+- **shadcn/ui** components
+- **Framer Motion** for animations
+- **SignalR client** for real-time updates
+
+### Getting Started
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Open [http://localhost:3000](http://localhost:3000) to see the app.
+
+### Project Structure (to be built)
+
+```
+frontend/
+├── app/
+│   ├── layout.tsx          # Root layout with SignalR provider
+│   ├── page.tsx            # Landing page
+│   ├── session/
+│   │   ├── new/            # Session creation flow
+│   │   └── [id]/           # Active session view (Thread + Map)
+│   └── globals.css
+│
+├── components/
+│   ├── ui/                 # shadcn/ui primitives
+│   ├── thread/             # Thread view components
+│   ├── truth-map/          # Truth Map drawer/panel
+│   └── session/            # Session controls (friction slider, etc.)
+│
+├── lib/
+│   ├── api/                # REST API client
+│   ├── signalr/            # SignalR connection manager
+│   ├── logger.ts           # Structured logging
+│   └── utils.ts
+│
+└── types/                  # TypeScript definitions
+```
+
+### Key Features
+
+- **Thread View**: Premium group-chat aesthetic with agent cards
+- **Truth Map Drawer**: Bottom sheet (mobile) / right panel (desktop)
+- **Friction Slider**: 0-100 control affecting tone and convergence thresholds
+- **Real-time Updates**: SignalR streams tokens, patches, confidence changes
+- **HITL Controls**: "Tap an Agent" for challenges, deep dives, constraint changes
 
 ---
 
-## Roadmap
+## Development Workflow
 
-### Phase 1 (current)
-- [x] Frontend shell — landing, session creation, debate view, sessions list
-- [x] Type system mirroring backend schemas
-- [x] Agent registry with model assignments and visual identity
-- [x] Component test suite (159 tests, 20 files)
-- [x] CI pipeline with automated badge updates
-- [x] Backend architecture decisions documented (MAF integration strategy)
-- [x] Domain model — TruthMap, PatchValidator, RoundPolicy, ConfidenceDecayEngine, ChangeImpactCalculator (TDD)
-- [x] Backend vertical slice — Application/Infrastructure/API scaffold with in-memory adapters and core session endpoints
-- [ ] Application layer — full Orchestrator state machine, AgentRunner, ICouncilAgent expansion
-- [ ] Infrastructure layer — MAF agents, PostgreSQL, Redis, full SignalR event surface (replace in-memory adapters)
-- [ ] API layer — full REST endpoints + global exception middleware
-- [ ] Frontend–backend integration — replace remaining demo thread/truth-map state with live REST + SignalR event data
+### 1. Backend Development
 
-### Phase 1.5
-- [ ] Map View (desktop graph visualisation)
-- [ ] Session Timeline Scrubber for Pause-and-Replay
+```bash
+cd backend
 
-### Phase 2
-- [ ] SwiftUI iOS app
-- [ ] Team workspaces and collaborative HITL
-- [ ] Attachments + RAG over user documents
-- [ ] Simulation mode
-- [ ] Continuous monitoring mode
+# Run all tests
+dotnet test
+
+# Run specific test class
+dotnet test --filter "FullyQualifiedName~PatchValidatorTests"
+
+# Build solution
+dotnet build
+
+# Watch mode (auto-rebuild on changes)
+dotnet watch --project src/Agon.Application
+```
+
+### 2. Frontend Development
+
+```bash
+cd frontend
+
+# Development server with hot reload
+npm run dev
+
+# Type checking
+npm run type-check
+
+# Linting
+npm run lint
+
+# Build for production
+npm run build
+```
+
+### 3. Testing Strategy
+
+- **Backend**: TDD strict — tests written first, implementation follows
+- **Domain**: Pure unit tests (no mocks, blazing fast)
+- **Application**: Unit tests with mocked repositories
+- **Infrastructure**: Integration tests with in-memory DB and mocked external services
+- **Frontend**: (to be added) Component tests with React Testing Library
 
 ---
 
-## Licence
+## Architecture Documentation
 
-Private. All rights reserved.
+Full architecture, round policy, agent roster, and coding guidelines are in `.github/instructions/`:
+
+- `architecture.instructions.md` — System topology, runtime responsibilities, data model
+- `prd-agon-core.instructions.md` — Product requirements, features, UX flows
+- `round-policy.instructions.md` — Phase transitions, convergence rules, HITL policy
+- `copilot.instructions.md` — Coding rules, TDD requirements, output templates
+- `schemas.instructions.md` — JSON schemas for all data structures
+- `backend-implementation.instructions.md` — MAF integration, solution structure, layer rules
+
+---
+
+## Current Status (March 2026)
+
+### ✅ Completed
+
+- **Domain Layer**: All business logic, engines, validators (66 tests passing)
+- **Application Layer**: Orchestrator, AgentRunner, SessionService (56 tests passing)
+- **Infrastructure Layer**: PostgreSQL, Redis, SignalR, MAF integration (42 tests passing)
+- **Root .gitignore**: Consolidated ignore patterns for monorepo
+- **TDD Discipline**: 164/164 tests passing, all following RED-GREEN-REFACTOR
+
+### 🚧 In Progress
+
+- **API Layer**: ASP.NET Core Web API with REST endpoints (not started)
+- **Frontend**: Next.js UI with SignalR client (not started)
+
+### 📋 Next Steps
+
+1. **API Layer** (backend):
+   - Create `Agon.Api` project
+   - Implement REST endpoints (`POST /sessions`, `GET /sessions/{id}/truthmap`, etc.)
+   - Add SignalR hub registration
+   - Configure DI container with all repositories and services
+
+2. **Frontend**:
+   - Scaffold core layout (Thread View + Truth Map Drawer)
+   - Implement SignalR client connection manager
+   - Build session creation flow
+   - Implement real-time agent token streaming
+
+3. **Integration**:
+   - Connect frontend to backend API
+   - End-to-end testing with real LLM providers
+   - Performance optimization (streaming latency, patch application)
+
+---
+
+## Contributing
+
+This project follows strict **Clean Architecture** and **TDD** principles. See `.github/instructions/copilot.instructions.md` for full coding guidelines.
+
+### Key Rules
+
+1. **TDD is non-negotiable**: Write tests first, then implementation (RED → GREEN → REFACTOR)
+2. **Clean Architecture layers**: Domain has zero framework dependencies
+3. **No Docker required**: All tests use in-memory databases or mocked clients
+4. **Structured logging**: Use `ILogger<T>` (backend) or `lib/logger.ts` (frontend)
+5. **Error boundaries**: Every route must have `error.tsx` and root must have `global-error.tsx`
+
+---
+
+## License
+
+Proprietary — All rights reserved.
+
+---
+
+## Contact
+
+For questions or contributions, contact the development team.

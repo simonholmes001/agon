@@ -4,516 +4,240 @@ using Agon.Application.Interfaces;
 using Agon.Application.Orchestration;
 using Agon.Application.Services;
 using Agon.Domain.Agents;
-using Agon.Domain.Sessions;
 using Agon.Infrastructure.Agents;
-using Agon.Infrastructure.Persistence.InMemory;
+using Agon.Infrastructure.Persistence.PostgreSQL;
+using Agon.Infrastructure.Persistence.Redis;
 using Agon.Infrastructure.SignalR;
-using Microsoft.AspNetCore.SignalR;
-using System.Globalization;
+using Anthropic;
+using Google.GenAI;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.AI;
+using Mscc.GenerativeAI.Microsoft;
+using OpenAI;
+using StackExchange.Redis;
 
 var builder = WebApplication.CreateBuilder(args);
 
-const string FrontendCorsPolicy = "FrontendCorsPolicy";
-const string CorrelationHeaderName = "X-Correlation-ID";
-const string OpenAiDefaultModel = "gpt-5.2";
-const string TechnicalArchitectTemporaryModelDefault = "gpt-5.2";
-const string GeminiDefaultModel = "gemini-3.1-pro-preview";
-const string AnthropicDefaultModel = "claude-opus-4-6";
-var allowedOrigins = builder.Configuration
-    .GetSection("Cors:AllowedOrigins")
-    .Get<string[]>()
-    ?? ["http://localhost:3000", "https://localhost:3000"];
-var dotEnvLoadResult = DotEnvLoader.Load(builder.Environment.ContentRootPath);
-
-static (double? Value, bool IsInvalid) ParseTemperatureSetting(string? rawValue)
+// ── Load Environment Variables from .env File ───────────────────────────
+// This allows us to read OPENAI_KEY, CLAUDE_KEY, etc. from the .env file
+var envFilePath = Path.Combine(Directory.GetParent(builder.Environment.ContentRootPath)?.Parent?.FullName ?? "", ".env");
+if (File.Exists(envFilePath))
 {
-    if (string.IsNullOrWhiteSpace(rawValue))
+    foreach (var line in File.ReadAllLines(envFilePath))
     {
-        return (null, false);
+        if (string.IsNullOrWhiteSpace(line) || line.StartsWith("#")) continue;
+        
+        var parts = line.Split('=', 2, StringSplitOptions.TrimEntries);
+        if (parts.Length == 2)
+        {
+            var key = parts[0];
+            var value = parts[1].Trim('"'); // Remove surrounding quotes
+            Environment.SetEnvironmentVariable(key, value);
+        }
     }
-
-    var parsed = double.TryParse(rawValue, NumberStyles.Float, CultureInfo.InvariantCulture, out var temperature)
-        && temperature is >= 0 and <= 2;
-    return parsed
-        ? (temperature, false)
-        : (null, true);
 }
 
-var openAiApiKey = Environment.GetEnvironmentVariable("OPENAI_KEY")
-    ?? builder.Configuration["OPENAI_KEY"]
-    ?? builder.Configuration["OpenAI:ApiKey"];
-var openAiModel = Environment.GetEnvironmentVariable("OPENAI_MODEL")
-    ?? builder.Configuration["OPENAI_MODEL"]
-    ?? builder.Configuration["OpenAI:Model"]
-    ?? OpenAiDefaultModel;
-var openAiTemperatureRaw = Environment.GetEnvironmentVariable("OPENAI_TEMPERATURE")
-    ?? builder.Configuration["OPENAI_TEMPERATURE"]
-    ?? builder.Configuration["OpenAI:Temperature"];
-var openAiTemperatureSetting = ParseTemperatureSetting(openAiTemperatureRaw);
-var openAiTemperature = openAiTemperatureSetting.Value;
-var geminiApiKey = Environment.GetEnvironmentVariable("GEMINI_KEY")
-    ?? builder.Configuration["GEMINI_KEY"]
-    ?? builder.Configuration["Gemini:ApiKey"];
-var geminiModel = Environment.GetEnvironmentVariable("GEMINI_MODEL")
-    ?? builder.Configuration["GEMINI_MODEL"]
-    ?? builder.Configuration["Gemini:Model"]
-    ?? GeminiDefaultModel;
-var geminiTemperatureRaw = Environment.GetEnvironmentVariable("GEMINI_TEMPERATURE")
-    ?? builder.Configuration["GEMINI_TEMPERATURE"]
-    ?? builder.Configuration["Gemini:Temperature"];
-var geminiTemperatureSetting = ParseTemperatureSetting(geminiTemperatureRaw);
-var geminiTemperature = geminiTemperatureSetting.Value;
-var anthropicApiKey = Environment.GetEnvironmentVariable("ANTHROPIC_KEY")
-    ?? Environment.GetEnvironmentVariable("CLAUDE_KEY")
-    ?? builder.Configuration["ANTHROPIC_KEY"]
-    ?? builder.Configuration["CLAUDE_KEY"]
-    ?? builder.Configuration["Anthropic:ApiKey"];
-var anthropicModel = Environment.GetEnvironmentVariable("ANTHROPIC_MODEL")
-    ?? builder.Configuration["ANTHROPIC_MODEL"]
-    ?? builder.Configuration["Anthropic:Model"]
-    ?? AnthropicDefaultModel;
-var anthropicTemperatureRaw = Environment.GetEnvironmentVariable("ANTHROPIC_TEMPERATURE")
-    ?? builder.Configuration["ANTHROPIC_TEMPERATURE"]
-    ?? builder.Configuration["Anthropic:Temperature"];
-var anthropicTemperatureSetting = ParseTemperatureSetting(anthropicTemperatureRaw);
-var anthropicTemperature = anthropicTemperatureSetting.Value;
-var technicalArchitectModel = Environment.GetEnvironmentVariable("TECHNICAL_ARCHITECT_MODEL")
-    ?? TechnicalArchitectTemporaryModelDefault;
-var technicalArchitectTemperatureRaw = Environment.GetEnvironmentVariable("TECHNICAL_ARCHITECT_TEMPERATURE")
-    ?? builder.Configuration["TECHNICAL_ARCHITECT_TEMPERATURE"]
-    ?? builder.Configuration["TechnicalArchitect:Temperature"];
-var technicalArchitectTemperatureSetting = ParseTemperatureSetting(technicalArchitectTemperatureRaw);
-var technicalArchitectTemperature = technicalArchitectTemperatureSetting.Value ?? openAiTemperature;
+// ── Configuration ───────────────────────────────────────────────────────
+var llmConfig = builder.Configuration.GetSection(LlmConfiguration.SectionName).Get<LlmConfiguration>() ?? new();
+var agonConfig = builder.Configuration.GetSection(AgonConfiguration.SectionName).Get<AgonConfiguration>() ?? new();
 
-builder.Logging.AddFilter("Microsoft.AspNetCore.Hosting.Diagnostics", LogLevel.Warning);
-builder.Logging.AddFilter("Microsoft.AspNetCore.Routing.EndpointMiddleware", LogLevel.Warning);
-builder.Logging.AddFilter("Microsoft.AspNetCore.Cors.Infrastructure.CorsService", LogLevel.Warning);
+// Replace ${ENV_VAR} placeholders with actual environment variables
+llmConfig.OpenAI.ApiKey = ReplaceEnvVars(llmConfig.OpenAI.ApiKey);
+llmConfig.Anthropic.ApiKey = ReplaceEnvVars(llmConfig.Anthropic.ApiKey);
+llmConfig.Google.ApiKey = ReplaceEnvVars(llmConfig.Google.ApiKey);
+llmConfig.DeepSeek.ApiKey = ReplaceEnvVars(llmConfig.DeepSeek.ApiKey);
 
-builder.Services.AddCors(options =>
-{
-    options.AddPolicy(FrontendCorsPolicy, cors =>
-    {
-        cors
-            .WithOrigins(allowedOrigins)
-            .AllowAnyHeader()
-            .AllowAnyMethod()
-            .AllowCredentials();
-    });
-});
+builder.Services.AddSingleton(llmConfig);
+builder.Services.AddSingleton(agonConfig);
 
+// ── Controllers and OpenAPI ─────────────────────────────────────────────
+builder.Services.AddControllers();
+builder.Services.AddOpenApi();
+
+// ── SignalR for Real-Time Events ────────────────────────────────────────
 builder.Services.AddSignalR();
-builder.Services.AddSingleton<ISessionRepository, InMemorySessionRepository>();
-builder.Services.AddSingleton<ITruthMapRepository, InMemoryTruthMapRepository>();
-builder.Services.AddSingleton<ITranscriptRepository, InMemoryTranscriptRepository>();
-builder.Services.AddSingleton<IEventBroadcaster, SignalREventBroadcaster>();
-builder.Services.AddSingleton<Orchestrator>();
-builder.Services.AddSingleton<AgentRunner>();
-builder.Services.AddSingleton<SessionService>();
-builder.Services.AddHttpClient();
 
-builder.Services.AddSingleton<ICouncilAgent>(sp =>
+// ── Database: PostgreSQL ────────────────────────────────────────────────
+var postgresConnectionString = builder.Configuration.GetConnectionString("PostgreSQL");
+if (!string.IsNullOrEmpty(postgresConnectionString))
 {
-    if (string.IsNullOrWhiteSpace(openAiApiKey))
-    {
-        return new ConfigurationErrorCouncilAgent(
-            AgentId.ResearchLibrarian,
-            modelProvider: "openai",
-            errorMessage: "Missing OPENAI_KEY for agent 'research_librarian'.",
-            logger: sp.GetRequiredService<ILogger<ConfigurationErrorCouncilAgent>>());
-    }
+    builder.Services.AddDbContext<AgonDbContext>(options =>
+        options.UseNpgsql(postgresConnectionString));
+    
+    // ── Infrastructure: Repositories ────────────────────────────────────────
+    builder.Services.AddScoped<ISessionRepository, SessionRepository>();
+    builder.Services.AddScoped<ITruthMapRepository, TruthMapRepository>();
+}
 
-    var logger = sp.GetRequiredService<ILogger<OpenAiCouncilAgent>>();
-    var httpClientFactory = sp.GetRequiredService<IHttpClientFactory>();
-    var options = new OpenAiCouncilAgentOptions(
-        AgentId.ResearchLibrarian,
-        ApiKey: openAiApiKey,
-        ModelName: openAiModel,
-        MaxOutputTokens: 600,
-        Temperature: openAiTemperature);
-
-    return new OpenAiCouncilAgent(httpClientFactory.CreateClient(), options, logger);
-});
-builder.Services.AddSingleton<ICouncilAgent>(sp =>
+// ── Database: Redis ─────────────────────────────────────────────────────
+var redisConnectionString = builder.Configuration.GetConnectionString("Redis") ?? "localhost:6379";
+if (!builder.Environment.IsEnvironment("Testing"))
 {
-    if (string.IsNullOrWhiteSpace(geminiApiKey))
-    {
-        return new ConfigurationErrorCouncilAgent(
-            AgentId.FramingChallenger,
-            modelProvider: "gemini",
-            errorMessage: "Missing GEMINI_KEY for agent 'framing_challenger'.",
-            logger: sp.GetRequiredService<ILogger<ConfigurationErrorCouncilAgent>>());
-    }
+    builder.Services.AddSingleton<IConnectionMultiplexer>(sp =>
+        ConnectionMultiplexer.Connect(redisConnectionString));
+    builder.Services.AddScoped<IDatabase>(sp =>
+        sp.GetRequiredService<IConnectionMultiplexer>().GetDatabase());
+    
+    builder.Services.AddScoped<ISnapshotStore, RedisSnapshotStore>();
+}
 
-    return new GeminiCouncilAgent(
-        sp.GetRequiredService<IHttpClientFactory>().CreateClient(),
-        new GeminiCouncilAgentOptions(
-            AgentId.FramingChallenger,
-            geminiApiKey,
-            geminiModel,
-            MaxOutputTokens: 600,
-            Temperature: geminiTemperature),
-        sp.GetRequiredService<ILogger<GeminiCouncilAgent>>());
-});
-builder.Services.AddSingleton<ICouncilAgent>(sp =>
+// ── Infrastructure: SignalR Event Broadcasting ──────────────────────────
+builder.Services.AddScoped<IEventBroadcaster, SignalREventBroadcaster>();
+
+// ── Application Layer Services ──────────────────────────────────────────
+builder.Services.AddScoped<ISessionService, SessionService>();
+
+// Only register Orchestrator and AgentRunner if dependencies are available
+if (!builder.Environment.IsEnvironment("Testing"))
 {
-    if (string.IsNullOrWhiteSpace(geminiApiKey))
-    {
-        return new ConfigurationErrorCouncilAgent(
-            AgentId.Contrarian,
-            modelProvider: "gemini",
-            errorMessage: "Missing GEMINI_KEY for agent 'contrarian'.",
-            logger: sp.GetRequiredService<ILogger<ConfigurationErrorCouncilAgent>>());
-    }
+    builder.Services.AddScoped<IAgentRunner, AgentRunner>();
+    builder.Services.AddScoped<Orchestrator>();
+}
 
-    return new GeminiCouncilAgent(
-        sp.GetRequiredService<IHttpClientFactory>().CreateClient(),
-        new GeminiCouncilAgentOptions(
-            AgentId.Contrarian,
-            geminiApiKey,
-            geminiModel,
-            MaxOutputTokens: 600,
-            Temperature: geminiTemperature),
-        sp.GetRequiredService<ILogger<GeminiCouncilAgent>>());
-});
-builder.Services.AddSingleton<ICouncilAgent>(sp =>
+// ── Infrastructure: Council Agents (MAF with Multiple Providers) ────────
+if (!builder.Environment.IsEnvironment("Testing"))
 {
-    if (string.IsNullOrWhiteSpace(anthropicApiKey))
-    {
-        return new ConfigurationErrorCouncilAgent(
-            AgentId.ProductStrategist,
-            modelProvider: "anthropic",
-            errorMessage: "Missing ANTHROPIC_KEY or CLAUDE_KEY for agent 'product_strategist'.",
-            logger: sp.GetRequiredService<ILogger<ConfigurationErrorCouncilAgent>>());
-    }
+    // Register AgentResponseParser adapter (shared by all agents)
+    builder.Services.AddScoped<IAgentResponseParser, AgentResponseParserAdapter>();
 
-    return new AnthropicCouncilAgent(
-        sp.GetRequiredService<IHttpClientFactory>().CreateClient(),
-        new AnthropicCouncilAgentOptions(
-            AgentId.ProductStrategist,
-            anthropicApiKey,
-            anthropicModel,
-            MaxOutputTokens: 600,
-            Temperature: anthropicTemperature),
-        sp.GetRequiredService<ILogger<AnthropicCouncilAgent>>());
-});
-builder.Services.AddSingleton<ICouncilAgent>(sp =>
+    var config = builder.Configuration.Get<LlmConfiguration>() ?? throw new InvalidOperationException("LlmConfiguration is missing");
+
+    // ── Register Council Agents with Provider-Specific Native MAF AIAgents ──
+    
+    // Moderator: OpenAI GPT (via ChatCompletion API)
+    builder.Services.AddScoped<ICouncilAgent>(sp =>
+    {
+        var parser = sp.GetRequiredService<IAgentResponseParser>();
+        // Cast ChatClient to IChatClient for .AsAIAgent() extension
+        var aiAgent = ((IChatClient)new OpenAIClient(config.OpenAI.ApiKey)
+            .GetChatClient(config.OpenAI.Model))
+            .AsAIAgent(
+                instructions: AgentSystemPrompts.Moderator,
+                name: AgentId.Moderator);
+        
+        return new MafCouncilAgent(
+            agentId: AgentId.Moderator,
+            modelProvider: $"OpenAI {config.OpenAI.Model}",
+            underlyingAgent: aiAgent,
+            parser: parser);
+    });
+
+    // GPT Agent: OpenAI GPT (via ChatCompletion API)
+    builder.Services.AddScoped<ICouncilAgent>(sp =>
+    {
+        var parser = sp.GetRequiredService<IAgentResponseParser>();
+        // Cast ChatClient to IChatClient for .AsAIAgent() extension
+        var aiAgent = ((IChatClient)new OpenAIClient(config.OpenAI.ApiKey)
+            .GetChatClient(config.OpenAI.Model))
+            .AsAIAgent(
+                instructions: AgentSystemPrompts.GptAgent,
+                name: AgentId.GptAgent);
+        
+        return new MafCouncilAgent(
+            agentId: AgentId.GptAgent,
+            modelProvider: $"OpenAI {config.OpenAI.Model}",
+            underlyingAgent: aiAgent,
+            parser: parser);
+    });
+
+    // Gemini Agent: Google Gemini (via Google.GenAI + Mscc.GenerativeAI.Microsoft)
+    builder.Services.AddScoped<ICouncilAgent>(sp =>
+    {
+        var parser = sp.GetRequiredService<IAgentResponseParser>();
+        var geminiClient = new Client(vertexAI: false, apiKey: config.Google.ApiKey);
+        var chatClient = geminiClient.AsIChatClient(config.Google.Model);
+        var aiAgent = chatClient.AsAIAgent(
+            instructions: AgentSystemPrompts.GeminiAgent,
+            name: AgentId.GeminiAgent);
+        
+        return new MafCouncilAgent(
+            agentId: AgentId.GeminiAgent,
+            modelProvider: $"Google {config.Google.Model}",
+            underlyingAgent: aiAgent,
+            parser: parser);
+    });
+
+    // Claude Agent: Anthropic Claude (via Anthropic SDK)
+    builder.Services.AddScoped<ICouncilAgent>(sp =>
+    {
+        var parser = sp.GetRequiredService<IAgentResponseParser>();
+        // Anthropic: .AsIChatClient(model) then .AsAIAgent()
+        var aiAgent = new AnthropicClient() { ApiKey = config.Anthropic.ApiKey }
+            .AsIChatClient(config.Anthropic.Model)
+            .AsAIAgent(
+                instructions: AgentSystemPrompts.ClaudeAgent,
+                name: AgentId.ClaudeAgent);
+        
+        return new MafCouncilAgent(
+            agentId: AgentId.ClaudeAgent,
+            modelProvider: $"Anthropic {config.Anthropic.Model}",
+            underlyingAgent: aiAgent,
+            parser: parser);
+    });
+
+    // Synthesizer: OpenAI GPT (via ChatCompletion API)
+    builder.Services.AddScoped<ICouncilAgent>(sp =>
+    {
+        var parser = sp.GetRequiredService<IAgentResponseParser>();
+        // Cast ChatClient to IChatClient for .AsAIAgent() extension
+        var aiAgent = ((IChatClient)new OpenAIClient(config.OpenAI.ApiKey)
+            .GetChatClient(config.OpenAI.Model))
+            .AsAIAgent(
+                instructions: AgentSystemPrompts.Synthesizer,
+                name: AgentId.Synthesizer);
+        
+        return new MafCouncilAgent(
+            agentId: AgentId.Synthesizer,
+            modelProvider: $"OpenAI {config.OpenAI.Model}",
+            underlyingAgent: aiAgent,
+            parser: parser);
+    });
+
+    // Register the collection of council agents
+    builder.Services.AddScoped<IReadOnlyList<ICouncilAgent>>(sp =>
+        sp.GetServices<ICouncilAgent>().ToList());
+}
+else
 {
-    if (string.IsNullOrWhiteSpace(openAiApiKey))
-    {
-        return new ConfigurationErrorCouncilAgent(
-            AgentId.TechnicalArchitect,
-            modelProvider: "openai",
-            errorMessage: "Missing OPENAI_KEY for agent 'technical_architect' temporary OpenAI override.",
-            logger: sp.GetRequiredService<ILogger<ConfigurationErrorCouncilAgent>>());
-    }
-
-    return new OpenAiCouncilAgent(
-        sp.GetRequiredService<IHttpClientFactory>().CreateClient(),
-        new OpenAiCouncilAgentOptions(
-            AgentId.TechnicalArchitect,
-            openAiApiKey,
-            technicalArchitectModel,
-            MaxOutputTokens: 600,
-            Temperature: technicalArchitectTemperature),
-        sp.GetRequiredService<ILogger<OpenAiCouncilAgent>>());
-});
+    // In test environment, provide empty list (tests mock ISessionService)
+    builder.Services.AddScoped<IReadOnlyList<ICouncilAgent>>(sp => new List<ICouncilAgent>());
+}
 
 var app = builder.Build();
+
+// ── HTTP Request Pipeline ───────────────────────────────────────────────
+
+// Global exception handling (must be first in pipeline)
 app.UseMiddleware<GlobalExceptionMiddleware>();
-app.UseCors(FrontendCorsPolicy);
 
-if (dotEnvLoadResult.FilePath is not null)
+if (app.Environment.IsDevelopment())
 {
-    app.Logger.LogInformation(
-        ".env configuration loaded. Path={Path} LoadedKeys={LoadedKeys} SkippedExistingKeys={SkippedExistingKeys}",
-        dotEnvLoadResult.FilePath,
-        dotEnvLoadResult.LoadedCount,
-        dotEnvLoadResult.SkippedExistingCount);
+    app.MapOpenApi();
 }
 
-app.Logger.LogInformation(
-    "Council provider configuration. OpenAI={OpenAiConfigured} Gemini={GeminiConfigured} Anthropic={AnthropicConfigured} TechnicalArchitectProvider={TechnicalArchitectProvider} TechnicalArchitectModel={TechnicalArchitectModel}",
-    !string.IsNullOrWhiteSpace(openAiApiKey),
-    !string.IsNullOrWhiteSpace(geminiApiKey),
-    !string.IsNullOrWhiteSpace(anthropicApiKey),
-    "openai-temporary-override",
-    technicalArchitectModel);
+app.UseHttpsRedirection();
+app.UseAuthorization();
 
-app.Logger.LogInformation(
-    "Provider temperature configuration. OpenAI={OpenAiTemperature} Gemini={GeminiTemperature} Anthropic={AnthropicTemperature} TechnicalArchitect={TechnicalArchitectTemperature}",
-    openAiTemperature?.ToString(CultureInfo.InvariantCulture) ?? "provider-default",
-    geminiTemperature?.ToString(CultureInfo.InvariantCulture) ?? "provider-default",
-    anthropicTemperature?.ToString(CultureInfo.InvariantCulture) ?? "provider-default",
-    technicalArchitectTemperature?.ToString(CultureInfo.InvariantCulture) ?? "provider-default");
-
-if (openAiTemperatureSetting.IsInvalid)
-{
-    app.Logger.LogWarning("OPENAI_TEMPERATURE is invalid. Expected decimal between 0 and 2. Falling back to provider default.");
-}
-
-if (geminiTemperatureSetting.IsInvalid)
-{
-    app.Logger.LogWarning("GEMINI_TEMPERATURE is invalid. Expected decimal between 0 and 2. Falling back to provider default.");
-}
-
-if (anthropicTemperatureSetting.IsInvalid)
-{
-    app.Logger.LogWarning("ANTHROPIC_TEMPERATURE is invalid. Expected decimal between 0 and 2. Falling back to provider default.");
-}
-
-if (technicalArchitectTemperatureSetting.IsInvalid)
-{
-    app.Logger.LogWarning("TECHNICAL_ARCHITECT_TEMPERATURE is invalid. Expected decimal between 0 and 2. Falling back to OpenAI temperature or provider default.");
-}
-
-if (string.IsNullOrWhiteSpace(openAiApiKey))
-{
-    app.Logger.LogWarning("OPENAI_KEY is not configured. openai-backed agents will emit system error messages.");
-}
-
-if (string.IsNullOrWhiteSpace(geminiApiKey))
-{
-    app.Logger.LogWarning("GEMINI_KEY is not configured. gemini-backed agents will emit system error messages.");
-}
-
-if (string.IsNullOrWhiteSpace(anthropicApiKey))
-{
-    app.Logger.LogWarning("ANTHROPIC_KEY/CLAUDE_KEY is not configured. anthropic-backed agents will emit system error messages.");
-}
-
-app.Logger.LogWarning(
-    "Temporary provider override active: technical_architect is mapped to OpenAI model {Model} until DeepSeek billing is restored.",
-    technicalArchitectModel);
-
-app.MapPost("/sessions", async (
-    CreateSessionRequest request,
-    SessionService sessionService,
-    ILoggerFactory loggerFactory,
-    CancellationToken cancellationToken) =>
-{
-    var logger = loggerFactory.CreateLogger("SessionsApi");
-    logger.LogInformation(
-        "POST /sessions request received. Mode={Mode} FrictionLevel={FrictionLevel}",
-        request.Mode,
-        request.FrictionLevel);
-
-    if (!Enum.TryParse<SessionMode>(request.Mode, ignoreCase: true, out var mode))
-    {
-        logger.LogWarning(
-            "POST /sessions rejected due to invalid mode. Mode={Mode}",
-            request.Mode);
-        return Results.BadRequest(new { error = $"Invalid mode '{request.Mode}'." });
-    }
-
-    try
-    {
-        var session = await sessionService.CreateSessionAsync(
-            request.Idea,
-            mode,
-            request.FrictionLevel,
-            cancellationToken);
-
-        return Results.Created($"/sessions/{session.SessionId}", new SessionResponse(
-            session.SessionId,
-            session.Status.ToString(),
-            session.Phase.ToString(),
-            session.Mode.ToString(),
-            session.FrictionLevel,
-            session.RoundNumber,
-            session.TargetedLoopCount));
-    }
-    catch (ArgumentException exception)
-    {
-        logger.LogWarning(
-            exception,
-            "POST /sessions validation failed.");
-        return Results.BadRequest(new { error = exception.Message });
-    }
-    catch (Exception exception)
-    {
-        logger.LogError(exception, "POST /sessions failed unexpectedly.");
-        throw;
-    }
-});
-
-app.MapGet("/sessions/{sessionId:guid}", async (
-    Guid sessionId,
-    SessionService sessionService,
-    ILoggerFactory loggerFactory,
-    CancellationToken cancellationToken) =>
-{
-    var logger = loggerFactory.CreateLogger("SessionsApi");
-    var session = await sessionService.GetSessionAsync(sessionId, cancellationToken);
-    if (session is null)
-    {
-        logger.LogWarning("GET /sessions/{SessionId} returned not found.", sessionId);
-        return Results.NotFound();
-    }
-
-    logger.LogInformation(
-        "GET /sessions/{SessionId} returned phase {Phase}.",
-        sessionId,
-        session.Phase);
-    return Results.Ok(new SessionResponse(
-        session.SessionId,
-        session.Status.ToString(),
-        session.Phase.ToString(),
-        session.Mode.ToString(),
-        session.FrictionLevel,
-        session.RoundNumber,
-        session.TargetedLoopCount));
-});
-
-app.MapPost("/sessions/{sessionId:guid}/start", async (
-    Guid sessionId,
-    SessionService sessionService,
-    HttpContext httpContext,
-    ILoggerFactory loggerFactory,
-    CancellationToken cancellationToken) =>
-{
-    var correlationId = ResolveCorrelationId(httpContext);
-    httpContext.Response.Headers[CorrelationHeaderName] = correlationId;
-
-    var logger = loggerFactory.CreateLogger("SessionsApi");
-    logger.LogInformation(
-        "POST /sessions/{SessionId}/start received. CorrelationId={CorrelationId}",
-        sessionId,
-        correlationId);
-
-    try
-    {
-        var session = await sessionService.StartSessionAsync(
-            sessionId,
-            cancellationToken,
-            correlationId);
-        logger.LogInformation(
-            "POST /sessions/{SessionId}/start transitioned to phase {Phase}. CorrelationId={CorrelationId}",
-            sessionId,
-            session.Phase,
-            correlationId);
-        return Results.Ok(new SessionResponse(
-            session.SessionId,
-            session.Status.ToString(),
-            session.Phase.ToString(),
-            session.Mode.ToString(),
-            session.FrictionLevel,
-            session.RoundNumber,
-            session.TargetedLoopCount));
-    }
-    catch (KeyNotFoundException)
-    {
-        logger.LogWarning(
-            "POST /sessions/{SessionId}/start returned not found. CorrelationId={CorrelationId}",
-            sessionId,
-            correlationId);
-        return Results.NotFound();
-    }
-    catch (Exception exception)
-    {
-        logger.LogError(
-            exception,
-            "POST /sessions/{SessionId}/start failed unexpectedly. CorrelationId={CorrelationId}",
-            sessionId,
-            correlationId);
-        throw;
-    }
-});
-
-app.MapGet("/sessions/{sessionId:guid}/truthmap", async (
-    Guid sessionId,
-    SessionService sessionService,
-    ILoggerFactory loggerFactory,
-    CancellationToken cancellationToken) =>
-{
-    var logger = loggerFactory.CreateLogger("SessionsApi");
-    var map = await sessionService.GetTruthMapAsync(sessionId, cancellationToken);
-    if (map is null)
-    {
-        logger.LogWarning("GET /sessions/{SessionId}/truthmap returned not found.", sessionId);
-        return Results.NotFound();
-    }
-
-    logger.LogInformation(
-        "GET /sessions/{SessionId}/truthmap returned version {Version}.",
-        sessionId,
-        map.Version);
-    return Results.Ok(new TruthMapResponse(
-        map.SessionId,
-        map.Version,
-        map.Round,
-        map.CoreIdea));
-});
-
-app.MapGet("/sessions/{sessionId:guid}/transcript", async (
-    Guid sessionId,
-    SessionService sessionService,
-    ILoggerFactory loggerFactory,
-    CancellationToken cancellationToken) =>
-{
-    var logger = loggerFactory.CreateLogger("SessionsApi");
-    var session = await sessionService.GetSessionAsync(sessionId, cancellationToken);
-    if (session is null)
-    {
-        logger.LogWarning("GET /sessions/{SessionId}/transcript returned not found.", sessionId);
-        return Results.NotFound();
-    }
-
-    var transcript = await sessionService.GetTranscriptAsync(sessionId, cancellationToken);
-    logger.LogInformation(
-        "GET /sessions/{SessionId}/transcript returned {MessageCount} messages.",
-        sessionId,
-        transcript.Count);
-
-    return Results.Ok(transcript.Select(message => new TranscriptMessageResponse(
-        message.Id,
-        message.Type.ToString().ToLowerInvariant(),
-        message.AgentId,
-        message.Content,
-        message.Round,
-        message.IsStreaming,
-        message.CreatedAtUtc)));
-});
-
+// ── Map Endpoints ───────────────────────────────────────────────────────
+app.MapControllers();
 app.MapHub<DebateHub>("/hubs/debate");
 
 app.Run();
 
-static string ResolveCorrelationId(HttpContext context)
-{
-    var fromHeader = context.Request.Headers[CorrelationHeaderName].FirstOrDefault();
-    if (!string.IsNullOrWhiteSpace(fromHeader))
-    {
-        context.TraceIdentifier = fromHeader;
-        return fromHeader;
-    }
+// ── Helper Methods ──────────────────────────────────────────────────────
 
-    return context.TraceIdentifier;
+static string ReplaceEnvVars(string value)
+{
+    if (string.IsNullOrWhiteSpace(value)) return value;
+    
+    // Replace ${VAR_NAME} with environment variable value
+    var pattern = @"\$\{([^}]+)\}";
+    return System.Text.RegularExpressions.Regex.Replace(value, pattern, match =>
+    {
+        var envVarName = match.Groups[1].Value;
+        return Environment.GetEnvironmentVariable(envVarName) ?? match.Value;
+    });
 }
 
-public record CreateSessionRequest(string Idea, string Mode, int FrictionLevel);
-
-public record SessionResponse(
-    Guid SessionId,
-    string Status,
-    string Phase,
-    string Mode,
-    int FrictionLevel,
-    int RoundNumber,
-    int TargetedLoopCount);
-
-public record TruthMapResponse(
-    Guid SessionId,
-    int Version,
-    int Round,
-    string CoreIdea);
-
-public record TranscriptMessageResponse(
-    Guid Id,
-    string Type,
-    string? AgentId,
-    string Content,
-    int Round,
-    bool IsStreaming,
-    DateTimeOffset CreatedAtUtc);
-
-public partial class Program;
+// Make Program class accessible to integration tests
+public partial class Program { }

@@ -1,3 +1,4 @@
+using Agon.Domain.Engines;
 using Agon.Domain.Sessions;
 using FluentAssertions;
 
@@ -5,122 +6,138 @@ namespace Agon.Domain.Tests.Sessions;
 
 public class RoundPolicyTests
 {
-    // --- Default values ---
+    // ── GetConvergenceThreshold ───────────────────────────────────────────────
+
+    [Theory]
+    [InlineData(0,  0.75f)]
+    [InlineData(50, 0.75f)]
+    [InlineData(69, 0.75f)]
+    [InlineData(70, 0.85f)]
+    [InlineData(100, 0.85f)]
+    public void GetConvergenceThreshold_ReturnsCorrectThresholdForFrictionLevel(
+        int frictionLevel, float expectedThreshold)
+    {
+        var policy = RoundPolicy.Default();
+        policy.GetConvergenceThreshold(frictionLevel).Should().BeApproximately(expectedThreshold, 0.001f);
+    }
+
+    // ── IsBudgetExhausted ─────────────────────────────────────────────────────
 
     [Fact]
-    public void DefaultPolicy_HasCorrectLimits()
+    public void IsBudgetExhausted_ReturnsFalse_WhenTokensUnderLimit()
     {
-        var policy = new RoundPolicy();
+        var policy = RoundPolicy.Default();
+        policy.IsBudgetExhausted(100_000).Should().BeFalse();
+    }
+
+    [Fact]
+    public void IsBudgetExhausted_ReturnsTrue_AtExactLimit()
+    {
+        var policy = RoundPolicy.Default();
+        policy.IsBudgetExhausted(200_000).Should().BeTrue();
+    }
+
+    [Fact]
+    public void IsBudgetExhausted_ReturnsTrue_AboveLimit()
+    {
+        var policy = RoundPolicy.Default();
+        policy.IsBudgetExhausted(250_000).Should().BeTrue();
+    }
+
+    // ── BudgetUtilisation ─────────────────────────────────────────────────────
+
+    [Theory]
+    [InlineData(0,       0.00f)]
+    [InlineData(100_000, 0.50f)]
+    [InlineData(200_000, 1.00f)]
+    public void BudgetUtilisation_ReturnsCorrectFraction(int tokensUsed, float expected)
+    {
+        RoundPolicy.Default().BudgetUtilisation(tokensUsed)
+            .Should().BeApproximately(expected, 0.001f);
+    }
+
+    [Fact]
+    public void BudgetUtilisation_ZeroBudget_ReturnsOne()
+    {
+        var policy = new RoundPolicy { MaxSessionBudgetTokens = 0 };
+        policy.BudgetUtilisation(1).Should().Be(1f);
+    }
+
+    // ── ShouldConverge ────────────────────────────────────────────────────────
+
+    [Fact]
+    public void ShouldConverge_ReturnsFalse_WhenBlockingOpenQuestionsExist()
+    {
+        var policy = RoundPolicy.Default();
+        policy.ShouldConverge(0.80f, 0.80f, 0.80f, hasBlockingOpenQuestions: true, frictionLevel: 50)
+            .Should().BeFalse();
+    }
+
+    [Fact]
+    public void ShouldConverge_ReturnsFalse_WhenOverallScoreBelowStandardThreshold()
+    {
+        var policy = RoundPolicy.Default();
+        policy.ShouldConverge(0.70f, 0.80f, 0.80f, hasBlockingOpenQuestions: false, frictionLevel: 50)
+            .Should().BeFalse();
+    }
+
+    [Fact]
+    public void ShouldConverge_ReturnsTrue_WhenAllConditionsMet_StandardFriction()
+    {
+        var policy = RoundPolicy.Default();
+        policy.ShouldConverge(0.80f, 0.75f, 0.55f, hasBlockingOpenQuestions: false, frictionLevel: 50)
+            .Should().BeTrue();
+    }
+
+    [Fact]
+    public void ShouldConverge_ReturnsFalse_WhenHighFrictionThresholdNotMet()
+    {
+        var policy = RoundPolicy.Default();
+        // overall = 0.80 which is >= 0.75 standard threshold but < 0.85 high-friction threshold
+        policy.ShouldConverge(0.80f, 0.85f, 0.75f, hasBlockingOpenQuestions: false, frictionLevel: 70)
+            .Should().BeFalse();
+    }
+
+    [Fact]
+    public void ShouldConverge_ReturnsTrue_WhenHighFrictionThresholdMet()
+    {
+        var policy = RoundPolicy.Default();
+        policy.ShouldConverge(0.87f, 0.85f, 0.75f, hasBlockingOpenQuestions: false, frictionLevel: 70)
+            .Should().BeTrue();
+    }
+
+    [Fact]
+    public void ShouldConverge_ReturnsFalse_WhenAssumptionExplicitnessToolow_HighFriction()
+    {
+        var policy = RoundPolicy.Default();
+        // assumption explicitness 0.75 < 0.80 required at high friction
+        policy.ShouldConverge(0.87f, 0.75f, 0.75f, hasBlockingOpenQuestions: false, frictionLevel: 70)
+            .Should().BeFalse();
+    }
+
+    // ── Default values ────────────────────────────────────────────────────────
+
+    [Fact]
+    public void Default_HasExpectedValues()
+    {
+        var policy = RoundPolicy.Default();
 
         policy.MaxClarificationRounds.Should().Be(2);
         policy.MaxDebateRounds.Should().Be(2);
         policy.MaxTargetedLoops.Should().Be(2);
         policy.MaxSessionBudgetTokens.Should().Be(200_000);
-        policy.ConvergenceThresholdStandard.Should().Be(0.75f);
-        policy.ConvergenceThresholdHighFriction.Should().Be(0.85f);
+        policy.ConvergenceThresholdStandard.Should().BeApproximately(0.75f, 0.001f);
+        policy.ConvergenceThresholdHighFriction.Should().BeApproximately(0.85f, 0.001f);
         policy.HighFrictionCutoff.Should().Be(70);
     }
 
-    // --- Loop termination ---
-
     [Fact]
-    public void ShouldTerminateClarification_True_WhenAtMaxRounds()
+    public void Default_ConfidenceDecayConfig_HasExpectedDefaults()
     {
-        var policy = new RoundPolicy();
+        var policy = RoundPolicy.Default();
 
-        policy.ShouldTerminateClarification(currentRound: 2).Should().BeTrue();
-    }
-
-    [Fact]
-    public void ShouldTerminateClarification_False_WhenBelowMaxRounds()
-    {
-        var policy = new RoundPolicy();
-
-        policy.ShouldTerminateClarification(currentRound: 1).Should().BeFalse();
-    }
-
-    [Fact]
-    public void ShouldTerminateDebate_True_WhenAtMaxRounds()
-    {
-        var policy = new RoundPolicy();
-
-        policy.ShouldTerminateDebate(currentRound: 2).Should().BeTrue();
-    }
-
-    [Fact]
-    public void ShouldTerminateTargetedLoop_True_WhenAtMaxRounds()
-    {
-        var policy = new RoundPolicy();
-
-        policy.ShouldTerminateTargetedLoop(currentLoop: 2).Should().BeTrue();
-    }
-
-    // --- Budget exhaustion ---
-
-    [Fact]
-    public void IsBudgetExhausted_True_WhenTokensExceedBudget()
-    {
-        var policy = new RoundPolicy();
-
-        policy.IsBudgetExhausted(tokensUsed: 200_001).Should().BeTrue();
-    }
-
-    [Fact]
-    public void IsBudgetExhausted_True_WhenTokensEqualBudget()
-    {
-        var policy = new RoundPolicy();
-
-        policy.IsBudgetExhausted(tokensUsed: 200_000).Should().BeTrue();
-    }
-
-    [Fact]
-    public void IsBudgetExhausted_False_WhenTokensBelowBudget()
-    {
-        var policy = new RoundPolicy();
-
-        policy.IsBudgetExhausted(tokensUsed: 150_000).Should().BeFalse();
-    }
-
-    // --- Convergence threshold selection ---
-
-    [Fact]
-    public void GetConvergenceThreshold_ReturnsStandard_WhenFrictionBelowCutoff()
-    {
-        var policy = new RoundPolicy();
-
-        policy.GetConvergenceThreshold(frictionLevel: 50).Should().Be(0.75f);
-    }
-
-    [Fact]
-    public void GetConvergenceThreshold_ReturnsHighFriction_WhenFrictionAtCutoff()
-    {
-        var policy = new RoundPolicy();
-
-        policy.GetConvergenceThreshold(frictionLevel: 70).Should().Be(0.85f);
-    }
-
-    [Fact]
-    public void GetConvergenceThreshold_ReturnsHighFriction_WhenFrictionAboveCutoff()
-    {
-        var policy = new RoundPolicy();
-
-        policy.GetConvergenceThreshold(frictionLevel: 90).Should().Be(0.85f);
-    }
-
-    // --- Custom policy ---
-
-    [Fact]
-    public void CustomPolicy_OverridesDefaults()
-    {
-        var policy = new RoundPolicy
-        {
-            MaxClarificationRounds = 3,
-            MaxDebateRounds = 4,
-            MaxSessionBudgetTokens = 500_000
-        };
-
-        policy.ShouldTerminateClarification(currentRound: 2).Should().BeFalse();
-        policy.ShouldTerminateClarification(currentRound: 3).Should().BeTrue();
-        policy.IsBudgetExhausted(tokensUsed: 300_000).Should().BeFalse();
+        policy.ConfidenceDecay.DecayStep.Should().BeApproximately(0.15f, 0.001f);
+        policy.ConfidenceDecay.BoostStep.Should().BeApproximately(0.10f, 0.001f);
+        policy.ConfidenceDecay.ContestedThreshold.Should().BeApproximately(0.30f, 0.001f);
     }
 }

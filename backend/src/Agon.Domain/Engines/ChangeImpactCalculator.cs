@@ -1,54 +1,87 @@
-using Agon.Domain.TruthMap;
 using Agon.Domain.TruthMap.Entities;
+using TruthMapModel = Agon.Domain.TruthMap.TruthMap;
 
 namespace Agon.Domain.Engines;
 
 /// <summary>
-/// Traverses the derived_from graph to find all entities transitively
-/// impacted when a given entity changes. Used for change propagation.
+/// Computes the downstream blast radius of a change to any entity in the Truth Map.
+///
+/// Algorithm:
+/// 1. Start from the changed entity ID.
+/// 2. Traverse the derived_from graph: find all entities whose derived_from list
+///    includes the changed entity (directly or transitively).
+/// 3. Return the complete set of affected entity IDs.
+///
+/// The Orchestrator uses this to mark affected entities as PendingRevalidation
+/// and to dispatch targeted micro-round tasks to the relevant agents.
 /// </summary>
 public static class ChangeImpactCalculator
 {
     /// <summary>
-    /// Returns the set of entity IDs that are transitively impacted by a change
-    /// to the entity with the given ID. Does not include the source entity itself.
-    /// Handles circular dependencies safely.
+    /// Returns the set of entity IDs that are transitively derived from
+    /// <paramref name="changedEntityId"/>.
+    /// The changed entity itself is NOT included in the result.
     /// </summary>
-    public static IReadOnlySet<string> CalculateImpact(string entityId, TruthMapState map)
+    public static IReadOnlySet<string> GetImpactSet(string changedEntityId, TruthMapModel map)
     {
-        var impacted = new HashSet<string>();
+        ArgumentException.ThrowIfNullOrWhiteSpace(changedEntityId);
+        ArgumentNullException.ThrowIfNull(map);
+
+        var visited = new HashSet<string>(StringComparer.Ordinal);
         var queue = new Queue<string>();
-        queue.Enqueue(entityId);
+        queue.Enqueue(changedEntityId);
+
+        // Build an index: entityId → list of entity IDs that declare it in derived_from.
+        var dependents = BuildDependentsIndex(map);
 
         while (queue.Count > 0)
         {
             var current = queue.Dequeue();
-            var dependents = FindDependents(current, map);
 
-            foreach (var dependent in dependents)
-            {
-                if (impacted.Add(dependent))
-                {
-                    queue.Enqueue(dependent);
-                }
-            }
+            if (!dependents.TryGetValue(current, out var children))
+                continue;
+
+            foreach (var child in children.Where(c => visited.Add(c)))
+                queue.Enqueue(child);
         }
 
-        // Don't include the source entity
-        impacted.Remove(entityId);
-        return impacted;
+        return visited;
     }
 
+    // ── Internal helpers ─────────────────────────────────────────────────────
+
     /// <summary>
-    /// Finds all entities that have the given entityId in their derived_from,
-    /// supports, or contradicts lists.
+    /// Builds a map of entityId → [ids of entities that list it in their derived_from].
+    /// This inverts the derived_from relationship so we can traverse downstream.
     /// </summary>
-    private static IEnumerable<string> FindDependents(string entityId, TruthMapState map)
+    private static Dictionary<string, List<string>> BuildDependentsIndex(TruthMapModel map)
     {
-        return map.Claims.Where(c => c.DerivedFrom.Contains(entityId)).Select(c => c.Id)
-            .Concat(map.Assumptions.Where(a => a.DerivedFrom.Contains(entityId)).Select(a => a.Id))
-            .Concat(map.Decisions.Where(d => d.DerivedFrom.Contains(entityId)).Select(d => d.Id))
-            .Concat(map.Risks.Where(r => r.DerivedFrom.Contains(entityId)).Select(r => r.Id))
-            .Concat(map.Evidence.Where(e => e.Supports.Contains(entityId) || e.Contradicts.Contains(entityId)).Select(e => e.Id));
+        var index = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+
+        AddToIndex(index, map.Claims.Select(c => (c.Id, c.DerivedFrom)));
+        AddToIndex(index, map.Assumptions.Select(a => (a.Id, a.DerivedFrom)));
+        AddToIndex(index, map.Decisions.Select(d => (d.Id, d.DerivedFrom)));
+        AddToIndex(index, map.Risks.Select(r => (r.Id, r.DerivedFrom)));
+
+        return index;
+    }
+
+    private static void AddToIndex(
+        Dictionary<string, List<string>> index,
+        IEnumerable<(string Id, IReadOnlyList<string> DerivedFrom)> entities)
+    {
+        foreach (var (id, derivedFrom) in entities)
+        {
+            foreach (var parentId in derivedFrom)
+            {
+                if (!index.TryGetValue(parentId, out var deps))
+                {
+                    deps = new List<string>();
+                    index[parentId] = deps;
+                }
+
+                deps.Add(id);
+            }
+        }
     }
 }
