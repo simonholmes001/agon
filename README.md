@@ -1,7 +1,22 @@
 # Agon — Living Strategy Room
 
-**Version:** 3.0  
-**Stack:** Next.js (frontend) + ASP.NET Core (.NET 9) (backend) + Microsoft Agent Framework (orchestration) + PostgreSQL + Redis + SignalR
+[![Next.js](https://img.shields.io/badge/Next.js-16-000000?style=flat-square&logo=next.js)](https://nextjs.org)
+[![React](https://img.shields.io/badge/React-19-61DAFB?style=flat-square&logo=react&logoColor=000)](https://react.dev)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?style=flat-square&logo=typescript&logoColor=fff)](https://www.typescriptlang.org)
+[![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-v4-06B6D4?style=flat-square&logo=tailwindcss&logoColor=fff)](https://tailwindcss.com)
+[![.NET](https://img.shields.io/badge/.NET-9-512BD4?style=flat-square&logo=dotnet&logoColor=fff)](https://dotnet.microsoft.com)
+[![Vitest](https://img.shields.io/badge/Tested_with-Vitest-6E9F18?style=flat-square&logo=vitest&logoColor=fff)](https://vitest.dev)
+[![xUnit](https://img.shields.io/badge/Tested_with-xUnit-512BD4?style=flat-square&logo=dotnet&logoColor=fff)](https://xunit.net)
+[![Tests](https://img.shields.io/badge/Tests-395_passing-brightgreen?style=flat-square)]()
+[![Coverage](https://img.shields.io/badge/Coverage-83%25_lines-green?style=flat-square)]()
+[![TDD](https://img.shields.io/badge/Methodology-TDD-red?style=flat-square)]()
+[![Licence](https://img.shields.io/badge/Licence-Private-lightgrey?style=flat-square)]()
+
+> A council of specialist AI agents debates your idea so you don't ship your blind spots.
+
+Agon is an agentic idea-analysis workspace. You bring a raw idea — a product concept, a technical proposal, a strategic pivot — and a council of AI agents drawn from different model providers tears it apart, stress-tests it, and reassembles it into a decision-grade output pack.
+
+Unlike a single-prompt AI chat, Agon maintains a **living Truth Map**: a structured, versioned graph of claims, assumptions, risks, and decisions that every agent reads from and writes to. If a constraint changes mid-session, the system propagates that change and agents re-evaluate automatically.
 
 ---
 
