@@ -4,6 +4,8 @@ using Agon.Application.Interfaces;
 using Agon.Application.Orchestration;
 using Agon.Application.Services;
 using Agon.Domain.Agents;
+using Agon.Domain.Engines;
+using Agon.Domain.Sessions;
 using Agon.Infrastructure.Agents;
 using Agon.Infrastructure.Persistence.PostgreSQL;
 using Agon.Infrastructure.Persistence.Redis;
@@ -19,10 +21,19 @@ using StackExchange.Redis;
 var builder = WebApplication.CreateBuilder(args);
 
 // ── Load Environment Variables from .env File ───────────────────────────
-// This allows us to read OPENAI_KEY, CLAUDE_KEY, etc. from the .env file
-var envFilePath = Path.Combine(Directory.GetParent(builder.Environment.ContentRootPath)?.Parent?.FullName ?? "", ".env");
+// This allows us to read OPENAI_KEY, CLAUDE_KEY, etc. from the .env file in the root directory
+// ContentRootPath is: /Users/.../Agon/backend/src/Agon.Api
+// Need to go up: Agon.Api -> src -> backend -> Agon (root)
+var contentRoot = builder.Environment.ContentRootPath;
+var projectRoot = Directory.GetParent(contentRoot)?.Parent?.Parent?.FullName ?? "";
+var envFilePath = Path.Combine(projectRoot, ".env");
+
+Console.WriteLine($"[Startup] Looking for .env file at: {envFilePath}");
+Console.WriteLine($"[Startup] .env file exists: {File.Exists(envFilePath)}");
+
 if (File.Exists(envFilePath))
 {
+    var loadedKeys = new List<string>();
     foreach (var line in File.ReadAllLines(envFilePath))
     {
         if (string.IsNullOrWhiteSpace(line) || line.StartsWith("#")) continue;
@@ -33,8 +44,14 @@ if (File.Exists(envFilePath))
             var key = parts[0];
             var value = parts[1].Trim('"'); // Remove surrounding quotes
             Environment.SetEnvironmentVariable(key, value);
+            loadedKeys.Add(key);
         }
     }
+    Console.WriteLine($"[Startup] Loaded {loadedKeys.Count} keys from .env: {string.Join(", ", loadedKeys)}");
+}
+else
+{
+    Console.WriteLine($"[Startup] WARNING: .env file not found at {envFilePath}");
 }
 
 // ── Configuration ───────────────────────────────────────────────────────
@@ -46,6 +63,11 @@ llmConfig.OpenAI.ApiKey = ReplaceEnvVars(llmConfig.OpenAI.ApiKey);
 llmConfig.Anthropic.ApiKey = ReplaceEnvVars(llmConfig.Anthropic.ApiKey);
 llmConfig.Google.ApiKey = ReplaceEnvVars(llmConfig.Google.ApiKey);
 llmConfig.DeepSeek.ApiKey = ReplaceEnvVars(llmConfig.DeepSeek.ApiKey);
+
+Console.WriteLine($"[Startup] OpenAI API key configured: {!string.IsNullOrEmpty(llmConfig.OpenAI.ApiKey)}");
+Console.WriteLine($"[Startup] Anthropic API key configured: {!string.IsNullOrEmpty(llmConfig.Anthropic.ApiKey)}");
+Console.WriteLine($"[Startup] Google API key configured: {!string.IsNullOrEmpty(llmConfig.Google.ApiKey)}");
+Console.WriteLine($"[Startup] DeepSeek API key configured: {!string.IsNullOrEmpty(llmConfig.DeepSeek.ApiKey)}");
 
 builder.Services.AddSingleton(llmConfig);
 builder.Services.AddSingleton(agonConfig);
@@ -87,6 +109,25 @@ builder.Services.AddScoped<IEventBroadcaster, SignalREventBroadcaster>();
 // ── Application Layer Services ──────────────────────────────────────────
 builder.Services.AddScoped<ISessionService, SessionService>();
 
+// ── Domain: RoundPolicy (Session Configuration) ─────────────────────────
+// Create RoundPolicy from configuration (immutable, so singleton is fine)
+builder.Services.AddSingleton(sp =>
+{
+    var agonConfig = sp.GetRequiredService<AgonConfiguration>();
+    return new RoundPolicy
+    {
+        MaxClarificationRounds = agonConfig.MaxClarificationRounds,
+        MaxDebateRounds = agonConfig.MaxDebateRounds,
+        MaxTargetedLoops = agonConfig.MaxTargetedLoops,
+        MaxSessionBudgetTokens = agonConfig.SessionBudgetTokens,
+        ConvergenceThresholdStandard = (float)agonConfig.ConvergenceThreshold,
+        ConvergenceThresholdHighFriction = 0.85f, // Hard-coded high friction threshold
+        HighFrictionCutoff = agonConfig.HighFrictionThreshold,
+        ConfidenceDecay = new ConfidenceDecayConfig(), // Use defaults
+        AgentTimeoutSeconds = 90
+    };
+});
+
 // Only register Orchestrator and AgentRunner if dependencies are available
 if (!builder.Environment.IsEnvironment("Testing"))
 {
@@ -100,18 +141,19 @@ if (!builder.Environment.IsEnvironment("Testing"))
     // Register AgentResponseParser adapter (shared by all agents)
     builder.Services.AddScoped<IAgentResponseParser, AgentResponseParserAdapter>();
 
-    var config = builder.Configuration.Get<LlmConfiguration>() ?? throw new InvalidOperationException("LlmConfiguration is missing");
-
     // ── Register Council Agents with Provider-Specific Native MAF AIAgents ──
     
     // Moderator: OpenAI GPT (via ChatCompletion API)
     builder.Services.AddScoped<ICouncilAgent>(sp =>
     {
+        var config = sp.GetRequiredService<LlmConfiguration>();
         var parser = sp.GetRequiredService<IAgentResponseParser>();
-        // Cast ChatClient to IChatClient for .AsAIAgent() extension
-        var aiAgent = ((IChatClient)new OpenAIClient(config.OpenAI.ApiKey)
-            .GetChatClient(config.OpenAI.Model))
-            .AsAIAgent(
+        
+        IChatClient chatClient = new OpenAIClient(config.OpenAI.ApiKey)
+            .GetChatClient(config.OpenAI.Model)
+            .AsIChatClient();
+        
+        var aiAgent = chatClient.AsAIAgent(
                 instructions: AgentSystemPrompts.Moderator,
                 name: AgentId.Moderator);
         
@@ -125,11 +167,14 @@ if (!builder.Environment.IsEnvironment("Testing"))
     // GPT Agent: OpenAI GPT (via ChatCompletion API)
     builder.Services.AddScoped<ICouncilAgent>(sp =>
     {
+        var config = sp.GetRequiredService<LlmConfiguration>();
         var parser = sp.GetRequiredService<IAgentResponseParser>();
-        // Cast ChatClient to IChatClient for .AsAIAgent() extension
-        var aiAgent = ((IChatClient)new OpenAIClient(config.OpenAI.ApiKey)
-            .GetChatClient(config.OpenAI.Model))
-            .AsAIAgent(
+        
+        IChatClient chatClient = new OpenAIClient(config.OpenAI.ApiKey)
+            .GetChatClient(config.OpenAI.Model)
+            .AsIChatClient();
+        
+        var aiAgent = chatClient.AsAIAgent(
                 instructions: AgentSystemPrompts.GptAgent,
                 name: AgentId.GptAgent);
         
@@ -143,6 +188,7 @@ if (!builder.Environment.IsEnvironment("Testing"))
     // Gemini Agent: Google Gemini (via Google.GenAI + Mscc.GenerativeAI.Microsoft)
     builder.Services.AddScoped<ICouncilAgent>(sp =>
     {
+        var config = sp.GetRequiredService<LlmConfiguration>();
         var parser = sp.GetRequiredService<IAgentResponseParser>();
         var geminiClient = new Client(vertexAI: false, apiKey: config.Google.ApiKey);
         var chatClient = geminiClient.AsIChatClient(config.Google.Model);
@@ -160,6 +206,7 @@ if (!builder.Environment.IsEnvironment("Testing"))
     // Claude Agent: Anthropic Claude (via Anthropic SDK)
     builder.Services.AddScoped<ICouncilAgent>(sp =>
     {
+        var config = sp.GetRequiredService<LlmConfiguration>();
         var parser = sp.GetRequiredService<IAgentResponseParser>();
         // Anthropic: .AsIChatClient(model) then .AsAIAgent()
         var aiAgent = new AnthropicClient() { ApiKey = config.Anthropic.ApiKey }
@@ -178,11 +225,14 @@ if (!builder.Environment.IsEnvironment("Testing"))
     // Synthesizer: OpenAI GPT (via ChatCompletion API)
     builder.Services.AddScoped<ICouncilAgent>(sp =>
     {
+        var config = sp.GetRequiredService<LlmConfiguration>();
         var parser = sp.GetRequiredService<IAgentResponseParser>();
-        // Cast ChatClient to IChatClient for .AsAIAgent() extension
-        var aiAgent = ((IChatClient)new OpenAIClient(config.OpenAI.ApiKey)
-            .GetChatClient(config.OpenAI.Model))
-            .AsAIAgent(
+        
+        IChatClient chatClient = new OpenAIClient(config.OpenAI.ApiKey)
+            .GetChatClient(config.OpenAI.Model)
+            .AsIChatClient();
+        
+        var aiAgent = chatClient.AsAIAgent(
                 instructions: AgentSystemPrompts.Synthesizer,
                 name: AgentId.Synthesizer);
         
