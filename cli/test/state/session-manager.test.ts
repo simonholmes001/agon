@@ -9,14 +9,14 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { SessionManager } from '../../src/state/session-manager.js';
-import type { SessionResponse } from '../../src/api/types.js';
-import * as fs from 'fs/promises';
-import * as path from 'path';
-import os from 'os';
+import { SessionManager } from '../../src/state/session-manager';
+import type { SessionResponse } from '../../src/api/types';
+import * as fs from 'node:fs/promises';
+import * as path from 'node:path';
+import os from 'node:os';
 
 // Mock fs module
-vi.mock('fs/promises');
+vi.mock('node:fs/promises');
 
 describe('SessionManager', () => {
   let sessionManager: SessionManager;
