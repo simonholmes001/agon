@@ -182,6 +182,65 @@ public class SessionsController : ControllerBase
         return Ok(response);
     }
 
+    /// <summary>
+    /// POST /sessions/test-agent — Simple endpoint to test agent functionality with a direct question.
+    /// This bypasses the full orchestration workflow and directly invokes a single agent.
+    /// </summary>
+    [HttpPost("test-agent")]
+    [ProducesResponseType(typeof(AgentTestResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+    public async Task<IActionResult> TestAgent(
+        [FromBody] AgentTestRequest request,
+        [FromServices] IReadOnlyList<Application.Interfaces.ICouncilAgent> agents,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            // Get the first available agent (Moderator)
+            var agent = agents.FirstOrDefault();
+            
+            if (agent is null)
+            {
+                return StatusCode(500, new { error = "No agents configured" });
+            }
+
+            _logger.LogInformation("Testing agent {AgentId} with question: {Question}", agent.AgentId, request.Question);
+
+            // Create a Truth Map seeded with the user's question as CoreIdea
+            var sessionId = Guid.NewGuid();
+            var truthMap = Domain.TruthMap.TruthMap.Empty(sessionId) with 
+            { 
+                CoreIdea = request.Question 
+            };
+            
+            var context = Application.Models.AgentContext.ForAnalysis(
+                sessionId: sessionId,
+                truthMap: truthMap,
+                frictionLevel: 50,
+                roundNumber: 1,
+                researchToolsEnabled: false
+            );
+
+            // Invoke the agent
+            var response = await agent.RunAsync(context, cancellationToken);
+
+            _logger.LogInformation("Agent {AgentId} responded: {Message}", agent.AgentId, response.Message);
+
+            var patchCount = response.Patch != null ? 1 : 0;
+
+            return Ok(new AgentTestResponse(
+                agent.AgentId,
+                response.Message,
+                patchCount
+            ));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to test agent");
+            return StatusCode(500, new { error = ex.Message, stackTrace = ex.StackTrace });
+        }
+    }
+
     // ── Helper Methods ──────────────────────────────────────────────────
 
     private static SessionResponse MapToResponse(Application.Models.SessionState sessionState)
@@ -214,3 +273,7 @@ public record SnapshotResponse(
     Guid SnapshotId,
     int Round,
     DateTimeOffset CreatedAt);
+
+public record AgentTestRequest(string Question);
+
+public record AgentTestResponse(string AgentId, string Message, int PatchOperationsCount);
