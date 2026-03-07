@@ -116,6 +116,49 @@ public class SessionServiceTests
         first.SessionId.Should().NotBe(second.SessionId);
     }
 
+    [Fact]
+    public async Task CreateAsync_WithUserContext_PersistsSessionWithUserInfo()
+    {
+        var userId = Guid.NewGuid();
+        var idea = "Build a task management app";
+        var sessionRepo = StubSessionRepo();
+        var svc = BuildService(sessionRepo: sessionRepo);
+
+        var result = await svc.CreateAsync(userId, idea, frictionLevel: 75);
+
+        result.Phase.Should().Be(SessionPhase.Intake);
+        result.Status.Should().Be(SessionStatus.Active);
+        result.FrictionLevel.Should().Be(75);
+        await sessionRepo.Received(1).CreateAsync(
+            Arg.Is<SessionState>(s => s.UserId == userId),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task CreateAsync_WithUserContext_SeedsEmptyTruthMap()
+    {
+        var truthMapRepo = StubTruthMapRepo();
+        var svc = BuildService(truthMapRepo: truthMapRepo);
+
+        await svc.CreateAsync(Guid.NewGuid(), "Test idea", 50);
+
+        await truthMapRepo.Received(1).SaveAsync(
+            Arg.Is<TruthMapModel>(m => m.Version == 0 && m.Round == 0),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task CreateAsync_WithUserContext_GeneratesUniqueSessionId()
+    {
+        var userId = Guid.NewGuid();
+        var svc = BuildService();
+
+        var first = await svc.CreateAsync(userId, "Idea 1", 50);
+        var second = await svc.CreateAsync(userId, "Idea 2", 50);
+
+        first.SessionId.Should().NotBe(second.SessionId);
+    }
+
     // ── GetAsync ──────────────────────────────────────────────────────────────
 
     [Fact]
@@ -141,6 +184,84 @@ public class SessionServiceTests
         var result = await svc.GetAsync(Guid.NewGuid());
 
         result.Should().BeNull();
+    }
+
+    // ── StartClarificationAsync ───────────────────────────────────────────────
+
+    [Fact]
+    public async Task StartClarificationAsync_TransitionsFromIntakeToClarification()
+    {
+        var state = BuildState(phase: SessionPhase.Intake);
+        var sessionRepo = StubSessionRepo(state);
+        var svc = BuildService(sessionRepo: sessionRepo);
+
+        await svc.StartClarificationAsync(state.SessionId);
+
+        state.Phase.Should().Be(SessionPhase.Clarification);
+        await sessionRepo.Received(1).UpdateAsync(
+            Arg.Is<SessionState>(s => s.Phase == SessionPhase.Clarification),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task StartClarificationAsync_ThrowsWhenSessionNotFound()
+    {
+        var repo = Substitute.For<ISessionRepository>();
+        repo.GetAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<SessionState?>(null));
+
+        var svc = BuildService(sessionRepo: repo);
+
+        var act = async () => await svc.StartClarificationAsync(Guid.NewGuid());
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*not found*");
+    }
+
+    [Fact]
+    public async Task StartClarificationAsync_ThrowsWhenNotInIntakePhase()
+    {
+        var state = BuildState(phase: SessionPhase.Clarification); // Already in Clarification
+        var sessionRepo = StubSessionRepo(state);
+        var svc = BuildService(sessionRepo: sessionRepo);
+
+        var act = async () => await svc.StartClarificationAsync(state.SessionId);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*Cannot start clarification from phase*");
+    }
+
+    [Fact]
+    public async Task StartClarificationAsync_BroadcastsPhaseTransitionEvent()
+    {
+        var state = BuildState(phase: SessionPhase.Intake);
+        var sessionRepo = StubSessionRepo(state);
+        var broadcaster = Substitute.For<IEventBroadcaster>();
+        var svcWithBroadcaster = new SessionService(
+            sessionRepo,
+            StubTruthMapRepo(),
+            StubSnapshotStore(),
+            broadcaster);
+
+        await svcWithBroadcaster.StartClarificationAsync(state.SessionId);
+
+        await broadcaster.Received(1).SendRoundProgressAsync(
+            state.SessionId,
+            nameof(SessionPhase.Clarification),
+            Arg.Any<string>(),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task StartClarificationAsync_DoesNotBroadcastWhenBroadcasterIsNull()
+    {
+        var state = BuildState(phase: SessionPhase.Intake);
+        var sessionRepo = StubSessionRepo(state);
+        var svc = BuildService(sessionRepo: sessionRepo); // No broadcaster
+
+        var act = async () => await svc.StartClarificationAsync(state.SessionId);
+
+        await act.Should().NotThrowAsync();
     }
 
     // ── AdvancePhaseAsync ─────────────────────────────────────────────────────
