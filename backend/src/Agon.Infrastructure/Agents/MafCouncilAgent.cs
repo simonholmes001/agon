@@ -95,6 +95,20 @@ public sealed class MafCouncilAgent : ICouncilAgent
         sb.AppendLine("```");
         sb.AppendLine();
 
+        if (context.UserMessages.Count > 0)
+        {
+            sb.AppendLine("# User Responses");
+            sb.AppendLine("The user has provided the following clarification responses:");
+            sb.AppendLine();
+            for (int i = 0; i < context.UserMessages.Count; i++)
+            {
+                var msg = context.UserMessages[i];
+                sb.AppendLine($"{i + 1}. {msg.Content}");
+                sb.AppendLine($"   _(Round {msg.ClarificationRound}, {msg.SubmittedAt:yyyy-MM-dd HH:mm:ss UTC})_");
+                sb.AppendLine();
+            }
+        }
+
         if (!string.IsNullOrWhiteSpace(context.MicroDirective))
         {
             sb.AppendLine("# Task Directive");
