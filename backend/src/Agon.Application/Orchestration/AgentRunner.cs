@@ -77,6 +77,14 @@ public sealed class AgentRunner : IAgentRunner
             state.ClarificationRoundCount,
             response.TokensUsed);
 
+        // Log the Moderator's message for debugging
+        if (!string.IsNullOrWhiteSpace(response.Message))
+        {
+            _logger?.LogInformation(
+                "Moderator message: {Message}",
+                response.Message.Length > 500 ? response.Message.Substring(0, 500) + "..." : response.Message);
+        }
+
         return response;
     }
 
