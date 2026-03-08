@@ -4,6 +4,7 @@ using Agon.Domain.Sessions;
 using Agon.Infrastructure.Persistence.PostgreSQL;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
+using NSubstitute;
 using TruthMapModel = Agon.Domain.TruthMap.TruthMap;
 
 namespace Agon.Infrastructure.Tests.Persistence;
@@ -24,7 +25,13 @@ public class SessionRepositoryTests : IDisposable
             .Options;
         
         _dbContext = new AgonDbContext(options);
-        _repository = new SessionRepository(_dbContext);
+        
+        // Create a stub TruthMapRepository for testing
+        var truthMapRepo = Substitute.For<ITruthMapRepository>();
+        truthMapRepo.GetAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>())
+            .Returns(callInfo => Task.FromResult<TruthMapModel?>(TruthMapModel.Empty((Guid)callInfo[0])));
+        
+        _repository = new SessionRepository(_dbContext, truthMapRepo);
     }
 
     public void Dispose()
