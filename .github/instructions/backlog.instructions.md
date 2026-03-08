@@ -11,23 +11,41 @@ applyTo: '**'
 ## 🎯 Current Sprint (CLI Foundation)
 
 ### In Progress
-- [ ] None
+- [ ] Add progress indicators with ora spinners (replace console.log in commands)
+- [ ] Improve command output formatting (use chalk colors consistently)
 
 ### To Do
-- [ ] Create CLI project structure with oclif
-- [ ] Implement `agon start` command (session creation + clarification)
-- [ ] Implement `agon status` command (session state display)
-- [ ] Implement `agon show` command (artifact display)
-- [ ] Set up local state management (~/.agon/)
-- [ ] Implement API client wrapper (axios + error handling)
-- [ ] Add progress indicators (ora spinners)
-- [ ] Add Markdown rendering (marked-terminal)
-- [ ] Write command tests (oclif test utilities)
-- [ ] Write API client tests (vitest + mocks)
+- [ ] Add interactive prompts for clarification (using inquirer)
+- [ ] Test CLI against live backend API
+- [ ] Add end-to-end tests for complete workflow
 
 ### Done ✅
 - [x] Backend test endpoint fixed (Truth Map CoreIdea seeding)
 - [x] LLM model names corrected and verified (gpt-5.2, claude-opus-4-6, gemini-3-flash-preview)
+- [x] MAF integration verified for all providers
+- [x] Integration test infrastructure created
+- [x] EF Core migrations applied (sessions, truth_maps tables)
+- [x] Architecture documentation updated for CLI-first approach
+- [x] CLI implementation guide created
+- [x] Backlog file created
+- [x] Create CLI project structure with oclif
+- [x] Implement `agon start` command (session creation + clarification)
+- [x] Implement `agon status` command (session state display)
+- [x] Implement `agon show` command (artifact display)
+- [x] Implement `agon sessions` command (list sessions)
+- [x] Implement `agon resume` command (resume paused session)
+- [x] Implement `agon config` command (configuration management)
+- [x] Set up local state management (~/.agon/)
+- [x] Implement API client wrapper (axios + error handling)
+- [x] Write command tests (oclif test utilities)
+- [x] Write API client tests (vitest + mocks)
+- [x] Implement Logger utility (structured logging)
+- [x] Implement Error Handler utility (friendly error messages with suggestions)
+- [x] Implement Formatter utility (dates, durations, IDs, convergence scores)
+- [x] Implement Markdown renderer (marked-terminal integration)
+- [x] Refactor API client to use Logger and Error Handler
+- [x] Refactor Show command to use new utilities
+- [x] All utils tests passing (191 total tests)
 - [x] MAF integration verified for all providers
 - [x] Integration test infrastructure created
 - [x] EF Core migrations applied (sessions, truth_maps tables)

@@ -10,17 +10,17 @@
  */
 
 import { Command, Args, Flags } from '@oclif/core';
-import { marked } from 'marked';
-import { markedTerminal } from 'marked-terminal';
 import { AgonAPIClient } from '../api/agon-client.js';
 import { SessionManager } from '../state/session-manager.js';
 import { ConfigManager } from '../state/config-manager.js';
+import { renderMarkdown } from '../utils/markdown.js';
+import { formatError } from '../utils/error-handler.js';
+import { Logger } from '../utils/logger.js';
 import type { ArtifactType } from '../api/types.js';
 
-// Configure marked to use terminal renderer
-marked.use(markedTerminal() as any);
-
 export default class Show extends Command {
+  private readonly logger = new Logger('Show');
+
   static override readonly description = 'Display an artifact from the current session';
 
   static override readonly examples = [
@@ -87,21 +87,28 @@ export default class Show extends Command {
         sessionId = currentId;
       }
 
+      this.logger.debug('Fetching artifact', { sessionId, artifactType, refresh: flags.refresh });
+
       // Try cache first unless refresh flag is set
       let content: string | null = null;
       
       if (!flags.refresh) {
         content = await sessionManager.getArtifact(sessionId, artifactType);
+        if (content) {
+          this.logger.debug('Artifact loaded from cache');
+        }
       }
 
       // Fetch from API if cache miss or refresh requested
       if (!content) {
         try {
+          this.logger.debug('Fetching artifact from API');
           const artifact = await apiClient.getArtifact(sessionId, artifactType);
           content = artifact.content;
           
           // Save to cache
           await sessionManager.saveArtifact(sessionId, artifactType, content);
+          this.logger.debug('Artifact saved to cache');
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : String(error);
           
@@ -121,11 +128,10 @@ export default class Show extends Command {
       this.displayArtifact(artifactType, content, flags.raw);
 
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      
-      this.error(`❌ Failed to show artifact: ${errorMessage}`, {
-        exit: 1
-      });
+      this.logger.error('Failed to show artifact', { error });
+      this.log('');
+      this.log(formatError(error));
+      this.error('', { exit: 1 });
     }
   }
 
@@ -146,8 +152,8 @@ export default class Show extends Command {
       // Show raw Markdown
       this.log(content);
     } else {
-      // Render Markdown for terminal
-      const rendered = marked(content) as string;
+      // Render Markdown for terminal using our utility
+      const rendered = renderMarkdown(content);
       this.log(rendered);
     }
 

@@ -6,6 +6,8 @@
  */
 
 import axios, { type AxiosInstance, type AxiosError } from 'axios';
+import { Logger } from '../utils/logger.js';
+import { AgonError, ErrorCode } from '../utils/error-handler.js';
 import type { 
   CreateSessionRequest, 
   SessionResponse, 
@@ -16,10 +18,12 @@ import type {
 } from './types.js';
 
 export class AgonAPIClient {
-  private client: AxiosInstance;
-  private maxRetries = 2;
+  private readonly client: AxiosInstance;
+  private readonly maxRetries = 2;
+  private readonly logger: Logger;
 
   constructor(baseURL: string = 'http://localhost:5000') {
+    this.logger = new Logger('AgonAPIClient');
     this.client = axios.create({
       baseURL,
       timeout: 30000, // 30 seconds
@@ -31,8 +35,10 @@ export class AgonAPIClient {
     // Request interceptor for logging
     this.client.interceptors.request.use(
       (config) => {
-        // TODO: Add structured logging
-        console.log(`[API] ${config.method?.toUpperCase()} ${config.url}`);
+        this.logger.debug(`${config.method?.toUpperCase()} ${config.url}`, {
+          method: config.method,
+          url: config.url
+        });
         return config;
       },
       (error) => Promise.reject(error)
@@ -47,11 +53,15 @@ export class AgonAPIClient {
           const retryCount = (error.config as any).__retryCount || 0;
           if (retryCount < this.maxRetries) {
             (error.config as any).__retryCount = retryCount + 1;
+            this.logger.warn(`Retrying request (attempt ${retryCount + 1})`, {
+              url: error.config.url,
+              retryCount: retryCount + 1
+            });
             await this.delay(1000 * (retryCount + 1)); // Exponential backoff
             return this.client.request(error.config);
           }
         }
-        return Promise.reject(this.mapError(error));
+        throw this.mapError(error);
       }
     );
   }
@@ -62,13 +72,23 @@ export class AgonAPIClient {
   async createSession(request: CreateSessionRequest): Promise<SessionResponse> {
     // Validation
     if (!request.idea || request.idea.trim().length === 0) {
-      throw new Error('Idea cannot be empty');
+      throw new AgonError(
+        ErrorCode.INVALID_INPUT,
+        'Idea cannot be empty',
+        ['Provide a description of your idea or decision']
+      );
     }
     if (request.idea.trim().length < 10) {
-      throw new Error('Idea must be at least 10 characters');
+      throw new AgonError(
+        ErrorCode.INVALID_INPUT,
+        'Idea must be at least 10 characters',
+        ['Provide more details about your idea']
+      );
     }
 
+    this.logger.info('Creating new session', { ideaLength: request.idea.length });
     const response = await this.client.post<SessionResponse>('/sessions', request);
+    this.logger.info('Session created successfully', { sessionId: response.data.id });
     return response.data;
   }
 
@@ -139,24 +159,47 @@ export class AgonAPIClient {
       const data = error.response.data as any;
       const message = data?.message || error.message;
 
+      this.logger.error('API error', { status, message });
+
       switch (status) {
         case 404:
-          return new Error(message || 'Session not found');
+          return new AgonError(
+            ErrorCode.SESSION_NOT_FOUND,
+            message || 'Session not found',
+            ['Check that the session ID is correct', 'Run `agon sessions` to list all sessions']
+          );
         case 400:
-          return new Error(message || 'Invalid request');
+          return new AgonError(
+            ErrorCode.INVALID_INPUT,
+            message || 'Invalid request',
+            ['Check your input parameters']
+          );
         case 429:
-          return new Error('Rate limit exceeded. Please try again later.');
+          return new AgonError(
+            ErrorCode.RATE_LIMIT,
+            'Rate limit exceeded. Please try again later.',
+            ['Wait a few minutes before retrying']
+          );
         case 500:
         case 502:
         case 503:
-          return new Error('Backend service unavailable. Please try again.');
+          return new AgonError(
+            ErrorCode.BACKEND_UNAVAILABLE,
+            'Backend service unavailable. Please try again.',
+            ['Check if the backend is running', 'Verify API URL in config']
+          );
         default:
-          return new Error(message);
+          return new AgonError(ErrorCode.API_ERROR, message);
       }
     }
 
     // Network error
-    return new Error(error.message || 'Network error');
+    this.logger.error('Network error', { message: error.message });
+    return new AgonError(
+      ErrorCode.NETWORK_ERROR,
+      error.message || 'Network error',
+      ['Check your internet connection', 'Verify the API URL is correct']
+    );
   }
 
   private delay(ms: number): Promise<void> {
