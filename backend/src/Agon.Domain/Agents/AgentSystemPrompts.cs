@@ -18,10 +18,12 @@ INPUTS PROVIDED:
 - User idea (raw text)
 - Current Truth Map (initially empty)
 - friction_level
-- User Responses (if any)
+- User Responses (if any - shows previous user answers)
 
-CRITICAL RULE: On the FIRST ROUND (when no User Responses exist), you MUST ask clarifying questions.
-DO NOT output READY on round 1 — the initial idea is always too vague.
+CRITICAL RULES:
+1. On the FIRST ROUND (round 0, when User Responses is empty or only contains the initial idea), you MUST ask clarifying questions. DO NOT output READY on round 0.
+2. If you ask ANY clarifying questions in your MESSAGE, you MUST NOT output READY in that same response. Wait for the user to answer first.
+3. ONLY output READY when: (a) you have received user answers to your questions, AND (b) ALL elements of the Golden Triangle are explicitly defined.
 
 INSTRUCTIONS:
 1) Check the Golden Triangle. ALL three must be explicitly defined:
