@@ -13,7 +13,9 @@ applyTo: '**'
 
 **Agon** is a living strategy room for agentic idea analysis. A council of specialist AI agents debates a user's idea in structured rounds, collaboratively building a shared "Truth Map" (structured state graph). The output is a decision-grade artifact pack.
 
-**Stack:** Next.js frontend · ASP.NET Core (.NET) backend · Microsoft Agent Framework · PostgreSQL + pgvector + Redis + Blob storage · SignalR
+**Stack:** CLI (TypeScript + oclif + ink) · ASP.NET Core (.NET) backend · Microsoft Agent Framework · PostgreSQL + pgvector + Redis + Blob storage · SignalR/SSE
+
+**Client Strategy:** CLI-first (Phase 1) → Web UI (Phase 2). Focus on terminal-native users, text artifacts, and rapid validation before investing in complex UI.
 
 **Task backlog:** See `backlog.instructions.md` — it is auto-injected into every session. Update it as tasks are completed or added.
 
@@ -91,7 +93,167 @@ Always consult the relevant provider documentation when building or modifying ag
 
 ---
 
-## Frontend Rules (Next.js)
+## CLI Rules (TypeScript + oclif + ink)
+
+**Phase 1 (Current):** CLI is the primary client for Agon.
+
+### Framework and Libraries
+- **CLI Framework:** oclif (command structure, plugin system, auto-help)
+- **UI Library:** ink (React for terminal UIs)
+- **HTTP Client:** axios for REST API calls
+- **Streaming:** EventSource or polling for SSE (Server-Sent Events)
+- **Markdown Rendering:** marked-terminal (render artifacts in terminal)
+- **Configuration:** cosmiconfig (support `.agonrc` files)
+- **Spinners/Progress:** ora or ink-spinner for async operations
+
+### Command Structure
+
+```bash
+# Core workflow
+agon start <idea>           # Create session + clarification
+agon clarify                # Continue clarification (interactive)
+agon status                 # Show current session status
+agon show <artifact>        # Display artifact (verdict, plan, prd, risks, etc.)
+
+# HITL interactions
+agon challenge <claim-id>   # Challenge a specific claim
+agon constraint <text>      # Add/modify constraint mid-debate
+agon deepdive <entity-id>   # Force targeted deep dive
+
+# Session management
+agon sessions               # List all sessions
+agon resume <session-id>    # Resume paused session
+agon fork <session-id>      # Fork session from snapshot
+
+# Configuration
+agon config                 # Show current config
+agon config set <key> <val> # Set config value (friction, research-tools, etc.)
+```
+
+### Code Organization
+
+```
+cli/
+├── bin/
+│   └── agon.ts                      # CLI entry point
+├── src/
+│   ├── commands/                    # oclif command classes
+│   │   ├── start.ts
+│   │   ├── clarify.ts
+│   │   ├── show.ts
+│   │   ├── challenge.ts
+│   │   ├── constraint.ts
+│   │   ├── deepdive.ts
+│   │   ├── sessions.ts
+│   │   ├── resume.ts
+│   │   ├── fork.ts
+│   │   ├── status.ts
+│   │   └── config.ts
+│   ├── api/                         # Backend API client
+│   │   ├── agon-client.ts          # Main API wrapper
+│   │   ├── session-service.ts
+│   │   ├── artifact-service.ts
+│   │   └── types.ts
+│   ├── ui/                          # Terminal UI components
+│   │   ├── spinner.tsx             # ink spinner component
+│   │   ├── progress.tsx            # ink progress bar
+│   │   ├── markdown.ts             # Markdown renderer
+│   │   ├── question-prompt.tsx     # Interactive clarification UI
+│   │   └── status-display.tsx      # Session status UI
+│   ├── state/                       # Local state management
+│   │   ├── session-manager.ts      # .agon/ directory management
+│   │   └── config-manager.ts       # .agonrc file handling
+│   └── utils/
+│       ├── logger.ts
+│       ├── error-handler.ts
+│       └── formatter.ts
+├── test/
+│   ├── commands/                    # Command tests
+│   └── api/                         # API client tests
+├── package.json
+├── tsconfig.json
+└── README.md
+```
+
+### CLI-Specific Rules
+
+1. **Local State Management:**
+   - Store active session ID in `~/.agon/current-session`
+   - Cache session data in `~/.agon/sessions/<session-id>.json`
+   - Store config in `~/.agonrc` (YAML format)
+
+2. **Streaming Strategy:**
+   - Use spinners/progress bars instead of token-by-token streaming
+   - Poll `/sessions/{id}` for phase transitions every 2 seconds during active debate
+   - Show "Agent X is thinking..." with spinner
+   - Display full agent response when round completes
+
+3. **Error Handling:**
+   - Always show friendly error messages (never raw stack traces)
+   - Suggest recovery actions: `Run 'agon resume' to continue`
+   - Log full errors to `~/.agon/logs/agon.log` for debugging
+
+4. **Interactive Mode:**
+   - Use inquirer.js or ink-text-input for interactive prompts
+   - Clarification questions as numbered list with text input
+   - Confirmation prompts for destructive actions (fork, clear session)
+
+5. **Output Formatting:**
+   - Use chalk for colors (green=success, red=error, yellow=warning, blue=info)
+   - Use boxen for important messages
+   - Use cli-table3 for tabular data (sessions list, Truth Map entities)
+   - Render Markdown artifacts with marked-terminal
+
+6. **Performance:**
+   - Cache API responses locally (session state, artifacts)
+   - Invalidate cache on state changes only
+   - Lazy-load artifacts (don't fetch until `show` command)
+
+7. **Testing:**
+   - Mock API client in command tests
+   - Test command parsing and flag handling
+   - Test interactive prompt flows
+   - Integration tests against real backend (optional)
+
+### Example User Flow
+
+```bash
+# Start new session
+$ agon start "Build a SaaS for project management"
+🎯 Creating session...
+✓ Session created: 8f3d2a1b
+
+🤔 Moderator is analyzing your idea...
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Clarification (Round 1/2):
+
+1. Who is the target customer?
+2. What is the primary pain point?
+3. What's your expected timeline?
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+? Answer 1: Freelancers
+? Answer 2: Lose track of multiple client projects
+? Answer 3: 6 months
+
+✓ Clarification complete.
+
+🔄 Starting debate (friction: 50)...
+  ✓ GPT Agent
+  ✓ Gemini Agent  
+  ✓ Claude Agent
+
+📊 Convergence: 0.78 / 0.75 ✅
+
+✓ Debate complete! Artifacts ready.
+
+Run 'agon show verdict' to view your decision.
+```
+
+---
+
+## Frontend Rules (Next.js) - Phase 2 (Future)
 
 - App Router + TypeScript. No Pages Router.
 - Tailwind for styling. Use shadcn/ui component primitives. No other component library.

@@ -30,6 +30,9 @@ public sealed class SessionState
     /// <summary>Messages from the most recent analysis round, keyed by agent ID.</summary>
     public Dictionary<string, string> LastRoundMessages { get; } = new();
 
+    /// <summary>User messages submitted during clarification (responses to Moderator questions).</summary>
+    public List<UserMessage> UserMessages { get; } = new();
+
     public static SessionState Create(
         Guid sessionId,
         Guid userId,

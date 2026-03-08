@@ -3,7 +3,7 @@ applyTo: '**'
 ---
 # Agon Architecture (Living Strategy Room)
 
-**Version:** 3.0
+**Version:** 3.1
 
 ---
 
@@ -11,11 +11,29 @@ applyTo: '**'
 
 | Layer | Technology |
 |---|---|
-| Frontend | Next.js (App Router) + Tailwind + shadcn/ui primitives + Framer Motion |
-| Realtime | SignalR (streaming tokens + Truth Map state events) |
+| **CLI Client** | **TypeScript + oclif + ink (React for CLI) - PHASE 1 (CURRENT)** |
+| Web Frontend | Next.js (App Router) + Tailwind + shadcn/ui primitives + Framer Motion - PHASE 2 (FUTURE) |
+| Realtime | SignalR (streaming tokens + Truth Map state events) → CLI uses SSE/polling fallback |
 | Backend | ASP.NET Core (.NET) |
 | Orchestration | Microsoft Agent Framework |
 | Persistence | PostgreSQL (sessions, artifacts, Truth Map), pgvector (semantic memory), Redis (ephemeral round state, locks, rate limits), Blob storage (exports) |
+
+### Client Strategy
+
+**Phase 1 (Current): CLI-First Approach**
+- Build command-line interface for core debate workflow
+- Focus on developer/PM/founder users (terminal-native audience)
+- Faster time to value — test debate quality without UI complexity
+- Natural fit for text-based artifacts (Markdown rendering in terminal)
+- Simpler state management and streaming (progress indicators vs full real-time sync)
+
+**Phase 2 (Future): Web UI Layer**
+- Add visual interface once CLI proves concept and workflow
+- Web becomes visualization + collaboration layer
+- Map View, Timeline Scrubber, visual Truth Map explorer
+- Design informed by actual CLI usage patterns
+
+**Rationale:** Text artifacts, conversational flow, and technical audience make CLI ideal for MVP. Web UI complexity deferred until core experience is validated.
 
 ---
 
@@ -78,9 +96,10 @@ Runs when a constraint, assumption, or decision changes mid-session (HITL or sys
 - Semantic retrieval: top-K memories injected into each agent call's context.
 - Supports natural-language queries: "what did we decide about stack?", "find unresolved risks", "show contested claims".
 
-### 2.7 Streaming Service (SignalR)
+### 2.7 Streaming Service (SignalR for Web / SSE for CLI)
 
-Streams the following event types to the frontend:
+**For Web Clients (Phase 2):**
+Streams the following event types via SignalR:
 - Partial agent tokens (streaming output)
 - Round progress events (phase transitions)
 - Truth Map patch events (entity add/update/remove)
@@ -88,13 +107,28 @@ Streams the following event types to the frontend:
 - Convergence score updates (per-dimension and overall)
 - Pending Revalidation notifications (when change propagation triggers)
 
+**For CLI Clients (Phase 1 - Current):**
+Simplified streaming via REST polling or Server-Sent Events (SSE):
+- Progress indicators (spinner, progress bars) instead of token streaming
+- Round completion polling (check phase transition)
+- Artifact ready notifications
+- Error states and warnings
+- CLI shows summarized updates, not real-time token streams
+
 ---
 
 ## 3) Mermaid Diagram
 
 ```mermaid
 graph TD
-  subgraph Client[Next.js Frontend]
+  subgraph CLIClient[CLI Client - Phase 1]
+    CLI[oclif Commands]
+    CLIUI[ink UI Components]
+    CLIHttp[HTTP Client + SSE]
+    CLIState[Local Session State]
+  end
+  
+  subgraph WebClient[Web Client - Phase 2]
     UI[Thread View + Map View]
     Drawer[Truth Map Drawer]
     Controls[Friction Slider + Tap Agent]
@@ -102,7 +136,9 @@ graph TD
     SRClient[SignalR Client]
   end
 
-  UI -->|HTTPS| API[ASP.NET Core API]
+  CLI -->|HTTPS| API[ASP.NET Core API]
+  CLIHttp -->|SSE/Polling| API
+  UI -->|HTTPS| API
   SRClient <-->|WebSockets| API
 
   subgraph Runtime[Agent Runtime .NET]
@@ -282,6 +318,40 @@ The frontend communicates with the backend via two channels: **REST API (HTTPS)*
 All user-initiated actions and data fetches use standard REST calls:
 
 | Action | Method | Endpoint | Notes |
+|---|---|---|---|
+| Create session | `POST` | `/sessions` | Returns session ID |
+| Start debate | `POST` | `/sessions/{id}/start` | Kicks off clarification phase |
+| Submit clarification response | `POST` | `/sessions/{id}/messages` | User answers to Socratic Clarifier |
+| Challenge a claim (HITL) | `POST` | `/sessions/{id}/hitl/challenge` | Targets a specific claim by entity ID |
+| Add/modify constraint (HITL) | `POST` | `/sessions/{id}/hitl/constraint` | Triggers change propagation |
+| Force deep dive (HITL) | `POST` | `/sessions/{id}/hitl/deepdive` | Scoped micro-round on a specific entity |
+| Post-delivery question | `POST` | `/sessions/{id}/messages` | Routed to relevant agent |
+| Get Truth Map | `GET` | `/sessions/{id}/truthmap` | Full current state |
+| Get artifacts | `GET` | `/sessions/{id}/artifacts/{type}` | Retrieve generated output |
+| Fork session | `POST` | `/sessions/{id}/fork` | Creates branch from snapshot |
+
+REST calls are fire-and-forget from the frontend's perspective — the response confirms the action was accepted. The actual results (agent responses, patch updates) arrive via SignalR.
+
+### 7.2 SignalR (WebSockets) — Real-Time Streaming
+
+The frontend connects to the `/hubs/debate` SignalR hub when a session is active. All real-time updates are **server-pushed** — the frontend never polls.
+
+| Event Type | Payload | When it fires |
+|---|---|---|
+| `AgentTokens` | `{ agentId, token, isComplete }` | Streaming partial agent output (token by token) |
+| `RoundProgress` | `{ phase, status }` | Phase transitions (e.g., CLARIFICATION → DEBATE_ROUND_1) |
+| `TruthMapPatch` | `{ patch, version }` | After a validated patch is applied to the Truth Map |
+| `ConfidenceTransition` | `{ claimId, oldConfidence, newConfidence, reason }` | After Confidence Decay Engine runs |
+| `ConvergenceUpdate` | `{ dimensions, overall }` | After convergence scores are recalculated |
+| `PendingRevalidation` | `{ entityIds[] }` | When change propagation marks entities for re-evaluation |
+| `ArtifactReady` | `{ artifactType, version }` | When an artifact is generated or regenerated |
+| `BudgetWarning` | `{ percentUsed, message }` | At 80% and 95% budget thresholds |
+
+### 7.3 Key Rules
+
+- **REST for intent, SignalR for results.** The frontend sends user actions via REST. It receives all system updates (agent output, Truth Map changes, phase transitions) via SignalR. Never poll REST endpoints to check for updates.
+- **Optimistic UI is not used.** Truth Map state in the UI is updated only when a `TruthMapPatch` event arrives from the server (confirming the patch was validated and applied). The UI shows a streaming/pending indicator until the event arrives.
+- **Connection resilience.** If the SignalR connection drops, the frontend must reconnect and re-fetch the current Truth Map state via `GET /sessions/{id}/truthmap` to resync, then resume listening for events.
 |---|---|---|---|
 | Create session | `POST` | `/sessions` | Returns session ID |
 | Start debate | `POST` | `/sessions/{id}/start` | Kicks off clarification phase |

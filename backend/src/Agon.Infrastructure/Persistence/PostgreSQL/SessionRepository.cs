@@ -13,10 +13,12 @@ namespace Agon.Infrastructure.Persistence.PostgreSQL;
 public sealed class SessionRepository : ISessionRepository
 {
     private readonly AgonDbContext _dbContext;
+    private readonly ITruthMapRepository _truthMapRepo;
 
-    public SessionRepository(AgonDbContext dbContext)
+    public SessionRepository(AgonDbContext dbContext, ITruthMapRepository truthMapRepo)
     {
         _dbContext = dbContext;
+        _truthMapRepo = truthMapRepo;
     }
 
     public async Task<SessionState> CreateAsync(
@@ -55,11 +57,14 @@ public sealed class SessionRepository : ISessionRepository
             return null;
         }
 
-        // Reconstruct SessionState from entity
-        // Note: This requires getting the Truth Map from TruthMapRepository
-        // For now, return a minimal SessionState with an empty Truth Map
-        // In production, the Orchestrator will load the Truth Map separately
-        var truthMap = TruthMapModel.Empty(sessionId);
+        // Load the Truth Map from the database
+        var truthMap = await _truthMapRepo.GetAsync(sessionId, cancellationToken);
+        if (truthMap == null)
+        {
+            // If Truth Map doesn't exist, create an empty one
+            // This shouldn't happen in normal operation
+            truthMap = TruthMapModel.Empty(sessionId);
+        }
         
         var sessionState = SessionState.Create(
             sessionId,

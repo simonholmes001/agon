@@ -14,13 +14,16 @@ namespace Agon.Api.Controllers;
 public class SessionsController : ControllerBase
 {
     private readonly ISessionService _sessionService;
+    private readonly ConversationHistoryService _conversationHistory;
     private readonly ILogger<SessionsController> _logger;
 
     public SessionsController(
         ISessionService sessionService,
+        ConversationHistoryService conversationHistory,
         ILogger<SessionsController> logger)
     {
         _sessionService = sessionService;
+        _conversationHistory = conversationHistory;
         _logger = logger;
     }
 
@@ -118,26 +121,33 @@ public class SessionsController : ControllerBase
     [HttpPost("{id}/messages")]
     [ProducesResponseType(StatusCodes.Status202Accepted)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> SubmitMessage(
         [FromRoute] Guid id,
         [FromBody] MessageRequest request,
         CancellationToken cancellationToken)
     {
-        var sessionState = await _sessionService.GetAsync(id, cancellationToken);
-
-        if (sessionState is null)
+        if (string.IsNullOrWhiteSpace(request.Content))
         {
-            return NotFound(new { error = $"Session {id} not found" });
+            return BadRequest(new { error = "Message content is required" });
         }
 
-        // TODO: Route message to Orchestrator for processing
-        // For now, just acknowledge receipt
-        _logger.LogInformation(
-            "Received message for session {SessionId}: {Content}",
-            id,
-            request.Content);
+        try
+        {
+            await _sessionService.SubmitMessageAsync(id, request.Content, cancellationToken);
 
-        return Accepted();
+            _logger.LogInformation(
+                "Submitted message for session {SessionId}: {Content}",
+                id,
+                request.Content);
+
+            return Accepted();
+        }
+        catch (InvalidOperationException ex)
+        {
+            _logger.LogWarning(ex, "Failed to submit message to session {SessionId}", id);
+            return NotFound(new { error = ex.Message });
+        }
     }
 
     /// <summary>
@@ -243,6 +253,32 @@ public class SessionsController : ControllerBase
 
     // ── Helper Methods ──────────────────────────────────────────────────
 
+    /// <summary>
+    /// GET /sessions/{id}/messages — Retrieves conversation history (agent messages).
+    /// </summary>
+    [HttpGet("{id}/messages")]
+    [ProducesResponseType(typeof(IReadOnlyList<MessageResponse>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetMessages(
+        [FromRoute] Guid id,
+        CancellationToken cancellationToken)
+    {
+        var messages = await _conversationHistory.GetMessagesAsync(id, cancellationToken);
+        
+        var response = messages.Select(m => new MessageResponse(
+            m.AgentId,
+            m.Message,
+            m.Round,
+            m.CreatedAt))
+            .ToList();
+        
+        _logger.LogInformation(
+            "Retrieved {Count} messages for session {SessionId}",
+            response.Count,
+            id);
+        
+        return Ok(response);
+    }
+
     private static SessionResponse MapToResponse(Application.Models.SessionState sessionState)
     {
         return new SessionResponse(
@@ -251,7 +287,9 @@ public class SessionsController : ControllerBase
             sessionState.Status.ToString(),
             sessionState.FrictionLevel,
             sessionState.CurrentRound,
-            sessionState.TokensUsed);
+            sessionState.TokensUsed,
+            sessionState.CreatedAt,
+            sessionState.CreatedAt); // TODO: Add UpdatedAt to SessionState
     }
 }
 
@@ -262,12 +300,14 @@ public record CreateSessionRequest(string Idea, int FrictionLevel);
 public record MessageRequest(string Content);
 
 public record SessionResponse(
-    Guid SessionId,
+    Guid Id,
     string Phase,
     string Status,
     int FrictionLevel,
-    int RoundCount,
-    int TokensUsed);
+    int CurrentRound,
+    int TokensUsed,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset UpdatedAt);
 
 public record SnapshotResponse(
     Guid SnapshotId,
@@ -277,3 +317,9 @@ public record SnapshotResponse(
 public record AgentTestRequest(string Question);
 
 public record AgentTestResponse(string AgentId, string Message, int PatchOperationsCount);
+
+public record MessageResponse(
+    string AgentId,
+    string Message,
+    int Round,
+    DateTimeOffset CreatedAt);

@@ -41,11 +41,11 @@ public class SessionsControllerIntegrationTests : IClassFixture<AgonWebApplicati
         using var doc = JsonDocument.Parse(content);
         var root = doc.RootElement;
 
-        root.GetProperty("sessionId").GetGuid().Should().NotBeEmpty();
+        root.GetProperty("id").GetGuid().Should().NotBeEmpty();
         root.GetProperty("phase").GetString().Should().Be("Intake");
         root.GetProperty("status").GetString().Should().Be("Active");
         root.GetProperty("frictionLevel").GetInt32().Should().Be(50);
-        root.GetProperty("roundCount").GetInt32().Should().Be(0);
+        root.GetProperty("currentRound").GetInt32().Should().Be(0);
         root.GetProperty("tokensUsed").GetInt32().Should().Be(0);
     }
 
@@ -120,7 +120,7 @@ public class SessionsControllerIntegrationTests : IClassFixture<AgonWebApplicati
 
         var createContent = await createResponse.Content.ReadAsStringAsync();
         using var createDoc = JsonDocument.Parse(createContent);
-        var sessionId = createDoc.RootElement.GetProperty("sessionId").GetGuid();
+        var sessionId = createDoc.RootElement.GetProperty("id").GetGuid();
 
         // Act - Retrieve the session
         var getResponse = await _client.GetAsync($"/sessions/{sessionId}");
@@ -132,7 +132,7 @@ public class SessionsControllerIntegrationTests : IClassFixture<AgonWebApplicati
         using var getDoc = JsonDocument.Parse(getContent);
         var root = getDoc.RootElement;
 
-        root.GetProperty("sessionId").GetGuid().Should().Be(sessionId);
+        root.GetProperty("id").GetGuid().Should().Be(sessionId);
         root.GetProperty("frictionLevel").GetInt32().Should().Be(75);
     }
 
@@ -149,7 +149,7 @@ public class SessionsControllerIntegrationTests : IClassFixture<AgonWebApplicati
         var createResponse = await _client.PostAsJsonAsync("/sessions", createRequest);
         var createContent = await createResponse.Content.ReadAsStringAsync();
         using var createDoc = JsonDocument.Parse(createContent);
-        var sessionId = createDoc.RootElement.GetProperty("sessionId").GetGuid();
+        var sessionId = createDoc.RootElement.GetProperty("id").GetGuid();
 
         // Act - Get TruthMap
         var response = await _client.GetAsync($"/sessions/{sessionId}/truthmap");
@@ -182,7 +182,7 @@ public class SessionsControllerIntegrationTests : IClassFixture<AgonWebApplicati
         var createResponse = await _client.PostAsJsonAsync("/sessions", createRequest);
         var createContent = await createResponse.Content.ReadAsStringAsync();
         using var createDoc = JsonDocument.Parse(createContent);
-        var sessionId = createDoc.RootElement.GetProperty("sessionId").GetGuid();
+        var sessionId = createDoc.RootElement.GetProperty("id").GetGuid();
 
         // Act - Start clarification
         var response = await _client.PostAsync($"/sessions/{sessionId}/start", null);
@@ -204,7 +204,10 @@ public class SessionsControllerIntegrationTests : IClassFixture<AgonWebApplicati
         var createResponse = await _client.PostAsJsonAsync("/sessions", createRequest);
         var createContent = await createResponse.Content.ReadAsStringAsync();
         using var createDoc = JsonDocument.Parse(createContent);
-        var sessionId = createDoc.RootElement.GetProperty("sessionId").GetGuid();
+        var sessionId = createDoc.RootElement.GetProperty("id").GetGuid();
+
+        // Start clarification phase (required before submitting messages)
+        await _client.PostAsync($"/sessions/{sessionId}/start", null);
 
         var messageRequest = new
         {
@@ -216,6 +219,33 @@ public class SessionsControllerIntegrationTests : IClassFixture<AgonWebApplicati
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+    }
+
+    [Fact]
+    public async Task POST_Sessions_Messages_Should_Return_404_If_Not_In_Clarification_Phase()
+    {
+        // Arrange - Create a session but DON'T start clarification
+        var createRequest = new
+        {
+            idea = "Test idea for messages validation",
+            frictionLevel = 50
+        };
+
+        var createResponse = await _client.PostAsJsonAsync("/sessions", createRequest);
+        var createContent = await createResponse.Content.ReadAsStringAsync();
+        using var createDoc = JsonDocument.Parse(createContent);
+        var sessionId = createDoc.RootElement.GetProperty("id").GetGuid();
+
+        var messageRequest = new
+        {
+            content = "This should fail because we're still in Intake phase"
+        };
+
+        // Act - Try to submit message without starting clarification
+        var response = await _client.PostAsJsonAsync($"/sessions/{sessionId}/messages", messageRequest);
+
+        // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
     }
 
     [Fact]
@@ -231,7 +261,7 @@ public class SessionsControllerIntegrationTests : IClassFixture<AgonWebApplicati
         var createResponse = await _client.PostAsJsonAsync("/sessions", createRequest);
         var createContent = await createResponse.Content.ReadAsStringAsync();
         using var createDoc = JsonDocument.Parse(createContent);
-        var sessionId = createDoc.RootElement.GetProperty("sessionId").GetGuid();
+        var sessionId = createDoc.RootElement.GetProperty("id").GetGuid();
 
         // Act - Get snapshots
         var response = await _client.GetAsync($"/sessions/{sessionId}/snapshots");
@@ -242,5 +272,65 @@ public class SessionsControllerIntegrationTests : IClassFixture<AgonWebApplicati
         var content = await response.Content.ReadAsStringAsync();
         using var doc = JsonDocument.Parse(content);
         doc.RootElement.GetArrayLength().Should().Be(0, "new session should have no snapshots");
+    }
+
+    [Fact]
+    public async Task POST_Sessions_Start_Should_Transition_Session_To_Clarification_Phase()
+    {
+        // Arrange - Create a session first
+        var createRequest = new
+        {
+            idea = "Test orchestrator integration via start endpoint",
+            frictionLevel = 50
+        };
+
+        var createResponse = await _client.PostAsJsonAsync("/sessions", createRequest);
+        var createContent = await createResponse.Content.ReadAsStringAsync();
+        using var createDoc = JsonDocument.Parse(createContent);
+        var sessionId = createDoc.RootElement.GetProperty("id").GetGuid();
+
+        // Verify initial phase is Intake
+        var initialResponse = await _client.GetAsync($"/sessions/{sessionId}");
+        var initialContent = await initialResponse.Content.ReadAsStringAsync();
+        using var initialDoc = JsonDocument.Parse(initialContent);
+        initialDoc.RootElement.GetProperty("phase").GetString().Should().Be("Intake");
+
+        // Act - Start clarification (should invoke Orchestrator)
+        var startResponse = await _client.PostAsync($"/sessions/{sessionId}/start", null);
+
+        // Assert - Should return 202 Accepted
+        startResponse.StatusCode.Should().Be(HttpStatusCode.Accepted);
+
+        // Verify phase changed to Clarification
+        var afterResponse = await _client.GetAsync($"/sessions/{sessionId}");
+        var afterContent = await afterResponse.Content.ReadAsStringAsync();
+        using var afterDoc = JsonDocument.Parse(afterContent);
+        afterDoc.RootElement.GetProperty("phase").GetString().Should().Be("Clarification");
+    }
+
+    [Fact]
+    public async Task POST_Sessions_Start_Should_Complete_Successfully_Without_Errors()
+    {
+        // Arrange - Create a session
+        var createRequest = new
+        {
+            idea = "Build a mobile app for fitness tracking",
+            frictionLevel = 50
+        };
+
+        var createResponse = await _client.PostAsJsonAsync("/sessions", createRequest);
+        var createContent = await createResponse.Content.ReadAsStringAsync();
+        using var createDoc = JsonDocument.Parse(createContent);
+        var sessionId = createDoc.RootElement.GetProperty("id").GetGuid();
+
+        // Act - Start clarification
+        var startResponse = await _client.PostAsync($"/sessions/{sessionId}/start", null);
+
+        // Assert - Should return 202 Accepted and not throw exceptions
+        startResponse.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        
+        // NOTE: In Testing environment, Orchestrator and agents are not registered
+        // so this test verifies the API layer works correctly without actual agent execution.
+        // Full agent execution is tested in manual/E2E tests with real LLM providers.
     }
 }

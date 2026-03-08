@@ -1,6 +1,7 @@
 using Agon.Application.Interfaces;
 using Agon.Application.Models;
 using Agon.Application.Orchestration;
+using Agon.Application.Services;
 using Agon.Domain.Agents;
 using Agon.Domain.Sessions;
 using Agon.Domain.TruthMap;
@@ -67,16 +68,24 @@ public class AgentRunnerTests
         return b;
     }
 
+    private static ConversationHistoryService StubConversationHistory()
+    {
+        var repo = Substitute.For<IAgentMessageRepository>();
+        return new ConversationHistoryService(repo);
+    }
+
     private static AgentRunner BuildRunner(
         IReadOnlyList<ICouncilAgent> agents,
         ITruthMapRepository? repo = null,
         IEventBroadcaster? broadcaster = null,
+        ConversationHistoryService? conversationHistory = null,
         int agentTimeoutSeconds = 5)
     {
         return new AgentRunner(
             agents,
             repo ?? StubRepo(),
             broadcaster ?? NullBroadcaster(),
+            conversationHistory ?? StubConversationHistory(),
             agentTimeoutSeconds);
     }
 
@@ -348,6 +357,107 @@ public class AgentRunnerTests
         await runner.RunAnalysisRoundAsync(state, CancellationToken.None);
 
         state.TokensUsed.Should().Be(1400); // 1000 + 250 + 150
+    }
+
+    // ── Moderator Tests ────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task RunModeratorAsync_Should_UseForClarificationContext()
+    {
+        // Arrange
+        var capturedContext = default(AgentContext);
+        var moderator = Substitute.For<ICouncilAgent>();
+        moderator.AgentId.Returns(AgentId.Moderator);
+        moderator.ModelProvider.Returns("fake/model");
+        moderator.RunAsync(Arg.Do<AgentContext>(ctx => capturedContext = ctx), Arg.Any<CancellationToken>())
+                 .Returns(Task.FromResult(SuccessResponse(AgentId.Moderator)));
+
+        var runner = BuildRunner([moderator]);
+        var state = BuildSessionState();
+        state.Phase = SessionPhase.Clarification;
+        state.ClarificationRoundCount = 2;
+        
+        // Add user messages to state
+        state.UserMessages.Add(new UserMessage(
+            "Target customers are small retail businesses",
+            DateTimeOffset.UtcNow.AddMinutes(-5),
+            1));
+        state.UserMessages.Add(new UserMessage(
+            "Primary pain point is inventory management",
+            DateTimeOffset.UtcNow.AddMinutes(-3),
+            1));
+        state.UserMessages.Add(new UserMessage(
+            "Budget is around $10k",
+            DateTimeOffset.UtcNow,
+            2));
+
+        // Act
+        await runner.RunModeratorAsync(state, CancellationToken.None);
+
+        // Assert
+        capturedContext.Should().NotBeNull();
+        capturedContext!.Phase.Should().Be(SessionPhase.Clarification);
+        capturedContext.RoundNumber.Should().Be(2);
+        capturedContext.UserMessages.Should().HaveCount(3);
+        capturedContext.UserMessages[0].Content.Should().Be("Target customers are small retail businesses");
+        capturedContext.UserMessages[1].Content.Should().Be("Primary pain point is inventory management");
+        capturedContext.UserMessages[2].Content.Should().Be("Budget is around $10k");
+    }
+
+    [Fact]
+    public async Task RunModeratorAsync_Should_WorkWithEmptyUserMessages()
+    {
+        // Arrange
+        var capturedContext = default(AgentContext);
+        var moderator = Substitute.For<ICouncilAgent>();
+        moderator.AgentId.Returns(AgentId.Moderator);
+        moderator.ModelProvider.Returns("fake/model");
+        moderator.RunAsync(Arg.Do<AgentContext>(ctx => capturedContext = ctx), Arg.Any<CancellationToken>())
+                 .Returns(Task.FromResult(SuccessResponse(AgentId.Moderator)));
+
+        var runner = BuildRunner([moderator]);
+        var state = BuildSessionState();
+        state.Phase = SessionPhase.Clarification;
+
+        // Act
+        await runner.RunModeratorAsync(state, CancellationToken.None);
+
+        // Assert
+        capturedContext.Should().NotBeNull();
+        capturedContext!.UserMessages.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task RunModeratorAsync_Should_ApplyPatchFromModeratorResponse()
+    {
+        // Arrange
+        var repo = StubRepo();
+        var patch = new TruthMapPatch(
+            [new PatchOperation(PatchOp.Add, "/topics/-", "New Topic")],
+            new PatchMeta(AgentId.Moderator, 1, "Moderator patch", SessionId));
+        var moderatorResponse = new AgentResponse(
+            AgentId.Moderator,
+            "READY",
+            patch,
+            100,
+            false,
+            null);
+
+        var moderator = Substitute.For<ICouncilAgent>();
+        moderator.AgentId.Returns(AgentId.Moderator);
+        moderator.ModelProvider.Returns("fake/model");
+        moderator.RunAsync(Arg.Any<AgentContext>(), Arg.Any<CancellationToken>())
+                 .Returns(Task.FromResult(moderatorResponse));
+
+        var runner = BuildRunner([moderator], repo: repo);
+        var state = BuildSessionState();
+        state.Phase = SessionPhase.Clarification;
+
+        // Act
+        await runner.RunModeratorAsync(state, CancellationToken.None);
+
+        // Assert
+        await repo.Received(1).ApplyPatchAsync(SessionId, patch, Arg.Any<CancellationToken>());
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

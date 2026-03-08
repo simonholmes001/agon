@@ -8,6 +8,9 @@ namespace Agon.Application.Orchestration;
 /// </summary>
 public interface IAgentRunner
 {
+    Task<AgentResponse> RunModeratorAsync(
+        SessionState state, CancellationToken cancellationToken);
+
     Task<IReadOnlyList<AgentResponse>> RunAnalysisRoundAsync(
         SessionState state, CancellationToken cancellationToken);
 

@@ -102,16 +102,18 @@ Once everything is wired:
 
 ---
 
-## 📊 Current Status
+## 📊 Current Status (March 9, 2026)
+
+**CRITICAL FINDING:** Orchestrator is NOT wired to API endpoints. SessionService.StartClarificationAsync only changes phase in database - it does NOT call Orchestrator or invoke any agents.
 
 | Component | Status | Completion |
 |---|---|---|
 | Configuration Files | ✅ Done | 100% |
-| Database Setup | 🟡 Needs Docker + Migrations | 50% |
-| LLM Agent Registration | 🔴 Not Started | 0% |
+| Database Setup | ✅ Done (Docker running) | 100% |
+| LLM Agent Registration | ✅ Done (5 agents via MAF) | 100% |
 | Orchestrator Wiring | 🔴 Not Started | 0% |
 | Missing Endpoints | 🔴 Not Started | 0% |
-| **Overall Progress** | | **~75%** |
+| **Overall Progress** | | **~85%** |
 
 ---
 

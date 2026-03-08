@@ -2,7 +2,15 @@
 
 ## ✅ ALL 171 TESTS PASSING
 
-**Last Updated:** January 2025
+**Last Updated:** March 9, 2026
+
+## ⚠️ CRITICAL GAP IDENTIFIED
+
+**SessionService does NOT call Orchestrator** - The `StartClarificationAsync` method only changes the phase in the database. It does NOT invoke the Orchestrator, which means NO AGENTS ARE EXECUTED when the `/sessions/{id}/start` endpoint is called.
+
+**Impact:** CLI can create sessions and call /start, but no actual debate happens. No clarification questions are generated.
+
+**Required Fix:** Wire SessionService → Orchestrator → AgentRunner → Agents (see implementation plan below)
 
 ---
 
@@ -27,24 +35,25 @@
 - Snapshot and fork mechanisms
 
 ### 2. Full Application Services
-- Orchestrator (deterministic phase transitions)
-- Agent runner (budget tracking)
-- Session service (CRUD operations)
+- Orchestrator (deterministic phase transitions) ✅ EXISTS
+- Agent runner (budget tracking) ✅ EXISTS
+- Session service (CRUD operations) ⚠️ NOT WIRED TO ORCHESTRATOR
 
 ### 3. Infrastructure Layer
 - PostgreSQL repositories (Session, TruthMap)
 - Redis snapshot store
 - SignalR event broadcasting
 - EF Core DbContext
+- 5 Council Agents configured via MAF ✅
 
 ### 4. API Layer Foundation
 - 7 RESTful endpoints:
-  - `POST /sessions` - Create session
-  - `GET /sessions/{id}` - Get session state
-  - `POST /sessions/{id}/start` - Start debate
-  - `POST /sessions/{id}/messages` - User messages
-  - `GET /sessions/{id}/truthmap` - Truth Map state
-  - `GET /sessions/{id}/snapshots` - List snapshots
+  - `POST /sessions` - Create session ✅
+  - `GET /sessions/{id}` - Get session state ✅
+  - `POST /sessions/{id}/start` - Start debate ⚠️ NO ORCHESTRATOR CALL
+  - `POST /sessions/{id}/messages` - User messages ⚠️ NO ORCHESTRATOR CALL
+  - `GET /sessions/{id}/truthmap` - Truth Map state ✅
+  - `GET /sessions/{id}/snapshots` - List snapshots ✅
 - SignalR hub at `/hubs/debate`
 - Global exception middleware
 - Full dependency injection

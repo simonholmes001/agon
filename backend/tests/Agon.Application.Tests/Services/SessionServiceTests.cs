@@ -1,5 +1,6 @@
 using Agon.Application.Interfaces;
 using Agon.Application.Models;
+using Agon.Application.Orchestration;
 using Agon.Application.Services;
 using Agon.Domain.Sessions;
 using Agon.Domain.Snapshots;
@@ -370,4 +371,177 @@ public class SessionServiceTests
 
         result.Should().HaveCount(2);
     }
+
+    // ── StartClarificationAsync (Orchestrator Integration) ────────────────────
+
+    [Fact]
+    public async Task StartClarificationAsync_Should_CallOrchestratorRunModeratorAsync()
+    {
+        // Arrange
+        var state = BuildState(phase: SessionPhase.Intake);
+        var sessionRepo = StubSessionRepo(state);
+        var orchestrator = Substitute.For<IOrchestrator>();
+        var svc = BuildServiceWithOrchestrator(sessionRepo, orchestrator: orchestrator);
+
+        // Act
+        await svc.StartClarificationAsync(state.SessionId);
+
+        // Assert
+        await orchestrator.Received(1).RunModeratorAsync(
+            Arg.Is<SessionState>(s => s.SessionId == state.SessionId),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task StartClarificationAsync_Should_TransitionToAnalysisPhaseAfterModeratorReturnsReady()
+    {
+        // Arrange
+        var state = BuildState(phase: SessionPhase.Intake);
+        var sessionRepo = StubSessionRepo(state);
+        var orchestrator = Substitute.For<IOrchestrator>();
+        
+        // Configure orchestrator to simulate READY signal by transitioning phase
+        orchestrator
+            .RunModeratorAsync(Arg.Any<SessionState>(), Arg.Any<CancellationToken>())
+            .Returns(call =>
+            {
+                var s = call.ArgAt<SessionState>(0);
+                s.Phase = SessionPhase.AnalysisRound;
+                return Task.CompletedTask;
+            });
+
+        var svc = BuildServiceWithOrchestrator(sessionRepo, orchestrator: orchestrator);
+
+        // Act
+        await svc.StartClarificationAsync(state.SessionId);
+
+        // Assert
+        state.Phase.Should().Be(SessionPhase.AnalysisRound);
+    }
+
+    [Fact]
+    public async Task StartClarificationAsync_Should_UpdateSessionAfterOrchestratorCall()
+    {
+        // Arrange
+        var state = BuildState(phase: SessionPhase.Intake);
+        var sessionRepo = StubSessionRepo(state);
+        var orchestrator = Substitute.For<IOrchestrator>();
+        var svc = BuildServiceWithOrchestrator(sessionRepo, orchestrator: orchestrator);
+
+        // Act
+        await svc.StartClarificationAsync(state.SessionId);
+
+        // Assert
+        await sessionRepo.Received().UpdateAsync(
+            Arg.Is<SessionState>(s => s.SessionId == state.SessionId),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task StartClarificationAsync_Should_BroadcastPhaseTransitionAfterOrchestratorCall()
+    {
+        // Arrange
+        var state = BuildState(phase: SessionPhase.Intake);
+        var sessionRepo = StubSessionRepo(state);
+        var orchestrator = Substitute.For<IOrchestrator>();
+        var broadcaster = Substitute.For<IEventBroadcaster>();
+        var svc = BuildServiceWithOrchestrator(sessionRepo, orchestrator, broadcaster);
+
+        // Act
+        await svc.StartClarificationAsync(state.SessionId);
+
+        // Assert
+        await broadcaster.Received(1).SendRoundProgressAsync(
+            state.SessionId,
+            Arg.Any<string>(),
+            Arg.Any<string>(),
+            Arg.Any<CancellationToken>());
+    }
+
+    // ── SubmitMessageAsync ────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task SubmitMessageAsync_Should_AddMessageToSessionState()
+    {
+        // Arrange
+        var state = BuildState(phase: SessionPhase.Clarification);
+        state.ClarificationRoundCount = 1;
+        var sessionRepo = StubSessionRepo(returns: state);
+        var svc = BuildService(sessionRepo: sessionRepo);
+
+        // Act
+        await svc.SubmitMessageAsync(state.SessionId, "Target customers are small businesses", CancellationToken.None);
+
+        // Assert
+        state.UserMessages.Should().HaveCount(1);
+        state.UserMessages[0].Content.Should().Be("Target customers are small businesses");
+        state.UserMessages[0].ClarificationRound.Should().Be(1);
+        await sessionRepo.Received(1).UpdateAsync(
+            Arg.Is<SessionState>(s => s.UserMessages.Count == 1),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task SubmitMessageAsync_Should_CallOrchestrator()
+    {
+        // Arrange
+        var state = BuildState(phase: SessionPhase.Clarification);
+        var sessionRepo = StubSessionRepo(returns: state);
+        var orchestrator = Substitute.For<IOrchestrator>();
+        var svc = BuildServiceWithOrchestrator(sessionRepo: sessionRepo, orchestrator: orchestrator);
+
+        // Act
+        await svc.SubmitMessageAsync(state.SessionId, "Test message", CancellationToken.None);
+
+        // Assert
+        await orchestrator.Received(1).RunModeratorAsync(
+            Arg.Is<SessionState>(s => s.UserMessages.Count == 1),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task SubmitMessageAsync_Should_ThrowIfSessionNotFound()
+    {
+        // Arrange
+        var sessionRepo = StubSessionRepo(returns: null);
+        var svc = BuildService(sessionRepo: sessionRepo);
+        var nonExistentId = Guid.NewGuid();
+
+        // Act & Assert
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => svc.SubmitMessageAsync(nonExistentId, "Test", CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task SubmitMessageAsync_Should_ThrowIfNotInClarificationPhase()
+    {
+        // Arrange
+        var state = BuildState(phase: SessionPhase.AnalysisRound);
+        var sessionRepo = StubSessionRepo(returns: state);
+        var svc = BuildService(sessionRepo: sessionRepo);
+
+        // Act & Assert
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => svc.SubmitMessageAsync(state.SessionId, "Test", CancellationToken.None));
+    }
+
+    // ── Helper for Orchestrator Injection ─────────────────────────────────────
+
+    private static SessionService BuildServiceWithOrchestrator(
+        ISessionRepository? sessionRepo = null,
+        IOrchestrator? orchestrator = null,
+        IEventBroadcaster? broadcaster = null,
+        ITruthMapRepository? truthMapRepo = null,
+        ISnapshotStore? snapshotStore = null)
+    {
+        return new SessionService(
+            sessionRepo ?? StubSessionRepo(),
+            truthMapRepo ?? StubTruthMapRepo(),
+            snapshotStore ?? StubSnapshotStore(),
+            broadcaster,
+            orchestrator != null 
+                ? new Lazy<IOrchestrator>(() => orchestrator) 
+                : new Lazy<IOrchestrator>(() => Substitute.For<IOrchestrator>()));
+    }
 }
+

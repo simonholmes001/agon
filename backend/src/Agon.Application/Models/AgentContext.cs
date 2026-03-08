@@ -24,7 +24,9 @@ public sealed record AgentContext(
     /// <summary>Specific directive injected for HITL micro-rounds or targeted loops.</summary>
     string? MicroDirective,
     /// <summary>Whether research tools are enabled for this session.</summary>
-    bool ResearchToolsEnabled)
+    bool ResearchToolsEnabled,
+    /// <summary>User messages submitted during clarification (for Moderator agent only).</summary>
+    IReadOnlyList<UserMessage> UserMessages)
 {
     public static AgentContext ForAnalysis(
         Guid sessionId,
@@ -41,7 +43,8 @@ public sealed record AgentContext(
             [],
             [],
             null,
-            researchToolsEnabled);
+            researchToolsEnabled,
+            []);
 
     public static AgentContext ForCritique(
         Guid sessionId,
@@ -59,7 +62,8 @@ public sealed record AgentContext(
             critiqueTargetMessages,
             [],
             null,
-            researchToolsEnabled);
+            researchToolsEnabled,
+            []);
 
     public static AgentContext ForTargetedLoop(
         Guid sessionId,
@@ -77,8 +81,34 @@ public sealed record AgentContext(
             [],
             [],
             microDirective,
-            researchToolsEnabled);
+            researchToolsEnabled,
+            []);
+
+    public static AgentContext ForClarification(
+        Guid sessionId,
+        TruthMapModel truthMap,
+        int frictionLevel,
+        int roundNumber,
+        IReadOnlyList<UserMessage> userMessages,
+        bool researchToolsEnabled = false) =>
+        new(
+            sessionId,
+            truthMap,
+            frictionLevel,
+            SessionPhase.Clarification,
+            roundNumber,
+            [],
+            [],
+            null,
+            researchToolsEnabled,
+            userMessages);
 }
 
 /// <summary>A captured agent message from a prior round, used as critique input.</summary>
 public sealed record AgentMessage(string AgentId, string Message);
+
+/// <summary>User message submitted during clarification or post-delivery phases.</summary>
+public sealed record UserMessage(
+    string Content,
+    DateTimeOffset SubmittedAt,
+    int ClarificationRound);

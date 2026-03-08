@@ -17,7 +17,7 @@ namespace Agon.Application.Orchestration;
 ///
 /// The Orchestrator holds no mutable state — all state is in <see cref="SessionState"/>.
 /// </summary>
-public sealed class Orchestrator
+public sealed class Orchestrator : IOrchestrator
 {
     private readonly IAgentRunner _agentRunner;
     private readonly ISessionService _sessionService;
@@ -48,6 +48,80 @@ public sealed class Orchestrator
     {
         _logger?.LogInformation("Session {SessionId}: INTAKE → CLARIFICATION", state.SessionId);
         await _sessionService.AdvancePhaseAsync(state, SessionPhase.Clarification, cancellationToken);
+    }
+
+    /// <summary>
+    /// Runs the Moderator agent for the Clarification phase.
+    /// The Moderator either asks clarifying questions or signals READY.
+    /// </summary>
+    public async Task RunModeratorAsync(SessionState state, CancellationToken cancellationToken)
+    {
+        _logger?.LogInformation(
+            "Session {SessionId}: Running Moderator for clarification", state.SessionId);
+
+        var response = await _agentRunner.RunModeratorAsync(state, cancellationToken);
+
+        // Check if Moderator signaled READY
+        if (response.Message.Contains("READY", StringComparison.OrdinalIgnoreCase))
+        {
+            _logger?.LogInformation(
+                "Session {SessionId}: Moderator signaled READY → transitioning to ANALYSIS_ROUND",
+                state.SessionId);
+
+            // Extract Debate Brief from the Truth Map (updated by agent runner)
+            var brief = ExtractDebateBrief(state.TruthMap);
+            await SignalClarificationCompleteAsync(state, brief, cancellationToken);
+        }
+        else
+        {
+            // Moderator asked questions - increment clarification round count
+            state.ClarificationRoundCount++;
+            await _sessionService.RecordRoundSnapshotAsync(state, cancellationToken);
+
+            _logger?.LogInformation(
+                "Session {SessionId}: Moderator asked clarification questions (round {Round})",
+                state.SessionId,
+                state.ClarificationRoundCount);
+
+            // Check if max clarification rounds reached
+            if (state.ClarificationRoundCount >= _policy.MaxClarificationRounds)
+            {
+                _logger?.LogWarning(
+                    "Session {SessionId}: Max clarification rounds reached - proceeding with partial brief",
+                    state.SessionId);
+
+                var partialBrief = ExtractDebateBrief(state.TruthMap);
+                await SignalClarificationTimedOutAsync(state, partialBrief, cancellationToken);
+            }
+        }
+    }
+
+    private static DebateBrief ExtractDebateBrief(Domain.TruthMap.TruthMap truthMap)
+    {
+        // Extract the debate brief from the Truth Map's current state
+        // The Moderator's patch will have populated constraints, personas, success metrics
+        var constraints = truthMap.Constraints is not null
+            ? new BriefConstraints(
+                truthMap.Constraints.Budget,
+                truthMap.Constraints.Timeline,
+                truthMap.Constraints.TechStack,
+                truthMap.Constraints.NonNegotiables)
+            : new BriefConstraints(string.Empty, string.Empty, Array.Empty<string>(), Array.Empty<string>());
+
+        var primaryPersona = truthMap.Personas.FirstOrDefault();
+        var personaName = primaryPersona?.Name ?? string.Empty;
+
+        var openQuestions = truthMap.OpenQuestions
+            .Select(q => q.Text)
+            .ToList();
+
+        return new DebateBrief(
+            CoreIdea: truthMap.CoreIdea,
+            Constraints: constraints,
+            SuccessMetrics: truthMap.SuccessMetrics,
+            PrimaryPersona: personaName,
+            OpenQuestions: openQuestions
+        );
     }
 
     /// <summary>

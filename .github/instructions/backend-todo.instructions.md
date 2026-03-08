@@ -3,15 +3,34 @@ applyTo: 'backend/**'
 ---
 # Backend Implementation TODO
 
-**Status as of March 6, 2026:** ~85% Complete  
-**Current Test Status:** 168/171 passing (3 skipped)  
-**Estimated remaining work:** 20-30 hours to v1 MVP
+**Status as of March 8, 2026:** ~87% Complete (ORCHESTRATOR WIRING IN PROGRESS - PHASE 2 COMPLETE)  
+**Current Test Status:** 401/401 passing (398 passed, 3 skipped)  
+**Estimated remaining work:** 2-3 hours to complete orchestrator wiring + end-to-end testing
+
+**CRITICAL GAP - BEING ACTIVELY FIXED (March 8, 2026):**
+- ✅ Agents ARE configured and registered in DI (5 agents via MAF)
+- ✅ Orchestrator class EXISTS with full phase transition logic
+- ✅ **PHASE 1 COMPLETE:** Orchestrator.RunModeratorAsync() implemented and tested (5 tests passing)
+- ✅ **PHASE 2 COMPLETE:** SessionService now calls Orchestrator.RunModeratorAsync() (4 tests passing)
+- ✅ IOrchestrator interface created and implemented
+- ✅ SessionService injected with IOrchestrator (optional dependency)
+- ⚠️ **PHASE 3 IN PROGRESS:** Controller needs to properly route to SessionService
+- ⚠️ **PHASE 4 PENDING:** User message handling not yet implemented
+- ⚠️ **PHASE 5 PENDING:** End-to-end integration testing
+- **Current Status:** SessionService → Orchestrator → AgentRunner connection COMPLETE and TESTED
+
+**TDD Progress:**
+- Phase 1 (Orchestrator layer): ✅ RED → GREEN → COMMITTED (7c77231)
+- Phase 2 (SessionService layer): ✅ RED → GREEN → COMMITTED (e135b88)
+- Phase 3 (Controller layer): ⏳ NEXT
+- Phase 4 (User messages): ⏳ PENDING
+- Phase 5 (Integration tests): ⏳ PENDING
 
 ---
 
 ## Architecture Reference
 
-**Source of Truth:** `architecture.instructions.md` (Version 3.0)
+**Source of Truth:** `architecture.instructions.md` (Version 3.1)
 
 **Correct Agent Roster (5 agents total):**
 1. **Moderator / Clarifier** - Orchestrates session, runs Socratic clarification

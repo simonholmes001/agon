@@ -1,5 +1,6 @@
 using Agon.Application.Interfaces;
 using Agon.Application.Models;
+using Agon.Application.Orchestration;
 using Agon.Domain.Sessions;
 using Agon.Domain.Snapshots;
 using TruthMapModel = Agon.Domain.TruthMap.TruthMap;
@@ -16,17 +17,20 @@ public sealed class SessionService : ISessionService
     private readonly ITruthMapRepository _truthMapRepo;
     private readonly ISnapshotStore _snapshotStore;
     private readonly IEventBroadcaster? _broadcaster;
+    private readonly Lazy<IOrchestrator>? _lazyOrchestrator;
 
     public SessionService(
         ISessionRepository sessionRepo,
         ITruthMapRepository truthMapRepo,
         ISnapshotStore snapshotStore,
-        IEventBroadcaster? broadcaster = null)
+        IEventBroadcaster? broadcaster = null,
+        Lazy<IOrchestrator>? orchestrator = null)
     {
         _sessionRepo = sessionRepo;
         _truthMapRepo = truthMapRepo;
         _snapshotStore = snapshotStore;
         _broadcaster = broadcaster;
+        _lazyOrchestrator = orchestrator;
     }
 
     public async Task<SessionState> CreateAsync(
@@ -56,7 +60,13 @@ public sealed class SessionService : ISessionService
         var sessionId = Guid.NewGuid();
         var truthMap = TruthMapModel.Empty(sessionId);
 
-        // Persist empty Truth Map
+        // Seed the user's initial idea into the CoreIdea field
+        if (!string.IsNullOrWhiteSpace(idea))
+        {
+            truthMap = truthMap with { CoreIdea = idea };
+        }
+
+        // Persist Truth Map with seeded CoreIdea
         await _truthMapRepo.SaveAsync(truthMap, cancellationToken);
 
         // Create session state with user context
@@ -100,6 +110,48 @@ public sealed class SessionService : ISessionService
                 SessionPhase.Clarification.ToString(),
                 state.Status.ToString(),
                 cancellationToken);
+        }
+
+        // ⚡ NEW: Call Orchestrator to run Moderator agent
+        if (_lazyOrchestrator?.Value is not null)
+        {
+            await _lazyOrchestrator?.Value.RunModeratorAsync(state, cancellationToken);
+        }
+    }
+
+    public async Task SubmitMessageAsync(
+        Guid sessionId,
+        string content,
+        CancellationToken cancellationToken = default)
+    {
+        var state = await _sessionRepo.GetAsync(sessionId, cancellationToken);
+        
+        if (state is null)
+        {
+            throw new InvalidOperationException($"Session {sessionId} not found");
+        }
+
+        if (state.Phase != SessionPhase.Clarification)
+        {
+            throw new InvalidOperationException(
+                $"Cannot submit message in phase {state.Phase}. Session must be in Clarification phase.");
+        }
+
+        // Add the user message to the session state
+        var userMessage = new UserMessage(
+            content,
+            DateTimeOffset.UtcNow,
+            state.ClarificationRoundCount);
+        
+        state.UserMessages.Add(userMessage);
+
+        // Persist the updated state
+        await _sessionRepo.UpdateAsync(state, cancellationToken);
+
+        // Call Orchestrator to run Moderator agent with the new message
+        if (_lazyOrchestrator?.Value is not null)
+        {
+            await _lazyOrchestrator?.Value.RunModeratorAsync(state, cancellationToken);
         }
     }
 
