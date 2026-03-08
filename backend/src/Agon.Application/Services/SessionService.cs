@@ -60,7 +60,13 @@ public sealed class SessionService : ISessionService
         var sessionId = Guid.NewGuid();
         var truthMap = TruthMapModel.Empty(sessionId);
 
-        // Persist empty Truth Map
+        // Seed the user's initial idea into the CoreIdea field
+        if (!string.IsNullOrWhiteSpace(idea))
+        {
+            truthMap = truthMap with { CoreIdea = idea };
+        }
+
+        // Persist Truth Map with seeded CoreIdea
         await _truthMapRepo.SaveAsync(truthMap, cancellationToken);
 
         // Create session state with user context
