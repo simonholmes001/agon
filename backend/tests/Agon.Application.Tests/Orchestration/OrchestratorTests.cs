@@ -61,6 +61,11 @@ public class OrchestratorTests
         runner.RunSynthesisAsync(Arg.Any<SessionState>(), Arg.Any<CancellationToken>())
               .Returns(Task.FromResult(synthResponse));
 
+        // Mock RunModeratorAsync - will be configured per-test as needed
+        runner.RunModeratorAsync(Arg.Any<SessionState>(), Arg.Any<CancellationToken>())
+              .Returns(Task.FromResult(
+                  new AgentResponse(AgentId.Moderator, "Moderator response", null, 100, false, null)));
+
         return runner;
     }
 
@@ -486,5 +491,213 @@ public class OrchestratorTests
         state.Status.Should().Be(SessionStatus.CompleteWithGaps);
         await sessionService.Received(1).AdvancePhaseAsync(
             state, SessionPhase.DeliverWithGaps, Arg.Any<CancellationToken>());
+    }
+
+    // ── Clarification Phase Tests ────────────────────────────────────────────
+
+    [Fact]
+    public async Task RunModeratorAsync_Should_CallAgentRunner()
+    {
+        // Arrange
+        var runner = Substitute.For<IAgentRunner>();
+        var moderatorResponse = new AgentResponse(
+            AgentId.Moderator,
+            "What is your target audience?",
+            null,
+            100,
+            false,
+            null);
+        
+        runner.RunModeratorAsync(Arg.Any<SessionState>(), Arg.Any<CancellationToken>())
+              .Returns(Task.FromResult(moderatorResponse));
+
+        var sessionService = StubSessionService();
+        var orchestrator = BuildOrchestrator(
+            runner: runner,
+            sessionService: sessionService);
+        
+        var state = BuildState(SessionPhase.Clarification);
+
+        // Act
+        await orchestrator.RunModeratorAsync(state, CancellationToken.None);
+
+        // Assert
+        await runner.Received(1).RunModeratorAsync(
+            state, 
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task RunModeratorAsync_Should_ApplyPatchWhenPresent()
+    {
+        // Arrange
+        var runner = Substitute.For<IAgentRunner>();
+        var patch = new Domain.TruthMap.TruthMapPatch(
+            new[] {
+                new Domain.TruthMap.PatchOperation(
+                    Domain.TruthMap.PatchOp.Add,
+                    "/constraints",
+                    new Constraints("Budget: $50k", "Timeline: 6 months", Array.Empty<string>(), Array.Empty<string>()))
+            }.ToList(),
+            new Domain.TruthMap.PatchMeta(
+                AgentId.Moderator,
+                0,
+                "Initial brief seeding",
+                SessionId));
+
+        var moderatorResponse = new AgentResponse(
+            AgentId.Moderator,
+            "What is your target audience?",
+            patch,
+            100,
+            false,
+            null);
+        
+        // Mock the AgentRunner to apply the patch to state.TruthMap when called
+        runner.RunModeratorAsync(Arg.Any<SessionState>(), Arg.Any<CancellationToken>())
+              .Returns(callInfo =>
+              {
+                  var state = callInfo.Arg<SessionState>();
+                  // Simulate patch application (increment version)
+                  var updated = state.TruthMap with { Version = state.TruthMap.Version + 1 };
+                  state.TruthMap = updated;
+                  return Task.FromResult(moderatorResponse);
+              });
+
+        var sessionService = StubSessionService();
+        var orchestrator = BuildOrchestrator(
+            runner: runner,
+            sessionService: sessionService);
+        
+        var state = BuildState(SessionPhase.Clarification);
+        var initialVersion = state.TruthMap.Version;
+
+        // Act
+        await orchestrator.RunModeratorAsync(state, CancellationToken.None);
+
+        // Assert
+        state.TruthMap.Version.Should().Be(initialVersion + 1);
+        await runner.Received(1).RunModeratorAsync(
+            state,
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task RunModeratorAsync_WithReadySignal_Should_TransitionToAnalysisRound()
+    {
+        // Arrange
+        var runner = Substitute.For<IAgentRunner>();
+        var patch = new Domain.TruthMap.TruthMapPatch(
+            new[] {
+                new Domain.TruthMap.PatchOperation(
+                    Domain.TruthMap.PatchOp.Add,
+                    "/constraints",
+                    new Constraints("Budget: $50k", "Timeline: 6 months", Array.Empty<string>(), Array.Empty<string>()))
+            }.ToList(),
+            new Domain.TruthMap.PatchMeta(
+                AgentId.Moderator,
+                0,
+                "Initial brief seeding",
+                SessionId));
+
+        var moderatorResponse = new AgentResponse(
+            AgentId.Moderator,
+            "READY - All clarification complete. The brief is now clear.",
+            patch,
+            100,
+            false,
+            null);
+        
+        runner.RunModeratorAsync(Arg.Any<SessionState>(), Arg.Any<CancellationToken>())
+              .Returns(Task.FromResult(moderatorResponse));
+
+        var sessionService = StubSessionService();
+        var orchestrator = BuildOrchestrator(
+            runner: runner,
+            sessionService: sessionService);
+        
+        var state = BuildState(SessionPhase.Clarification);
+
+        // Act
+        await orchestrator.RunModeratorAsync(state, CancellationToken.None);
+
+        // Assert
+        await sessionService.Received(1).AdvancePhaseAsync(
+            state,
+            SessionPhase.AnalysisRound,
+            Arg.Any<CancellationToken>());
+        state.ClarificationIncomplete.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task RunModeratorAsync_WithoutReadySignal_Should_IncrementClarificationRound()
+    {
+        // Arrange
+        var runner = Substitute.For<IAgentRunner>();
+        var moderatorResponse = new AgentResponse(
+            AgentId.Moderator,
+            "What is your target audience?",
+            null,
+            100,
+            false,
+            null);
+        
+        runner.RunModeratorAsync(Arg.Any<SessionState>(), Arg.Any<CancellationToken>())
+              .Returns(Task.FromResult(moderatorResponse));
+
+        var sessionService = StubSessionService();
+        var orchestrator = BuildOrchestrator(
+            runner: runner,
+            sessionService: sessionService);
+        
+        var state = BuildState(SessionPhase.Clarification);
+        state.ClarificationRoundCount = 0;
+
+        // Act
+        await orchestrator.RunModeratorAsync(state, CancellationToken.None);
+
+        // Assert
+        state.ClarificationRoundCount.Should().Be(1);
+        await sessionService.Received(1).RecordRoundSnapshotAsync(
+            state,
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task RunModeratorAsync_MaxRoundsReached_Should_TimeoutAndProceedWithPartialBrief()
+    {
+        // Arrange
+        var runner = Substitute.For<IAgentRunner>();
+        var moderatorResponse = new AgentResponse(
+            AgentId.Moderator,
+            "What is your target audience?",
+            null,
+            100,
+            false,
+            null);
+        
+        runner.RunModeratorAsync(Arg.Any<SessionState>(), Arg.Any<CancellationToken>())
+              .Returns(Task.FromResult(moderatorResponse));
+
+        var sessionService = StubSessionService();
+        var policy = DefaultPolicy();
+        var orchestrator = BuildOrchestrator(
+            runner: runner,
+            sessionService: sessionService,
+            policy: policy);
+        
+        var state = BuildState(SessionPhase.Clarification);
+        state.ClarificationRoundCount = policy.MaxClarificationRounds - 1;
+
+        // Act
+        await orchestrator.RunModeratorAsync(state, CancellationToken.None);
+
+        // Assert
+        state.ClarificationRoundCount.Should().Be(policy.MaxClarificationRounds);
+        state.ClarificationIncomplete.Should().BeTrue();
+        await sessionService.Received(1).AdvancePhaseAsync(
+            state,
+            SessionPhase.AnalysisRound,
+            Arg.Any<CancellationToken>());
     }
 }

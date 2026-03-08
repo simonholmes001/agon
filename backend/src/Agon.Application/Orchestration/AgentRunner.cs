@@ -40,6 +40,46 @@ public sealed class AgentRunner : IAgentRunner
     // ── Public API ────────────────────────────────────────────────────────────
 
     /// <summary>
+    /// Runs the Moderator agent for the Clarification phase.
+    /// </summary>
+    public async Task<AgentResponse> RunModeratorAsync(
+        SessionState state,
+        CancellationToken cancellationToken)
+    {
+        var moderator = _agents.FirstOrDefault(a => a.AgentId == Domain.Agents.AgentId.Moderator);
+        
+        if (moderator is null)
+        {
+            throw new InvalidOperationException("Moderator agent not configured");
+        }
+
+        var context = AgentContext.ForAnalysis(
+            state.SessionId,
+            state.TruthMap,
+            state.FrictionLevel,
+            state.ClarificationRoundCount,
+            false); // Research tools not used during clarification
+
+        var response = await RunWithTimeoutAsync(moderator, context, cancellationToken);
+
+        // Apply patches (if any) from the Moderator's response
+        if (response.HasPatch)
+        {
+            await ApplyPatchesAsync(state, [response], cancellationToken);
+        }
+
+        AccumulateTokens(state, [response]);
+
+        _logger?.LogInformation(
+            "Moderator completed for session {SessionId}, round {Round}. Tokens: {Tokens}",
+            state.SessionId,
+            state.ClarificationRoundCount,
+            response.TokensUsed);
+
+        return response;
+    }
+
+    /// <summary>
     /// Dispatches all council agents in parallel for the Analysis Round.
     /// Applies valid patches sequentially (alphabetical order) then updates token budget.
     /// </summary>
