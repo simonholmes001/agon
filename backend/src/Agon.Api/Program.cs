@@ -137,7 +137,7 @@ builder.Services.AddSingleton(sp =>
 if (!builder.Environment.IsEnvironment("Testing"))
 {
     builder.Services.AddScoped<IAgentRunner, AgentRunner>();
-    builder.Services.AddScoped<Orchestrator>();
+    builder.Services.AddScoped<IOrchestrator, Orchestrator>();
 }
 
 // ── Infrastructure: Council Agents (MAF with Multiple Providers) ────────
