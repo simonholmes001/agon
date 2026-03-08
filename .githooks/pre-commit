@@ -13,6 +13,23 @@ echo "✅ Frontend tests passed."
 # Return to repo root
 cd ..
 
+# CLI tests
+if [ -f "cli/package.json" ]; then
+  echo ""
+  echo "🧪 Running CLI tests before commit..."
+  cd cli && npm run test
+
+  if [ $? -ne 0 ]; then
+    echo "❌ CLI tests failed. Commit aborted."
+    exit 1
+  fi
+
+  echo "✅ CLI tests passed."
+  cd ..
+else
+  echo "⏭️  No CLI project found — skipping CLI tests."
+fi
+
 # Backend tests — only run if a .NET project exists
 if find backend -name '*.sln' -o -name '*.csproj' 2>/dev/null | grep -q .; then
   echo ""
