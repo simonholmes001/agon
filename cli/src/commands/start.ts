@@ -97,22 +97,33 @@ export default class Start extends Command {
       this.log('🤔 Moderator is analyzing your idea...');
       await new Promise(resolve => setTimeout(resolve, 2000));
       
-      // Fetch conversation messages immediately (before phase might change)
-      const messages = await apiClient.getMessages(session.id);
-      const moderatorMessages = messages.filter(m => m.agentId === 'moderator');
-      
       // Refresh session to get updated phase
       const updatedSession = await apiClient.getSession(session.id);
       await sessionManager.saveSession(updatedSession);
+      await sessionManager.saveSession(updatedSession);
 
-      // Display Moderator's message if we got one
-      if (flags.interactive && moderatorMessages.length > 0) {
+      // Continuous conversation loop: keep prompting until phase changes
+      let currentPhase = updatedSession.phase;
+      
+      while (flags.interactive && currentPhase === 'Clarification') {
+        // Fetch latest messages
+        const messages = await apiClient.getMessages(session.id);
+        const moderatorMessages = messages.filter(m => m.agentId === 'moderator');
+
+        if (moderatorMessages.length === 0) {
+          // No messages yet, wait a bit and check again
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          const latestSession = await apiClient.getSession(session.id);
+          currentPhase = latestSession.phase;
+          continue;
+        }
+
+        // Display Moderator's message
         this.log('');
         this.log('━'.repeat(60));
         this.log(chalk.bold('Moderator:'));
         this.log('');
 
-        // Display the latest moderator message with markdown formatting
         const latestMessage = moderatorMessages.at(-1)!;
         const formattedMessage = renderMarkdown(latestMessage.message);
         this.log(formattedMessage);
@@ -120,7 +131,7 @@ export default class Start extends Command {
         this.log('━'.repeat(60));
         this.log('');
         
-        // Prompt for response (even if phase changed - backend transitions fast)
+        // Prompt for response
         const { response } = await inquirer.prompt([
           {
             type: 'input',
@@ -142,7 +153,20 @@ export default class Start extends Command {
         
         this.log(chalk.green('✓ Response submitted!'));
         this.log('');
-        this.log(chalk.dim('The Moderator will process your response.'));
+        this.log('🤔 Moderator is processing your response...');
+        this.log('');
+
+        // Wait for Moderator to process and check phase again
+        await new Promise(resolve => setTimeout(resolve, 3000));
+        const latestSession = await apiClient.getSession(session.id);
+        currentPhase = latestSession.phase;
+      }
+
+      // Clarification complete
+      if (currentPhase !== 'Clarification') {
+        this.log(chalk.green('✓ Clarification complete. Debate is starting!'));
+        this.log('');
+        this.log(chalk.dim('The council agents are now analyzing your idea...'));
         this.log(chalk.dim('Use ') + chalk.cyan('agon answer') + chalk.dim(' to continue the conversation.'));
         this.log(chalk.dim('Use ') + chalk.cyan('agon status') + chalk.dim(' to check debate progress.'));
 

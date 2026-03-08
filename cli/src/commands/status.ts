@@ -148,7 +148,7 @@ export default class Status extends Command {
       this.log('⚠️  Session complete with gaps. Some dimensions did not meet convergence threshold.');
       this.log('   View artifacts with: agon show <artifact-type>');
     } else if (session.status === 'active') {
-      if (session.phase === 'CLARIFICATION') {
+      if (session.phase === 'Clarification') {
         this.log('💡 Answer clarification questions with: agon clarify');
       } else {
         this.log('⏳ Debate in progress. Check back soon or wait for completion.');

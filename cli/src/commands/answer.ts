@@ -66,7 +66,7 @@ export default class Answer extends Command {
       console.log(chalk.green('✓ Response submitted\n'));
 
       // Check if clarification is complete
-      if (updatedSession.phase !== 'CLARIFICATION') {
+      if (updatedSession.phase !== 'Clarification') {
         console.log(chalk.green('✓ Clarification complete!'));
         console.log(chalk.blue('🔄 Starting debate phase...\n'));
         console.log('The council agents are now analyzing your idea.');
