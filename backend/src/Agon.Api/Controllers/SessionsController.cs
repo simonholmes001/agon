@@ -251,7 +251,9 @@ public class SessionsController : ControllerBase
             sessionState.Status.ToString(),
             sessionState.FrictionLevel,
             sessionState.CurrentRound,
-            sessionState.TokensUsed);
+            sessionState.TokensUsed,
+            sessionState.CreatedAt,
+            sessionState.CreatedAt); // TODO: Add UpdatedAt to SessionState
     }
 }
 
@@ -262,12 +264,14 @@ public record CreateSessionRequest(string Idea, int FrictionLevel);
 public record MessageRequest(string Content);
 
 public record SessionResponse(
-    Guid SessionId,
+    Guid Id,
     string Phase,
     string Status,
     int FrictionLevel,
-    int RoundCount,
-    int TokensUsed);
+    int CurrentRound,
+    int TokensUsed,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset UpdatedAt);
 
 public record SnapshotResponse(
     Guid SnapshotId,

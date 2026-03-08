@@ -41,11 +41,11 @@ public class SessionsControllerIntegrationTests : IClassFixture<AgonWebApplicati
         using var doc = JsonDocument.Parse(content);
         var root = doc.RootElement;
 
-        root.GetProperty("sessionId").GetGuid().Should().NotBeEmpty();
+        root.GetProperty("id").GetGuid().Should().NotBeEmpty();
         root.GetProperty("phase").GetString().Should().Be("Intake");
         root.GetProperty("status").GetString().Should().Be("Active");
         root.GetProperty("frictionLevel").GetInt32().Should().Be(50);
-        root.GetProperty("roundCount").GetInt32().Should().Be(0);
+        root.GetProperty("currentRound").GetInt32().Should().Be(0);
         root.GetProperty("tokensUsed").GetInt32().Should().Be(0);
     }
 
@@ -120,7 +120,7 @@ public class SessionsControllerIntegrationTests : IClassFixture<AgonWebApplicati
 
         var createContent = await createResponse.Content.ReadAsStringAsync();
         using var createDoc = JsonDocument.Parse(createContent);
-        var sessionId = createDoc.RootElement.GetProperty("sessionId").GetGuid();
+        var sessionId = createDoc.RootElement.GetProperty("id").GetGuid();
 
         // Act - Retrieve the session
         var getResponse = await _client.GetAsync($"/sessions/{sessionId}");
@@ -132,7 +132,7 @@ public class SessionsControllerIntegrationTests : IClassFixture<AgonWebApplicati
         using var getDoc = JsonDocument.Parse(getContent);
         var root = getDoc.RootElement;
 
-        root.GetProperty("sessionId").GetGuid().Should().Be(sessionId);
+        root.GetProperty("id").GetGuid().Should().Be(sessionId);
         root.GetProperty("frictionLevel").GetInt32().Should().Be(75);
     }
 
@@ -149,7 +149,7 @@ public class SessionsControllerIntegrationTests : IClassFixture<AgonWebApplicati
         var createResponse = await _client.PostAsJsonAsync("/sessions", createRequest);
         var createContent = await createResponse.Content.ReadAsStringAsync();
         using var createDoc = JsonDocument.Parse(createContent);
-        var sessionId = createDoc.RootElement.GetProperty("sessionId").GetGuid();
+        var sessionId = createDoc.RootElement.GetProperty("id").GetGuid();
 
         // Act - Get TruthMap
         var response = await _client.GetAsync($"/sessions/{sessionId}/truthmap");
@@ -182,7 +182,7 @@ public class SessionsControllerIntegrationTests : IClassFixture<AgonWebApplicati
         var createResponse = await _client.PostAsJsonAsync("/sessions", createRequest);
         var createContent = await createResponse.Content.ReadAsStringAsync();
         using var createDoc = JsonDocument.Parse(createContent);
-        var sessionId = createDoc.RootElement.GetProperty("sessionId").GetGuid();
+        var sessionId = createDoc.RootElement.GetProperty("id").GetGuid();
 
         // Act - Start clarification
         var response = await _client.PostAsync($"/sessions/{sessionId}/start", null);
@@ -204,7 +204,7 @@ public class SessionsControllerIntegrationTests : IClassFixture<AgonWebApplicati
         var createResponse = await _client.PostAsJsonAsync("/sessions", createRequest);
         var createContent = await createResponse.Content.ReadAsStringAsync();
         using var createDoc = JsonDocument.Parse(createContent);
-        var sessionId = createDoc.RootElement.GetProperty("sessionId").GetGuid();
+        var sessionId = createDoc.RootElement.GetProperty("id").GetGuid();
 
         var messageRequest = new
         {
@@ -231,7 +231,7 @@ public class SessionsControllerIntegrationTests : IClassFixture<AgonWebApplicati
         var createResponse = await _client.PostAsJsonAsync("/sessions", createRequest);
         var createContent = await createResponse.Content.ReadAsStringAsync();
         using var createDoc = JsonDocument.Parse(createContent);
-        var sessionId = createDoc.RootElement.GetProperty("sessionId").GetGuid();
+        var sessionId = createDoc.RootElement.GetProperty("id").GetGuid();
 
         // Act - Get snapshots
         var response = await _client.GetAsync($"/sessions/{sessionId}/snapshots");

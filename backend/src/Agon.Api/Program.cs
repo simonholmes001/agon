@@ -73,7 +73,12 @@ builder.Services.AddSingleton(llmConfig);
 builder.Services.AddSingleton(agonConfig);
 
 // ── Controllers and OpenAPI ─────────────────────────────────────────────
-builder.Services.AddControllers();
+builder.Services.AddControllers()
+    .AddJsonOptions(options =>
+    {
+        // Use camelCase for JSON property names (JavaScript convention)
+        options.JsonSerializerOptions.PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase;
+    });
 builder.Services.AddOpenApi();
 
 // ── SignalR for Real-Time Events ────────────────────────────────────────
