@@ -11,9 +11,11 @@
 
 import { Command, Flags, Args } from '@oclif/core';
 import chalk from 'chalk';
+import inquirer from 'inquirer';
 import { AgonAPIClient } from '../api/agon-client.js';
 import { SessionManager } from '../state/session-manager.js';
 import { ConfigManager } from '../state/config-manager.js';
+import { renderMarkdown } from '../utils/markdown.js';
 
 export default class Start extends Command {
   static override readonly description = 'Start a new strategy debate session';
@@ -110,18 +112,40 @@ export default class Start extends Command {
         this.log(chalk.bold('Moderator:'));
         this.log('');
 
-        // Display the latest moderator message
+        // Display the latest moderator message with markdown formatting
         const latestMessage = moderatorMessages.at(-1)!;
-        this.log(latestMessage.message);
+        const formattedMessage = renderMarkdown(latestMessage.message);
+        this.log(formattedMessage);
 
         this.log('━'.repeat(60));
         this.log('');
         
-        if (updatedSession.phase === 'CLARIFICATION') {
-          this.log(chalk.cyan('💡 Answer with: ') + chalk.white('agon answer "<your response>"'));
-        } else {
-          this.log(chalk.green('✓ Clarification complete. Debate is running.'));
-        }
+        // Prompt for response (even if phase changed - backend transitions fast)
+        const { response } = await inquirer.prompt([
+          {
+            type: 'input',
+            name: 'response',
+            message: 'Your response:',
+            validate: (input: string) => {
+              if (!input || input.trim().length === 0) {
+                return 'Please provide a response';
+              }
+              return true;
+            }
+          }
+        ]);
+
+        // Submit the response
+        this.log('');
+        this.log('📤 Submitting your response...');
+        await apiClient.submitMessage(session.id, response);
+        
+        this.log(chalk.green('✓ Response submitted!'));
+        this.log('');
+        this.log(chalk.dim('The Moderator will process your response.'));
+        this.log(chalk.dim('Use ') + chalk.cyan('agon answer') + chalk.dim(' to continue the conversation.'));
+        this.log(chalk.dim('Use ') + chalk.cyan('agon status') + chalk.dim(' to check debate progress.'));
+
       } else if (flags.interactive) {
         this.log('✓ No clarification needed. Session ready.');
       } else if (!flags.interactive) {
