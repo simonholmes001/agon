@@ -206,6 +206,9 @@ public class SessionsControllerIntegrationTests : IClassFixture<AgonWebApplicati
         using var createDoc = JsonDocument.Parse(createContent);
         var sessionId = createDoc.RootElement.GetProperty("id").GetGuid();
 
+        // Start clarification phase (required before submitting messages)
+        await _client.PostAsync($"/sessions/{sessionId}/start", null);
+
         var messageRequest = new
         {
             content = "Target customers are small retail businesses"
@@ -216,6 +219,33 @@ public class SessionsControllerIntegrationTests : IClassFixture<AgonWebApplicati
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+    }
+
+    [Fact]
+    public async Task POST_Sessions_Messages_Should_Return_404_If_Not_In_Clarification_Phase()
+    {
+        // Arrange - Create a session but DON'T start clarification
+        var createRequest = new
+        {
+            idea = "Test idea for messages validation",
+            frictionLevel = 50
+        };
+
+        var createResponse = await _client.PostAsJsonAsync("/sessions", createRequest);
+        var createContent = await createResponse.Content.ReadAsStringAsync();
+        using var createDoc = JsonDocument.Parse(createContent);
+        var sessionId = createDoc.RootElement.GetProperty("id").GetGuid();
+
+        var messageRequest = new
+        {
+            content = "This should fail because we're still in Intake phase"
+        };
+
+        // Act - Try to submit message without starting clarification
+        var response = await _client.PostAsJsonAsync($"/sessions/{sessionId}/messages", messageRequest);
+
+        // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
     }
 
     [Fact]

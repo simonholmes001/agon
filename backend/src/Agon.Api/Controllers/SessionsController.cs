@@ -118,26 +118,33 @@ public class SessionsController : ControllerBase
     [HttpPost("{id}/messages")]
     [ProducesResponseType(StatusCodes.Status202Accepted)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> SubmitMessage(
         [FromRoute] Guid id,
         [FromBody] MessageRequest request,
         CancellationToken cancellationToken)
     {
-        var sessionState = await _sessionService.GetAsync(id, cancellationToken);
-
-        if (sessionState is null)
+        if (string.IsNullOrWhiteSpace(request.Content))
         {
-            return NotFound(new { error = $"Session {id} not found" });
+            return BadRequest(new { error = "Message content is required" });
         }
 
-        // TODO: Route message to Orchestrator for processing
-        // For now, just acknowledge receipt
-        _logger.LogInformation(
-            "Received message for session {SessionId}: {Content}",
-            id,
-            request.Content);
+        try
+        {
+            await _sessionService.SubmitMessageAsync(id, request.Content, cancellationToken);
 
-        return Accepted();
+            _logger.LogInformation(
+                "Submitted message for session {SessionId}: {Content}",
+                id,
+                request.Content);
+
+            return Accepted();
+        }
+        catch (InvalidOperationException ex)
+        {
+            _logger.LogWarning(ex, "Failed to submit message to session {SessionId}", id);
+            return NotFound(new { error = ex.Message });
+        }
     }
 
     /// <summary>
