@@ -3,15 +3,22 @@ applyTo: 'backend/**'
 ---
 # Backend Implementation TODO
 
-**Status as of March 6, 2026:** ~85% Complete  
-**Current Test Status:** 168/171 passing (3 skipped)  
-**Estimated remaining work:** 20-30 hours to v1 MVP
+**Status as of March 9, 2026:** ~85% Complete (ORCHESTRATOR WIRING INCOMPLETE)  
+**Current Test Status:** 171/171 passing  
+**Estimated remaining work:** 4-6 hours to wire Orchestrator + test end-to-end
+
+**CRITICAL GAP IDENTIFIED (March 9, 2026):**
+- ✅ Agents ARE configured and registered in DI (5 agents via MAF)
+- ✅ Orchestrator class EXISTS with full phase transition logic
+- ❌ SessionService does NOT call Orchestrator - only changes phase in DB
+- ❌ API endpoints do NOT trigger agent execution
+- **Result:** Creating sessions works, but NO ACTUAL DEBATE HAPPENS when /start endpoint is called
 
 ---
 
 ## Architecture Reference
 
-**Source of Truth:** `architecture.instructions.md` (Version 3.0)
+**Source of Truth:** `architecture.instructions.md` (Version 3.1)
 
 **Correct Agent Roster (5 agents total):**
 1. **Moderator / Clarifier** - Orchestrates session, runs Socratic clarification
