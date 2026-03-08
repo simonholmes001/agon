@@ -14,13 +14,16 @@ namespace Agon.Api.Controllers;
 public class SessionsController : ControllerBase
 {
     private readonly ISessionService _sessionService;
+    private readonly ConversationHistoryService _conversationHistory;
     private readonly ILogger<SessionsController> _logger;
 
     public SessionsController(
         ISessionService sessionService,
+        ConversationHistoryService conversationHistory,
         ILogger<SessionsController> logger)
     {
         _sessionService = sessionService;
+        _conversationHistory = conversationHistory;
         _logger = logger;
     }
 
@@ -250,6 +253,32 @@ public class SessionsController : ControllerBase
 
     // ── Helper Methods ──────────────────────────────────────────────────
 
+    /// <summary>
+    /// GET /sessions/{id}/messages — Retrieves conversation history (agent messages).
+    /// </summary>
+    [HttpGet("{id}/messages")]
+    [ProducesResponseType(typeof(IReadOnlyList<MessageResponse>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetMessages(
+        [FromRoute] Guid id,
+        CancellationToken cancellationToken)
+    {
+        var messages = await _conversationHistory.GetMessagesAsync(id, cancellationToken);
+        
+        var response = messages.Select(m => new MessageResponse(
+            m.AgentId,
+            m.Message,
+            m.Round,
+            m.CreatedAt))
+            .ToList();
+        
+        _logger.LogInformation(
+            "Retrieved {Count} messages for session {SessionId}",
+            response.Count,
+            id);
+        
+        return Ok(response);
+    }
+
     private static SessionResponse MapToResponse(Application.Models.SessionState sessionState)
     {
         return new SessionResponse(
@@ -288,3 +317,9 @@ public record SnapshotResponse(
 public record AgentTestRequest(string Question);
 
 public record AgentTestResponse(string AgentId, string Message, int PatchOperationsCount);
+
+public record MessageResponse(
+    string AgentId,
+    string Message,
+    int Round,
+    DateTimeOffset CreatedAt);
