@@ -86,8 +86,19 @@ export default class Start extends Command {
       this.log(`✓ Session created: ${session.id}`);
       this.log('');
 
+      // Start the debate (triggers clarification phase)
+      this.log('🚀 Starting debate...');
+      await apiClient.startSession(session.id);
+      
+      // Wait a moment for the backend to process
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      // Refresh session to get updated phase
+      const updatedSession = await apiClient.getSession(session.id);
+      await sessionManager.saveSession(updatedSession);
+
       // Handle clarification phase
-      if (flags.interactive && session.phase === 'CLARIFICATION') {
+      if (flags.interactive && updatedSession.phase === 'CLARIFICATION') {
         this.log('🤔 Moderator is analyzing your idea...');
         this.log('');
 

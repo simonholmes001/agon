@@ -101,6 +101,15 @@ export class AgonAPIClient {
   }
 
   /**
+   * Start a session (begin debate/clarification)
+   */
+  async startSession(sessionId: string): Promise<void> {
+    this.logger.info('Starting session', { sessionId });
+    await this.client.post(`/sessions/${sessionId}/start`);
+    this.logger.info('Session started successfully', { sessionId });
+  }
+
+  /**
    * Get clarification questions for a session
    */
   async getClarification(sessionId: string): Promise<ClarificationResponse> {
