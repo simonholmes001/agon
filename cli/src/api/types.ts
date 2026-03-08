@@ -85,3 +85,14 @@ export interface APIError {
   statusCode: number;
   errors?: Record<string, string[]>;
 }
+
+export interface Message {
+  agentId: string;
+  message: string;
+  round: number;
+  createdAt: string;
+}
+
+export interface SubmitMessageRequest {
+  content: string;
+}

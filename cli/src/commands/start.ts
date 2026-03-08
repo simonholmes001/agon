@@ -10,6 +10,7 @@
  */
 
 import { Command, Flags, Args } from '@oclif/core';
+import chalk from 'chalk';
 import { AgonAPIClient } from '../api/agon-client.js';
 import { SessionManager } from '../state/session-manager.js';
 import { ConfigManager } from '../state/config-manager.js';
@@ -91,36 +92,38 @@ export default class Start extends Command {
       await apiClient.startSession(session.id);
       
       // Wait a moment for the backend to process
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      this.log('🤔 Moderator is analyzing your idea...');
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
+      // Fetch conversation messages immediately (before phase might change)
+      const messages = await apiClient.getMessages(session.id);
+      const moderatorMessages = messages.filter(m => m.agentId === 'moderator');
       
       // Refresh session to get updated phase
       const updatedSession = await apiClient.getSession(session.id);
       await sessionManager.saveSession(updatedSession);
 
-      // Handle clarification phase
-      if (flags.interactive && updatedSession.phase === 'CLARIFICATION') {
-        this.log('🤔 Moderator is analyzing your idea...');
+      // Display Moderator's message if we got one
+      if (flags.interactive && moderatorMessages.length > 0) {
+        this.log('');
+        this.log('━'.repeat(60));
+        this.log(chalk.bold('Moderator:'));
         this.log('');
 
-        // Fetch clarification questions
-        const clarification = await apiClient.getClarification(session.id);
+        // Display the latest moderator message
+        const latestMessage = moderatorMessages.at(-1)!;
+        this.log(latestMessage.message);
 
-        if (clarification.questions && clarification.questions.length > 0) {
-          this.log('━'.repeat(60));
-          this.log('Clarification Questions:');
-          this.log('');
-
-          // Display questions
-          clarification.questions.forEach((q: { id: string; text: string; order: number }, index: number) => {
-            this.log(`${index + 1}. ${q.text}`);
-          });
-
-          this.log('━'.repeat(60));
-          this.log('');
-          this.log('💡 Use `agon clarify` to answer these questions and continue.');
+        this.log('━'.repeat(60));
+        this.log('');
+        
+        if (updatedSession.phase === 'CLARIFICATION') {
+          this.log(chalk.cyan('💡 Answer with: ') + chalk.white('agon answer "<your response>"'));
         } else {
-          this.log('✓ No clarification needed. Session ready.');
+          this.log(chalk.green('✓ Clarification complete. Debate is running.'));
         }
+      } else if (flags.interactive) {
+        this.log('✓ No clarification needed. Session ready.');
       } else if (!flags.interactive) {
         this.log('ℹ️  Non-interactive mode: Skipping clarification.');
         this.log('   The debate will proceed with the information provided.');

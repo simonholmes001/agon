@@ -14,7 +14,9 @@ import type {
   ClarificationResponse,
   SubmitAnswersRequest,
   Artifact,
-  ArtifactType
+  ArtifactType,
+  Message,
+  SubmitMessageRequest
 } from './types.js';
 
 export class AgonAPIClient {
@@ -150,6 +152,41 @@ export class AgonAPIClient {
     const response = await this.client.get<Artifact[]>(
       `/sessions/${sessionId}/artifacts`
     );
+    return response.data;
+  }
+
+  /**
+   * Get conversation messages for a session
+   */
+  async getMessages(sessionId: string): Promise<Message[]> {
+    this.logger.info('Fetching conversation messages', { sessionId });
+    const response = await this.client.get<Message[]>(
+      `/sessions/${sessionId}/messages`
+    );
+    this.logger.debug('Messages fetched', { sessionId, count: response.data.length });
+    return response.data;
+  }
+
+  /**
+   * Submit a clarification response or question
+   */
+  async submitMessage(sessionId: string, content: string): Promise<SessionResponse> {
+    // Validation
+    if (!content || content.trim().length === 0) {
+      throw new AgonError(
+        ErrorCode.INVALID_INPUT,
+        'Message content cannot be empty',
+        ['Provide a response to the clarification question']
+      );
+    }
+
+    this.logger.info('Submitting message', { sessionId, contentLength: content.length });
+    const request: SubmitMessageRequest = { content };
+    const response = await this.client.post<SessionResponse>(
+      `/sessions/${sessionId}/messages`,
+      request
+    );
+    this.logger.info('Message submitted successfully', { sessionId });
     return response.data;
   }
 
