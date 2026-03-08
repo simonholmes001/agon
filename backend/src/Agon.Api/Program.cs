@@ -9,6 +9,7 @@ using Agon.Domain.Sessions;
 using Agon.Infrastructure.Agents;
 using Agon.Infrastructure.Persistence.PostgreSQL;
 using Agon.Infrastructure.Persistence.Redis;
+using Agon.Infrastructure.Persistence.Repositories;
 using Agon.Infrastructure.SignalR;
 using Anthropic;
 using Google.GenAI;
@@ -94,6 +95,7 @@ if (!string.IsNullOrEmpty(postgresConnectionString))
     // ── Infrastructure: Repositories ────────────────────────────────────────
     builder.Services.AddScoped<ISessionRepository, SessionRepository>();
     builder.Services.AddScoped<ITruthMapRepository, TruthMapRepository>();
+    builder.Services.AddScoped<IAgentMessageRepository, AgentMessageRepository>();
 }
 
 // ── Database: Redis ─────────────────────────────────────────────────────
@@ -113,6 +115,7 @@ builder.Services.AddScoped<IEventBroadcaster, SignalREventBroadcaster>();
 
 // ── Application Layer Services ──────────────────────────────────────────
 builder.Services.AddScoped<ISessionService, SessionService>();
+builder.Services.AddScoped<ConversationHistoryService>();
 
 // ── Domain: RoundPolicy (Session Configuration) ─────────────────────────
 // Create RoundPolicy from configuration (immutable, so singleton is fine)

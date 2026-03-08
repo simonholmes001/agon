@@ -1,6 +1,7 @@
 using Agon.Application.Interfaces;
 using Agon.Application.Models;
 using Agon.Application.Orchestration;
+using Agon.Application.Services;
 using Agon.Domain.Agents;
 using Agon.Domain.Sessions;
 using Agon.Domain.TruthMap;
@@ -67,16 +68,24 @@ public class AgentRunnerTests
         return b;
     }
 
+    private static ConversationHistoryService StubConversationHistory()
+    {
+        var repo = Substitute.For<IAgentMessageRepository>();
+        return new ConversationHistoryService(repo);
+    }
+
     private static AgentRunner BuildRunner(
         IReadOnlyList<ICouncilAgent> agents,
         ITruthMapRepository? repo = null,
         IEventBroadcaster? broadcaster = null,
+        ConversationHistoryService? conversationHistory = null,
         int agentTimeoutSeconds = 5)
     {
         return new AgentRunner(
             agents,
             repo ?? StubRepo(),
             broadcaster ?? NullBroadcaster(),
+            conversationHistory ?? StubConversationHistory(),
             agentTimeoutSeconds);
     }
 

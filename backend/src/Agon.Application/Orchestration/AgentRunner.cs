@@ -1,5 +1,6 @@
 using Agon.Application.Interfaces;
 using Agon.Application.Models;
+using Agon.Application.Services;
 using Agon.Domain.Sessions;
 using Agon.Domain.TruthMap;
 using Microsoft.Extensions.Logging;
@@ -20,6 +21,7 @@ public sealed class AgentRunner : IAgentRunner
     private readonly IReadOnlyList<ICouncilAgent> _agents;
     private readonly ITruthMapRepository _truthMapRepository;
     private readonly IEventBroadcaster _broadcaster;
+    private readonly ConversationHistoryService _conversationHistory;
     private readonly int _agentTimeoutSeconds;
     private readonly ILogger<AgentRunner>? _logger;
 
@@ -27,12 +29,14 @@ public sealed class AgentRunner : IAgentRunner
         IReadOnlyList<ICouncilAgent> agents,
         ITruthMapRepository truthMapRepository,
         IEventBroadcaster broadcaster,
+        ConversationHistoryService conversationHistory,
         int agentTimeoutSeconds = 90,
         ILogger<AgentRunner>? logger = null)
     {
         _agents = agents;
         _truthMapRepository = truthMapRepository;
         _broadcaster = broadcaster;
+        _conversationHistory = conversationHistory;
         _agentTimeoutSeconds = agentTimeoutSeconds;
         _logger = logger;
     }
@@ -77,12 +81,20 @@ public sealed class AgentRunner : IAgentRunner
             state.ClarificationRoundCount,
             response.TokensUsed);
 
-        // Log the Moderator's message for debugging
+        // Log and persist the Moderator's message
         if (!string.IsNullOrWhiteSpace(response.Message))
         {
             _logger?.LogInformation(
                 "Moderator message: {Message}",
                 response.Message.Length > 500 ? response.Message.Substring(0, 500) + "..." : response.Message);
+            
+            // Store message in conversation history for CLI retrieval
+            await _conversationHistory.StoreMessageAsync(
+                state.SessionId,
+                "moderator",
+                response.Message,
+                state.ClarificationRoundCount,
+                cancellationToken);
         }
 
         return response;
