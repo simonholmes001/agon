@@ -53,11 +53,12 @@ public sealed class AgentRunner : IAgentRunner
             throw new InvalidOperationException("Moderator agent not configured");
         }
 
-        var context = AgentContext.ForAnalysis(
+        var context = AgentContext.ForClarification(
             state.SessionId,
             state.TruthMap,
             state.FrictionLevel,
             state.ClarificationRoundCount,
+            state.UserMessages,
             false); // Research tools not used during clarification
 
         var response = await RunWithTimeoutAsync(moderator, context, cancellationToken);

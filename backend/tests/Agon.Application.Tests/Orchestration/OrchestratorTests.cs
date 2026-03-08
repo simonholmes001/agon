@@ -700,4 +700,97 @@ public class OrchestratorTests
             SessionPhase.AnalysisRound,
             Arg.Any<CancellationToken>());
     }
+
+    // ── RunModeratorAsync (User Message Handling) ─────────────────────────────
+
+    [Fact]
+    public async Task RunModeratorAsync_Should_PassUserMessagesToAgentRunner()
+    {
+        // Arrange
+        var runner = StubRunner();
+        var sessionService = StubSessionService();
+        var orchestrator = BuildOrchestrator(runner: runner, sessionService: sessionService);
+        var state = BuildState(SessionPhase.Clarification);
+        
+        // Add user messages to state
+        state.UserMessages.Add(new UserMessage(
+            "Target customers are small retail businesses",
+            DateTimeOffset.UtcNow,
+            1));
+        state.UserMessages.Add(new UserMessage(
+            "Primary pain point is inventory tracking",
+            DateTimeOffset.UtcNow,
+            1));
+
+        // Act
+        await orchestrator.RunModeratorAsync(state, CancellationToken.None);
+
+        // Assert
+        await runner.Received(1).RunModeratorAsync(
+            Arg.Is<SessionState>(s => s.UserMessages.Count == 2),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task RunModeratorAsync_Should_IncludeUserMessagesInContext()
+    {
+        // Arrange
+        var moderatorResponse = new AgentResponse(
+            AgentId: AgentId.Moderator,
+            Message: "READY",
+            Patch: null,
+            TokensUsed: 100,
+            TimedOut: false,
+            RawOutput: null);
+
+        var runner = Substitute.For<IAgentRunner>();
+        runner.RunModeratorAsync(Arg.Any<SessionState>(), Arg.Any<CancellationToken>())
+              .Returns(Task.FromResult(moderatorResponse));
+
+        var sessionService = StubSessionService();
+        var orchestrator = BuildOrchestrator(runner: runner, sessionService: sessionService);
+        var state = BuildState(SessionPhase.Clarification);
+        
+        state.UserMessages.Add(new UserMessage(
+            "Test message",
+            DateTimeOffset.UtcNow,
+            1));
+
+        // Act
+        await orchestrator.RunModeratorAsync(state, CancellationToken.None);
+
+        // Assert - Agent runner should have been called with state containing user messages
+        await runner.Received(1).RunModeratorAsync(
+            Arg.Is<SessionState>(s => s.UserMessages.Count == 1),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task RunModeratorAsync_Should_WorkWithEmptyUserMessages()
+    {
+        // Arrange
+        var moderatorResponse = new AgentResponse(
+            AgentId: AgentId.Moderator,
+            Message: "What is your target customer?",
+            Patch: null,
+            TokensUsed: 50,
+            TimedOut: false,
+            RawOutput: null);
+
+        var runner = Substitute.For<IAgentRunner>();
+        runner.RunModeratorAsync(Arg.Any<SessionState>(), Arg.Any<CancellationToken>())
+              .Returns(Task.FromResult(moderatorResponse));
+
+        var sessionService = StubSessionService();
+        var orchestrator = BuildOrchestrator(runner: runner, sessionService: sessionService);
+        var state = BuildState(SessionPhase.Clarification);
+
+        // Act
+        await orchestrator.RunModeratorAsync(state, CancellationToken.None);
+
+        // Assert - Should work fine with no user messages
+        await runner.Received(1).RunModeratorAsync(
+            Arg.Is<SessionState>(s => s.UserMessages.Count == 0),
+            Arg.Any<CancellationToken>());
+    }
 }
