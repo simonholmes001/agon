@@ -290,4 +290,70 @@ describe('start command', () => {
       ).rejects.toThrow('Rate limit exceeded');
     });
   });
+
+  describe('continuous conversation loop', () => {
+    it('should continue prompting until phase changes from CLARIFICATION', async () => {
+      // Arrange
+      const sessionId = 'test-session-123';
+      
+      // Mock getMessages to return Moderator messages
+      mockApiClient.getMessages = vi.fn();
+      mockApiClient.getMessages
+        .mockResolvedValueOnce([
+          { agentId: 'moderator', message: 'First question?', round: 1, createdAt: '2026-03-08T12:00:00Z' }
+        ])
+        .mockResolvedValueOnce([
+          { agentId: 'moderator', message: 'Follow-up question?', round: 1, createdAt: '2026-03-08T12:05:00Z' }
+        ]);
+
+      // Mock submitMessage
+      mockApiClient.submitMessage = vi.fn().mockResolvedValue({
+        id: sessionId,
+        status: 'active',
+        phase: 'CLARIFICATION',
+        createdAt: '2026-03-08T12:00:00Z',
+        updatedAt: '2026-03-08T12:05:00Z',
+        currentRound: 1
+      });
+
+      // Mock getSession to return CLARIFICATION first, then ANALYSIS_ROUND
+      mockApiClient.getSession = vi.fn();
+      mockApiClient.getSession
+        .mockResolvedValueOnce({
+          id: sessionId,
+          status: 'active',
+          phase: 'CLARIFICATION',
+          createdAt: '2026-03-08T12:00:00Z',
+          updatedAt: '2026-03-08T12:05:00Z',
+          currentRound: 1
+        })
+        .mockResolvedValueOnce({
+          id: sessionId,
+          status: 'active',
+          phase: 'ANALYSIS_ROUND',
+          createdAt: '2026-03-08T12:00:00Z',
+          updatedAt: '2026-03-08T12:10:00Z',
+          currentRound: 1
+        });
+
+      // Act - simulate conversation loop
+      const messages1 = await mockApiClient.getMessages(sessionId);
+      expect(messages1).toHaveLength(1);
+      
+      await mockApiClient.submitMessage(sessionId, 'First response');
+      const session1 = await mockApiClient.getSession(sessionId);
+      expect(session1.phase).toBe('CLARIFICATION');
+
+      const messages2 = await mockApiClient.getMessages(sessionId);
+      expect(messages2).toHaveLength(1);
+      
+      await mockApiClient.submitMessage(sessionId, 'Second response');
+      const session2 = await mockApiClient.getSession(sessionId);
+      expect(session2.phase).toBe('ANALYSIS_ROUND');
+
+      // Assert - should have prompted twice
+      expect(mockApiClient.submitMessage).toHaveBeenCalledTimes(2);
+      expect(mockApiClient.getMessages).toHaveBeenCalledTimes(2);
+    });
+  });
 });

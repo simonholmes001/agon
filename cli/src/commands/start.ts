@@ -131,12 +131,15 @@ export default class Start extends Command {
         this.log('━'.repeat(60));
         this.log('');
         
-        // Prompt for response
+        // Prompt for response with explicit visual cue
+        this.log(chalk.cyan('Please answer the Moderator\'s questions:'));
+        this.log('');
+        
         const { response } = await inquirer.prompt([
           {
             type: 'input',
             name: 'response',
-            message: 'Your response:',
+            message: chalk.bold('Your response'),
             validate: (input: string) => {
               if (!input || input.trim().length === 0) {
                 return 'Please provide a response';

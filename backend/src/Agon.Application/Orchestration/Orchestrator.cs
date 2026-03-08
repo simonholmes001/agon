@@ -61,8 +61,15 @@ public sealed class Orchestrator : IOrchestrator
 
         var response = await _agentRunner.RunModeratorAsync(state, cancellationToken);
 
+        // Check if Moderator asked questions (heuristic: contains "?" in the message)
+        var askedQuestions = response.Message.Contains('?');
+
         // Check if Moderator signaled READY
-        if (response.Message.Contains("READY", StringComparison.OrdinalIgnoreCase))
+        var signaledReady = response.Message.Contains("READY", StringComparison.OrdinalIgnoreCase);
+
+        // CRITICAL RULE: If Moderator asked questions, IGNORE the READY signal
+        // The LLM sometimes outputs both - we enforce the rule here
+        if (signaledReady && !askedQuestions)
         {
             _logger?.LogInformation(
                 "Session {SessionId}: Moderator signaled READY → transitioning to ANALYSIS_ROUND",
@@ -74,6 +81,13 @@ public sealed class Orchestrator : IOrchestrator
         }
         else
         {
+            if (signaledReady && askedQuestions)
+            {
+                _logger?.LogWarning(
+                    "Session {SessionId}: Moderator signaled READY but also asked questions - ignoring READY signal",
+                    state.SessionId);
+            }
+
             // Moderator asked questions - increment clarification round count
             state.ClarificationRoundCount++;
             await _sessionService.RecordRoundSnapshotAsync(state, cancellationToken);
