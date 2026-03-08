@@ -539,6 +539,9 @@ public class SessionServiceTests
             truthMapRepo ?? StubTruthMapRepo(),
             snapshotStore ?? StubSnapshotStore(),
             broadcaster,
-            orchestrator ?? Substitute.For<IOrchestrator>());
+            orchestrator != null 
+                ? new Lazy<IOrchestrator>(() => orchestrator) 
+                : new Lazy<IOrchestrator>(() => Substitute.For<IOrchestrator>()));
     }
 }
+

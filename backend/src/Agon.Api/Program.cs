@@ -138,6 +138,10 @@ if (!builder.Environment.IsEnvironment("Testing"))
 {
     builder.Services.AddScoped<IAgentRunner, AgentRunner>();
     builder.Services.AddScoped<IOrchestrator, Orchestrator>();
+    
+    // Register Lazy<IOrchestrator> to break circular dependency with SessionService
+    builder.Services.AddScoped<Lazy<IOrchestrator>>(sp => 
+        new Lazy<IOrchestrator>(() => sp.GetRequiredService<IOrchestrator>()));
 }
 
 // ── Infrastructure: Council Agents (MAF with Multiple Providers) ────────

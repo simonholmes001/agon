@@ -17,20 +17,20 @@ public sealed class SessionService : ISessionService
     private readonly ITruthMapRepository _truthMapRepo;
     private readonly ISnapshotStore _snapshotStore;
     private readonly IEventBroadcaster? _broadcaster;
-    private readonly IOrchestrator? _orchestrator;
+    private readonly Lazy<IOrchestrator>? _lazyOrchestrator;
 
     public SessionService(
         ISessionRepository sessionRepo,
         ITruthMapRepository truthMapRepo,
         ISnapshotStore snapshotStore,
         IEventBroadcaster? broadcaster = null,
-        IOrchestrator? orchestrator = null)
+        Lazy<IOrchestrator>? orchestrator = null)
     {
         _sessionRepo = sessionRepo;
         _truthMapRepo = truthMapRepo;
         _snapshotStore = snapshotStore;
         _broadcaster = broadcaster;
-        _orchestrator = orchestrator;
+        _lazyOrchestrator = orchestrator;
     }
 
     public async Task<SessionState> CreateAsync(
@@ -107,9 +107,9 @@ public sealed class SessionService : ISessionService
         }
 
         // ⚡ NEW: Call Orchestrator to run Moderator agent
-        if (_orchestrator is not null)
+        if (_lazyOrchestrator?.Value is not null)
         {
-            await _orchestrator.RunModeratorAsync(state, cancellationToken);
+            await _lazyOrchestrator?.Value.RunModeratorAsync(state, cancellationToken);
         }
     }
 
@@ -143,9 +143,9 @@ public sealed class SessionService : ISessionService
         await _sessionRepo.UpdateAsync(state, cancellationToken);
 
         // Call Orchestrator to run Moderator agent with the new message
-        if (_orchestrator is not null)
+        if (_lazyOrchestrator?.Value is not null)
         {
-            await _orchestrator.RunModeratorAsync(state, cancellationToken);
+            await _lazyOrchestrator?.Value.RunModeratorAsync(state, cancellationToken);
         }
     }
 
