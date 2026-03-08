@@ -3,8 +3,8 @@ applyTo: '**'
 ---
 # Agon Development Backlog
 
-**Last Updated:** March 7, 2026  
-**Current Phase:** Phase 1 - CLI MVP
+**Last Updated:** March 8, 2026  
+**Current Phase:** Phase 1 - CLI MVP Complete
 
 ---
 
@@ -19,6 +19,7 @@ applyTo: '**'
 - [ ] Add polling for backend round completion in start command
 - [ ] Add pager support for long artifacts (less/more)
 - [ ] Add estimated time remaining to status command
+- [ ] Improve command output formatting (use chalk colors consistently throughout)
 - [ ] Test CLI against live backend API
 - [ ] Add end-to-end integration tests
 - [ ] Write comprehensive CLI README with examples
