@@ -57,28 +57,17 @@ public sealed class SessionService : ISessionService
         int frictionLevel,
         CancellationToken cancellationToken = default)
     {
-        Console.WriteLine($"[DEBUG] CreateAsync called with userId={userId}, idea='{idea}', frictionLevel={frictionLevel}");
-        
         var sessionId = Guid.NewGuid();
         var truthMap = TruthMapModel.Empty(sessionId);
-
-        Console.WriteLine($"[DEBUG] Empty Truth Map created with CoreIdea='{truthMap.CoreIdea}'");
 
         // Seed the user's initial idea into the CoreIdea field
         if (!string.IsNullOrWhiteSpace(idea))
         {
             truthMap = truthMap with { CoreIdea = idea };
-            Console.WriteLine($"[DEBUG] CoreIdea seeded: '{truthMap.CoreIdea}'");
-        }
-        else
-        {
-            Console.WriteLine($"[DEBUG] Idea was null/empty, CoreIdea not seeded");
         }
 
         // Persist Truth Map with seeded CoreIdea
         await _truthMapRepo.SaveAsync(truthMap, cancellationToken);
-        
-        Console.WriteLine($"[DEBUG] Truth Map saved with CoreIdea='{truthMap.CoreIdea}'");
 
         // Create session state with user context
         var state = SessionState.Create(sessionId, userId, idea, frictionLevel, researchToolsEnabled: false, truthMap);
