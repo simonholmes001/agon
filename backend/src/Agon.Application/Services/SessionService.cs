@@ -113,6 +113,42 @@ public sealed class SessionService : ISessionService
         }
     }
 
+    public async Task SubmitMessageAsync(
+        Guid sessionId,
+        string content,
+        CancellationToken cancellationToken = default)
+    {
+        var state = await _sessionRepo.GetAsync(sessionId, cancellationToken);
+        
+        if (state is null)
+        {
+            throw new InvalidOperationException($"Session {sessionId} not found");
+        }
+
+        if (state.Phase != SessionPhase.Clarification)
+        {
+            throw new InvalidOperationException(
+                $"Cannot submit message in phase {state.Phase}. Session must be in Clarification phase.");
+        }
+
+        // Add the user message to the session state
+        var userMessage = new UserMessage(
+            content,
+            DateTimeOffset.UtcNow,
+            state.ClarificationRoundCount);
+        
+        state.UserMessages.Add(userMessage);
+
+        // Persist the updated state
+        await _sessionRepo.UpdateAsync(state, cancellationToken);
+
+        // Call Orchestrator to run Moderator agent with the new message
+        if (_orchestrator is not null)
+        {
+            await _orchestrator.RunModeratorAsync(state, cancellationToken);
+        }
+    }
+
     public async Task AdvancePhaseAsync(
         SessionState state,
         SessionPhase nextPhase,

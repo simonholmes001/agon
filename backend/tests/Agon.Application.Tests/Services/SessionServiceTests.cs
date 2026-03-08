@@ -458,6 +458,73 @@ public class SessionServiceTests
             Arg.Any<CancellationToken>());
     }
 
+    // ── SubmitMessageAsync ────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task SubmitMessageAsync_Should_AddMessageToSessionState()
+    {
+        // Arrange
+        var state = BuildState(phase: SessionPhase.Clarification);
+        state.ClarificationRoundCount = 1;
+        var sessionRepo = StubSessionRepo(returns: state);
+        var svc = BuildService(sessionRepo: sessionRepo);
+
+        // Act
+        await svc.SubmitMessageAsync(state.SessionId, "Target customers are small businesses", CancellationToken.None);
+
+        // Assert
+        state.UserMessages.Should().HaveCount(1);
+        state.UserMessages[0].Content.Should().Be("Target customers are small businesses");
+        state.UserMessages[0].ClarificationRound.Should().Be(1);
+        await sessionRepo.Received(1).UpdateAsync(
+            Arg.Is<SessionState>(s => s.UserMessages.Count == 1),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task SubmitMessageAsync_Should_CallOrchestrator()
+    {
+        // Arrange
+        var state = BuildState(phase: SessionPhase.Clarification);
+        var sessionRepo = StubSessionRepo(returns: state);
+        var orchestrator = Substitute.For<IOrchestrator>();
+        var svc = BuildServiceWithOrchestrator(sessionRepo: sessionRepo, orchestrator: orchestrator);
+
+        // Act
+        await svc.SubmitMessageAsync(state.SessionId, "Test message", CancellationToken.None);
+
+        // Assert
+        await orchestrator.Received(1).RunModeratorAsync(
+            Arg.Is<SessionState>(s => s.UserMessages.Count == 1),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task SubmitMessageAsync_Should_ThrowIfSessionNotFound()
+    {
+        // Arrange
+        var sessionRepo = StubSessionRepo(returns: null);
+        var svc = BuildService(sessionRepo: sessionRepo);
+        var nonExistentId = Guid.NewGuid();
+
+        // Act & Assert
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => svc.SubmitMessageAsync(nonExistentId, "Test", CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task SubmitMessageAsync_Should_ThrowIfNotInClarificationPhase()
+    {
+        // Arrange
+        var state = BuildState(phase: SessionPhase.AnalysisRound);
+        var sessionRepo = StubSessionRepo(returns: state);
+        var svc = BuildService(sessionRepo: sessionRepo);
+
+        // Act & Assert
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => svc.SubmitMessageAsync(state.SessionId, "Test", CancellationToken.None));
+    }
+
     // ── Helper for Orchestrator Injection ─────────────────────────────────────
 
     private static SessionService BuildServiceWithOrchestrator(

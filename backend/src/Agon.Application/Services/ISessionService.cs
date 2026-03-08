@@ -33,6 +33,16 @@ public interface ISessionService
     /// </summary>
     Task StartClarificationAsync(Guid sessionId, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Submits a user message during the clarification phase and triggers moderator evaluation.
+    /// </summary>
+    /// <param name="sessionId">The session ID</param>
+    /// <param name="content">The user's message content</param>
+    /// <param name="cancellationToken">Cancellation token</param>
+    /// <returns>Task</returns>
+    /// <exception cref="InvalidOperationException">If session not found or not in clarification phase</exception>
+    Task SubmitMessageAsync(Guid sessionId, string content, CancellationToken cancellationToken = default);
+
     Task AdvancePhaseAsync(
         SessionState state,
         SessionPhase nextPhase,
