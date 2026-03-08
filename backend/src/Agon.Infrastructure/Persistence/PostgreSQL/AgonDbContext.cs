@@ -1,5 +1,6 @@
 using Agon.Domain.TruthMap;
 using Agon.Domain.TruthMap.Entities;
+using Agon.Infrastructure.Persistence.Entities;
 using Microsoft.EntityFrameworkCore;
 using TruthMapModel = Agon.Domain.TruthMap.TruthMap;
 
@@ -22,6 +23,9 @@ public class AgonDbContext : DbContext
 
     // Sessions
     public DbSet<SessionEntity> Sessions => Set<SessionEntity>();
+
+    // Agent messages (conversation history)
+    public DbSet<AgentMessageEntity> AgentMessages => Set<AgentMessageEntity>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
