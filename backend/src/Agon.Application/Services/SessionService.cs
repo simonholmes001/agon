@@ -1,5 +1,6 @@
 using Agon.Application.Interfaces;
 using Agon.Application.Models;
+using Agon.Application.Orchestration;
 using Agon.Domain.Sessions;
 using Agon.Domain.Snapshots;
 using TruthMapModel = Agon.Domain.TruthMap.TruthMap;
@@ -16,17 +17,20 @@ public sealed class SessionService : ISessionService
     private readonly ITruthMapRepository _truthMapRepo;
     private readonly ISnapshotStore _snapshotStore;
     private readonly IEventBroadcaster? _broadcaster;
+    private readonly IOrchestrator? _orchestrator;
 
     public SessionService(
         ISessionRepository sessionRepo,
         ITruthMapRepository truthMapRepo,
         ISnapshotStore snapshotStore,
-        IEventBroadcaster? broadcaster = null)
+        IEventBroadcaster? broadcaster = null,
+        IOrchestrator? orchestrator = null)
     {
         _sessionRepo = sessionRepo;
         _truthMapRepo = truthMapRepo;
         _snapshotStore = snapshotStore;
         _broadcaster = broadcaster;
+        _orchestrator = orchestrator;
     }
 
     public async Task<SessionState> CreateAsync(
@@ -100,6 +104,12 @@ public sealed class SessionService : ISessionService
                 SessionPhase.Clarification.ToString(),
                 state.Status.ToString(),
                 cancellationToken);
+        }
+
+        // ⚡ NEW: Call Orchestrator to run Moderator agent
+        if (_orchestrator is not null)
+        {
+            await _orchestrator.RunModeratorAsync(state, cancellationToken);
         }
     }
 

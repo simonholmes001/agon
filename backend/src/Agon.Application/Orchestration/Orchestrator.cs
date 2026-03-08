@@ -17,7 +17,7 @@ namespace Agon.Application.Orchestration;
 ///
 /// The Orchestrator holds no mutable state — all state is in <see cref="SessionState"/>.
 /// </summary>
-public sealed class Orchestrator
+public sealed class Orchestrator : IOrchestrator
 {
     private readonly IAgentRunner _agentRunner;
     private readonly ISessionService _sessionService;
