@@ -36,32 +36,87 @@ export function normalizeMarkdownStructure(markdown: string): string {
 
   const lines = markdown.split('\n');
   const normalized: string[] = [];
+  const numberedPattern = /^(\d+)\.\s+(.+)$/;
+  const bulletPattern = /^[-*]\s+(.+)$/;
+  const continuationPattern = /^(and|or|also|plus|including|where)\b/i;
+  let insideNumberedList = false;
+  let numberedItemCounter = 0;
+  let pendingBlank = false;
 
-  const getPreviousNonEmptyLine = (): string | undefined => {
-    for (let i = normalized.length - 1; i >= 0; i -= 1) {
-      const candidate = normalized[i]?.trim();
-      if (candidate) {
-        return candidate;
-      }
+  const pushBlank = (): void => {
+    if (normalized.length > 0 && normalized.at(-1) !== '') {
+      normalized.push('');
     }
-    return undefined;
   };
 
   for (const line of lines) {
     const trimmed = line.trim();
-    const isExamplesLine = /^[-*]\s+examples?:/i.test(trimmed);
-    const previousNonEmpty = getPreviousNonEmptyLine();
-    const followsNumberedItem = previousNonEmpty ? /^\d+\.\s+/.test(previousNonEmpty) : false;
 
-    if (isExamplesLine && followsNumberedItem) {
-      while (normalized.length > 0 && normalized.at(-1)?.trim() === '') {
-        normalized.pop();
-      }
-      normalized.push(`   - ${trimmed.replace(/^[-*]\s+/, '')}`);
+    if (trimmed.length === 0) {
+      pendingBlank = true;
       continue;
     }
 
-    normalized.push(line);
+    const numberedMatch = trimmed.match(numberedPattern);
+    const bulletMatch = trimmed.match(bulletPattern);
+    const isContinuation = continuationPattern.test(trimmed);
+
+    if (pendingBlank) {
+      // Keep grouped content tight inside numbered items.
+      if (!(insideNumberedList && (Boolean(bulletMatch) || isContinuation))) {
+        pushBlank();
+      }
+      pendingBlank = false;
+    }
+
+    if (numberedMatch) {
+      if (insideNumberedList) {
+        numberedItemCounter += 1;
+      } else {
+        insideNumberedList = true;
+        numberedItemCounter = 1;
+      }
+
+      // Add breathing room between top-level numbered sections.
+      if (numberedItemCounter > 1) {
+        pushBlank();
+      }
+
+      normalized.push(`${numberedItemCounter}. ${numberedMatch[2].trim()}`);
+      continue;
+    }
+
+    if (insideNumberedList && bulletMatch) {
+      normalized.push(`   - ${bulletMatch[1].trim()}`);
+      continue;
+    }
+
+    if (insideNumberedList && isContinuation) {
+      const indent = /^also\b/i.test(trimmed) ? '     ' : '   ';
+      normalized.push(`${indent}${trimmed}`);
+      continue;
+    }
+
+    if (insideNumberedList) {
+      const previous = normalized.at(-1) ?? '';
+      const followsSubItem = /^\s+-\s+/.test(previous) || /^\s{5,}\S+/.test(previous);
+      if (followsSubItem) {
+        normalized.push(`     ${trimmed}`);
+        continue;
+      }
+    }
+
+    insideNumberedList = false;
+    numberedItemCounter = 0;
+    normalized.push(trimmed);
+  }
+
+  if (pendingBlank) {
+    pushBlank();
+  }
+
+  while (normalized.length > 0 && normalized.at(-1) === '') {
+    normalized.pop();
   }
 
   return normalized.join('\n').replace(/\n{3,}/g, '\n\n');
@@ -77,7 +132,10 @@ export function renderMarkdown(markdown: string): string {
   
   try {
     const normalized = normalizeMarkdownStructure(markdown);
-    const rendered = marked(normalized) as string;
+    // Escape ordered-list prefixes so marked-terminal doesn't auto-renumber
+    // and collapse spacing in moderator-style question blocks.
+    const safeForRenderer = normalized.replace(/^(\d+)\.\s+/gm, '$1\\. ');
+    const rendered = marked(safeForRenderer) as string;
     return rendered.trim();
   } catch {
     // If markdown parsing fails, return the original text

@@ -92,8 +92,87 @@ describe('Markdown Renderer', () => {
       expect(normalized).toBe([
         '1. Primary persona question',
         '   - Examples: "A", "B"',
+        '',
         '2. Next question'
       ].join('\n'));
+    });
+
+    it('should keep continuation and helper lines visually attached to the right numbered item', () => {
+      const text = [
+        '1. Primary persona detail: Who is this for?',
+        '',
+        'and which geography/market?',
+        '2. AI scope for bio writing: What exactly should AI do?',
+        '',
+        '* Options: (a) rewrite bullets, (b) generate from questionnaire',
+        'Also: should generation run on-device?',
+        '3. Non-negotiables + tech preferences',
+        '',
+        '* Examples: "must use Apple Sign In"'
+      ].join('\n');
+
+      const normalized = normalizeMarkdownStructure(text);
+
+      expect(normalized).toBe([
+        '1. Primary persona detail: Who is this for?',
+        '   and which geography/market?',
+        '',
+        '2. AI scope for bio writing: What exactly should AI do?',
+        '   - Options: (a) rewrite bullets, (b) generate from questionnaire',
+        '     Also: should generation run on-device?',
+        '',
+        '3. Non-negotiables + tech preferences',
+        '   - Examples: "must use Apple Sign In"'
+      ].join('\n'));
+    });
+
+    it('should renumber malformed ordered lists and add spacing between top-level items', () => {
+      const text = [
+        '1. First question',
+        '2. Second question',
+        '',
+        '* must-have A',
+        '* must-have B',
+        'Pick 1-2 as "must-have."',
+        '',
+        '1. Third question'
+      ].join('\n');
+
+      const normalized = normalizeMarkdownStructure(text);
+
+      expect(normalized).toBe([
+        '1. First question',
+        '',
+        '2. Second question',
+        '   - must-have A',
+        '   - must-have B',
+        '     Pick 1-2 as "must-have."',
+        '',
+        '3. Third question'
+      ].join('\n'));
+    });
+  });
+
+  describe('renderMarkdown numbering', () => {
+    it('should preserve explicit numbering and spacing in moderator-style prompts', () => {
+      const text = [
+        '1. Primary persona',
+        '2. AI scope',
+        '',
+        '* Matchmaking/ranking',
+        '* Verification',
+        'Pick 1-2 as "must-have."',
+        '',
+        '1. Constraints'
+      ].join('\n');
+
+      const rendered = stripAnsi(renderMarkdown(text));
+
+      expect(rendered).toContain('1. Primary persona');
+      expect(rendered).toContain('2. AI scope');
+      expect(rendered).toContain('3. Constraints');
+      expect(rendered).not.toContain('1. Constraints');
+      expect(rendered).toMatch(/1\. Primary persona[\s\S]*\n\n2\. AI scope/);
     });
   });
 
