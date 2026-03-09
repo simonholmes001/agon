@@ -313,7 +313,7 @@ export default class Start extends Command {
           this.log(renderMarkdown(verdict.content));
           this.log('');
           this.log('Next steps:');
-          this.log('  • Ask follow-up questions (post-delivery chat support is the next backend step)');
+          this.log('  • Ask follow-up questions: agon answer "<follow-up request>"');
           this.log('  • View again: agon show verdict --refresh');
         } catch {
           this.log(chalk.yellow('⚠️  Session completed, but verdict artifact is not ready yet.'));

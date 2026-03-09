@@ -25,4 +25,9 @@ public interface IAgentRunner
         IReadOnlyList<string> targetAgentIds,
         string microDirective,
         CancellationToken cancellationToken);
+
+    Task<AgentResponse> RunPostDeliveryFollowUpAsync(
+        SessionState state,
+        string userMessage,
+        CancellationToken cancellationToken);
 }

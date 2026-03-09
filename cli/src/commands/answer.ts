@@ -1,7 +1,8 @@
 /**
  * Answer Command
  * 
- * Submit a clarification response to the Moderator during the clarification phase.
+ * Submit a message to the current session.
+ * Supports both clarification and post-delivery follow-up chat.
  * 
  * Usage:
  *   agon answer "Our target customers are small business owners"
@@ -14,18 +15,42 @@ import { ConfigManager } from '../state/config-manager.js';
 import { Logger } from '../utils/logger.js';
 import { formatError } from '../utils/error-handler.js';
 import chalk from 'chalk';
+import type { Message } from '../api/types.js';
+
+export function normalizePhase(phase: string): string {
+  return phase.replace(/[\s_-]/g, '').toLowerCase();
+}
+
+export function getLatestResponseMessage(phase: string, messages: Message[]): Message | undefined {
+  const normalizedPhase = normalizePhase(phase);
+  const ordered = [...messages].sort(
+    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+  );
+
+  if (normalizedPhase === 'clarification') {
+    return ordered.find(m => m.agentId === 'moderator');
+  }
+
+  if (normalizedPhase === 'deliver' || normalizedPhase === 'deliverwithgaps' || normalizedPhase === 'postdelivery') {
+    return ordered.find(m => m.agentId === 'post_delivery_assistant')
+      ?? ordered.find(m => m.agentId !== 'moderator');
+  }
+
+  return ordered.find(m => m.agentId !== 'moderator');
+}
 
 export default class Answer extends Command {
-  static override readonly description = 'Submit a clarification response to the Moderator';
+  static override readonly description = 'Submit a message for clarification or post-delivery follow-up';
 
   static override readonly examples = [
     '<%= config.bin %> <%= command.id %> "Our target customers are enterprise healthcare organizations"',
     '<%= config.bin %> <%= command.id %> "Budget is $100k, timeline is 6 months"',
+    '<%= config.bin %> <%= command.id %> "Please revise the PRD for an iOS-only MVP"',
   ];
 
   static override readonly args = {
     response: Args.string({
-      description: 'Your response to the clarification question',
+      description: 'Your message for the current session',
       required: true,
     }),
   };
@@ -66,29 +91,41 @@ export default class Answer extends Command {
 
       console.log(chalk.green('✓ Response submitted\n'));
 
-      // Check if clarification is complete
+      const messages = await apiClient.getMessages(sessionId);
+      const latestMessage = getLatestResponseMessage(updatedSession.phase, messages);
+
+      if (this.isClarificationPhase(updatedSession.phase)) {
+        if (latestMessage) {
+          console.log(chalk.bold('Moderator:\n'));
+          console.log(latestMessage.message);
+          console.log('\n' + chalk.dim('Answer with:'));
+          console.log(chalk.cyan('  agon answer "<your response>"\n'));
+        } else {
+          console.log(chalk.yellow('⏳ Waiting for Moderator response...'));
+          console.log(`Run ${chalk.cyan('agon status')} to check session state.`);
+        }
+        return;
+      }
+
+      if (this.isPostDeliveryPhase(updatedSession.phase)) {
+        if (latestMessage) {
+          console.log(chalk.bold('Assistant:\n'));
+          console.log(latestMessage.message);
+          console.log('\n' + chalk.dim('Continue with:'));
+          console.log(chalk.cyan('  agon answer "<follow-up request>"\n'));
+        } else {
+          console.log(chalk.yellow('⏳ Waiting for assistant follow-up response...'));
+          console.log(`Run ${chalk.cyan('agon show verdict --refresh')} to review current output.`);
+        }
+        return;
+      }
+
       if (!this.isClarificationPhase(updatedSession.phase)) {
         console.log(chalk.green('✓ Clarification complete!'));
         console.log(chalk.blue('🔄 Starting debate phase...\n'));
         console.log('The council agents are now analyzing your idea.');
         console.log(`Run ${chalk.cyan('agon status')} to check progress.`);
         return;
-      }
-
-      // Fetch latest messages to see if Moderator asked follow-up questions
-      const messages = await apiClient.getMessages(sessionId);
-      const latestModeratorMessage = messages
-        .filter(m => m.agentId === 'moderator')
-        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];
-
-      if (latestModeratorMessage) {
-        console.log(chalk.bold('Moderator:\n'));
-        console.log(latestModeratorMessage.message);
-        console.log('\n' + chalk.dim('Answer with:'));
-        console.log(chalk.cyan('  agon answer "<your response>"\n'));
-      } else {
-        console.log(chalk.yellow('⏳ Waiting for Moderator response...'));
-        console.log(`Run ${chalk.cyan('agon status')} to check session state.`);
       }
 
     } catch (error) {
@@ -99,6 +136,13 @@ export default class Answer extends Command {
   }
 
   private isClarificationPhase(phase: string): boolean {
-    return phase.replace(/[\s_-]/g, '').toLowerCase() === 'clarification';
+    return normalizePhase(phase) === 'clarification';
+  }
+
+  private isPostDeliveryPhase(phase: string): boolean {
+    const normalized = normalizePhase(phase);
+    return normalized === 'deliver'
+      || normalized === 'deliverwithgaps'
+      || normalized === 'postdelivery';
   }
 }

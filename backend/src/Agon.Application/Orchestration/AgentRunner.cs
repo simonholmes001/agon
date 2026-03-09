@@ -101,6 +101,54 @@ public sealed class AgentRunner : IAgentRunner
     }
 
     /// <summary>
+    /// Runs the dedicated post-delivery assistant for follow-up Q&A and revisions.
+    /// </summary>
+    public async Task<AgentResponse> RunPostDeliveryFollowUpAsync(
+        SessionState state,
+        string userMessage,
+        CancellationToken cancellationToken)
+    {
+        var assistant = _agents.FirstOrDefault(a => a.AgentId == Domain.Agents.AgentId.PostDeliveryAssistant);
+        if (assistant is null)
+        {
+            throw new InvalidOperationException("Post-delivery assistant agent not configured");
+        }
+
+        var history = await _conversationHistory.GetMessagesAsync(state.SessionId, cancellationToken);
+        var priorContext = BuildPostDeliveryContext(history);
+
+        var context = AgentContext.ForPostDelivery(
+            state.SessionId,
+            state.TruthMap,
+            state.FrictionLevel,
+            state.CurrentRound,
+            state.UserMessages,
+            priorContext,
+            state.ResearchToolsEnabled);
+
+        var response = await RunWithTimeoutAsync(assistant, context, cancellationToken);
+        AccumulateTokens(state, [response]);
+
+        if (!response.TimedOut && !string.IsNullOrWhiteSpace(response.Message))
+        {
+            await _conversationHistory.StoreMessageAsync(
+                state.SessionId,
+                assistant.AgentId,
+                response.Message,
+                state.CurrentRound,
+                cancellationToken);
+        }
+
+        _logger?.LogInformation(
+            "Post-delivery assistant completed for session {SessionId}. User message length: {Length}, Tokens: {Tokens}",
+            state.SessionId,
+            userMessage.Length,
+            response.TokensUsed);
+
+        return response;
+    }
+
+    /// <summary>
     /// Dispatches all council agents in parallel for the Analysis Round.
     /// Applies valid patches sequentially (alphabetical order) then updates token budget.
     /// Stores all agent messages to conversation history for CLI retrieval.
@@ -356,6 +404,32 @@ public sealed class AgentRunner : IAgentRunner
     {
         foreach (var r in responses)
             state.TokensUsed += r.TokensUsed;
+    }
+
+    private static string? BuildPostDeliveryContext(IReadOnlyList<AgentMessageRecord> history)
+    {
+        var relevant = history
+            .Where(m => m.AgentId is Domain.Agents.AgentId.Synthesizer or Domain.Agents.AgentId.PostDeliveryAssistant)
+            .TakeLast(6)
+            .ToList();
+
+        if (relevant.Count == 0)
+        {
+            return null;
+        }
+
+        var lines = new List<string>
+        {
+            "Use this prior assistant context when preparing your answer:"
+        };
+
+        foreach (var message in relevant)
+        {
+            lines.Add($"[{message.AgentId} | round {message.Round}]");
+            lines.Add(message.Message);
+        }
+
+        return string.Join(Environment.NewLine + Environment.NewLine, lines);
     }
 
     /// <summary>

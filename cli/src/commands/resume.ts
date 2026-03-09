@@ -134,6 +134,7 @@ export default class Resume extends Command {
     
     if (normalizedStatus === 'complete' || normalizedStatus === 'complete_with_gaps') {
       this.log('  • View artifacts: agon show <artifact-type>');
+      this.log('  • Ask follow-up: agon answer "<your request>"');
       this.log('  • Check status: agon status');
     } else if (normalizedPhase === 'clarification') {
       this.log('  • Answer questions: agon answer "<your response>"');

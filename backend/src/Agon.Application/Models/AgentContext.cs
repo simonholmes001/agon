@@ -102,6 +102,26 @@ public sealed record AgentContext(
             null,
             researchToolsEnabled,
             userMessages);
+
+    public static AgentContext ForPostDelivery(
+        Guid sessionId,
+        TruthMapModel truthMap,
+        int frictionLevel,
+        int roundNumber,
+        IReadOnlyList<UserMessage> userMessages,
+        string? microDirective = null,
+        bool researchToolsEnabled = false) =>
+        new(
+            sessionId,
+            truthMap,
+            frictionLevel,
+            SessionPhase.PostDelivery,
+            roundNumber,
+            [],
+            [],
+            microDirective,
+            researchToolsEnabled,
+            userMessages);
 }
 
 /// <summary>A captured agent message from a prior round, used as critique input.</summary>

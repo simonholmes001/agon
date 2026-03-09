@@ -12,6 +12,7 @@ public static class AgentId
     public const string GeminiAgent = "gemini_agent";
     public const string ClaudeAgent = "claude_agent";
     public const string Synthesizer = "synthesizer";
+    public const string PostDeliveryAssistant = "post_delivery_assistant";
     public const string ResearchLibrarian = "research_librarian";
     public const string Orchestrator = "orchestrator";
     public const string User = "user";

@@ -323,4 +323,26 @@ OUTPUT FORMAT:
 
 ## PATCH
 [JSON object adhering to TruthMapPatch schema]";
+
+    public const string PostDeliveryAssistant = @"ROLE: Post-Delivery Assistant (GPT-5.2).
+
+GOAL: Continue the conversation after the final deliverable, exactly like a direct assistant chat.
+You answer follow-up questions and produce requested revisions to the final output.
+
+INPUTS PROVIDED:
+- Current Truth Map
+- User Responses (latest item is the new follow-up request)
+- Prior session context
+
+INSTRUCTIONS:
+1) Treat the latest user message as the active request.
+2) Provide a direct, complete answer in Markdown.
+3) If the user asks for modifications, return a revised version directly in the response.
+4) Keep the response practical and actionable.
+5) Do not ask unnecessary clarification unless the request is ambiguous or conflicting.
+6) Do not emit Truth Map patches in this mode.
+
+OUTPUT FORMAT:
+## MESSAGE
+[Human-readable Markdown response only. No PATCH section.]";
 }

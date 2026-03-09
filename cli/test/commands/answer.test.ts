@@ -15,6 +15,7 @@ import { AgonAPIClient } from '../../src/api/agon-client.js';
 import { SessionManager } from '../../src/state/session-manager.js';
 import { ConfigManager } from '../../src/state/config-manager.js';
 import type { SessionResponse, Message } from '../../src/api/types.js';
+import { getLatestResponseMessage } from '../../src/commands/answer.js';
 
 // Mock dependencies
 vi.mock('../../src/api/agon-client.js');
@@ -142,6 +143,33 @@ describe('agon answer', () => {
       const result = await mockSessionManager.getCurrentSessionId();
 
       expect(result).toBeNull();
+    });
+  });
+
+  describe('message selection', () => {
+    it('should select latest moderator message during clarification', () => {
+      const messages: Message[] = [
+        { agentId: 'moderator', message: 'First question', round: 0, createdAt: '2026-03-09T10:00:00Z' },
+        { agentId: 'moderator', message: 'Second question', round: 1, createdAt: '2026-03-09T10:05:00Z' },
+        { agentId: 'gpt_agent', message: 'Analysis', round: 1, createdAt: '2026-03-09T10:06:00Z' }
+      ];
+
+      const selected = getLatestResponseMessage('Clarification', messages);
+
+      expect(selected?.agentId).toBe('moderator');
+      expect(selected?.message).toBe('Second question');
+    });
+
+    it('should select post-delivery assistant message when available', () => {
+      const messages: Message[] = [
+        { agentId: 'synthesizer', message: 'Final verdict', round: 2, createdAt: '2026-03-09T10:10:00Z' },
+        { agentId: 'post_delivery_assistant', message: 'Revised PRD section', round: 2, createdAt: '2026-03-09T10:12:00Z' }
+      ];
+
+      const selected = getLatestResponseMessage('PostDelivery', messages);
+
+      expect(selected?.agentId).toBe('post_delivery_assistant');
+      expect(selected?.message).toBe('Revised PRD section');
     });
   });
 });

@@ -72,7 +72,22 @@ public class AgentRunnerTests
     private static ConversationHistoryService StubConversationHistory()
     {
         var repo = Substitute.For<IAgentMessageRepository>();
+        repo.GetBySessionIdAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<AgentMessageRecord>>([]));
+        repo.AddAsync(Arg.Any<AgentMessageRecord>(), Arg.Any<CancellationToken>())
+            .Returns(Task.CompletedTask);
         return new ConversationHistoryService(repo);
+    }
+
+    private static (ConversationHistoryService Service, IAgentMessageRepository Repository) StubConversationHistoryWithRepo()
+    {
+        var repo = Substitute.For<IAgentMessageRepository>();
+        repo.GetBySessionIdAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<AgentMessageRecord>>([]));
+        repo.AddAsync(Arg.Any<AgentMessageRecord>(), Arg.Any<CancellationToken>())
+            .Returns(Task.CompletedTask);
+        var service = new ConversationHistoryService(repo);
+        return (service, repo);
     }
 
     private static AgentRunner BuildRunner(
@@ -481,6 +496,74 @@ public class AgentRunnerTests
 
         // Assert
         await repo.Received(1).ApplyPatchAsync(SessionId, patch, Arg.Any<CancellationToken>());
+    }
+
+    // ── Post-delivery follow-up tests ────────────────────────────────────────
+
+    [Fact]
+    public async Task RunPostDeliveryFollowUpAsync_Should_UsePostDeliveryContextAndPersistMessage()
+    {
+        // Arrange
+        var capturedContext = default(AgentContext);
+        var assistant = Substitute.For<ICouncilAgent>();
+        assistant.AgentId.Returns(AgentId.PostDeliveryAssistant);
+        assistant.ModelProvider.Returns("OpenAI gpt-5.2");
+        assistant.RunAsync(Arg.Do<AgentContext>(ctx => capturedContext = ctx), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new AgentResponse(
+                AgentId.PostDeliveryAssistant,
+                "Here is your revised PRD section.",
+                null,
+                180,
+                false,
+                null)));
+
+        var history = StubConversationHistoryWithRepo();
+        var runner = BuildRunner([assistant], conversationHistory: history.Service);
+        var state = BuildSessionState(round: 3);
+        state.Phase = SessionPhase.Deliver;
+        state.UserMessages.Add(new UserMessage(
+            "Please rewrite this with fewer assumptions.",
+            DateTimeOffset.UtcNow,
+            3));
+
+        // Act
+        await runner.RunPostDeliveryFollowUpAsync(
+            state,
+            "Please rewrite this with fewer assumptions.",
+            CancellationToken.None);
+
+        // Assert
+        capturedContext.Should().NotBeNull();
+        capturedContext!.Phase.Should().Be(SessionPhase.PostDelivery);
+        capturedContext.RoundNumber.Should().Be(3);
+        capturedContext.UserMessages.Should().HaveCount(1);
+
+        await history.Repository.Received(1).AddAsync(
+            Arg.Is<AgentMessageRecord>(m =>
+                m.SessionId == state.SessionId &&
+                m.AgentId == AgentId.PostDeliveryAssistant &&
+                m.Message == "Here is your revised PRD section." &&
+                m.Round == state.CurrentRound),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task RunPostDeliveryFollowUpAsync_Should_ThrowWhenAssistantNotConfigured()
+    {
+        // Arrange
+        var moderator = StubAgent(AgentId.Moderator, SuccessResponse(AgentId.Moderator));
+        var runner = BuildRunner([moderator]);
+        var state = BuildSessionState(round: 2);
+
+        // Act
+        Func<Task> act = () => runner.RunPostDeliveryFollowUpAsync(
+            state,
+            "Can you adjust the final output?",
+            CancellationToken.None);
+
+        // Assert
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*Post-delivery assistant*");
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

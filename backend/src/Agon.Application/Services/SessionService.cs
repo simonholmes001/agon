@@ -131,25 +131,37 @@ public sealed class SessionService : ISessionService
             throw new InvalidOperationException($"Session {sessionId} not found");
         }
 
-        if (state.Phase != SessionPhase.Clarification)
+        var isClarificationFlow = state.Phase == SessionPhase.Clarification;
+        var isPostDeliveryFlow = state.Phase is SessionPhase.Deliver
+            or SessionPhase.DeliverWithGaps
+            or SessionPhase.PostDelivery;
+
+        if (!isClarificationFlow && !isPostDeliveryFlow)
         {
             throw new InvalidOperationException(
-                $"Cannot submit message in phase {state.Phase}. Session must be in Clarification phase.");
+                $"Cannot submit message in phase {state.Phase}. Session must be in Clarification, Deliver, DeliverWithGaps, or PostDelivery phase.");
         }
 
         // Add the user message to the session state
         var userMessage = new UserMessage(
             content,
             DateTimeOffset.UtcNow,
-            state.ClarificationRoundCount);
+            isClarificationFlow ? state.ClarificationRoundCount : state.CurrentRound);
         
         state.UserMessages.Add(userMessage);
 
-        // Call Orchestrator to run Moderator agent with the new message
-        // (Orchestrator may increment ClarificationRoundCount)
-        if (_lazyOrchestrator?.Value is not null)
+        if (_lazyOrchestrator?.Value is { } orchestrator)
         {
-            await _lazyOrchestrator.Value.RunModeratorAsync(state, cancellationToken);
+            if (isClarificationFlow)
+            {
+                // Clarification flow: moderator asks follow-up questions or signals READY.
+                await orchestrator.RunModeratorAsync(state, cancellationToken);
+            }
+            else
+            {
+                // Post-delivery flow: single assistant handles follow-up Q&A and revisions.
+                await orchestrator.RunPostDeliveryFollowUpAsync(state, content, cancellationToken);
+            }
         }
 
         // Persist the updated state AFTER orchestrator (to capture any state changes)
