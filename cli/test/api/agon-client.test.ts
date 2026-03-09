@@ -243,7 +243,8 @@ describe('AgonAPIClient', () => {
       // Assert
       expect(mockAxios.post).toHaveBeenCalledWith(
         `/sessions/${sessionId}/messages`,
-        { content }
+        { content },
+        expect.objectContaining({ timeout: 120000 })
       );
       expect(result).toEqual(mockResponse);
     });
@@ -272,6 +273,27 @@ describe('AgonAPIClient', () => {
 
       // Act & Assert
       await expect(client.submitMessage(sessionId, content)).rejects.toThrow();
+    });
+  });
+
+  describe('retry policy', () => {
+    it('should not retry timeout errors', () => {
+      const timeoutError: any = new Error('timeout of 30000ms exceeded');
+      timeoutError.code = 'ECONNABORTED';
+      timeoutError.config = { method: 'post', url: '/sessions/test/messages' };
+
+      const shouldRetry = (client as any).shouldRetry(timeoutError);
+
+      expect(shouldRetry).toBe(false);
+    });
+
+    it('should not retry message submission posts', () => {
+      const networkError: any = new Error('Network error');
+      networkError.config = { method: 'post', url: '/sessions/test/messages' };
+
+      const shouldRetry = (client as any).shouldRetry(networkError);
+
+      expect(shouldRetry).toBe(false);
     });
   });
 });
