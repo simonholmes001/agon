@@ -24,4 +24,13 @@ public interface IOrchestrator
     /// Analysis → Critique → Synthesis → (TargetedLoop if needed) → Deliver/DeliverWithGaps.
     /// </summary>
     Task RunFullDebateChainAsync(SessionState state, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Handles user-initiated follow-up after delivery.
+    /// Runs a single assistant agent and stores the response to conversation history.
+    /// </summary>
+    Task RunPostDeliveryFollowUpAsync(
+        SessionState state,
+        string userMessage,
+        CancellationToken cancellationToken);
 }

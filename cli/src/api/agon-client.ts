@@ -159,7 +159,7 @@ export class AgonAPIClient {
    * Get conversation messages for a session
    */
   async getMessages(sessionId: string): Promise<Message[]> {
-    this.logger.info('Fetching conversation messages', { sessionId });
+    this.logger.debug('Fetching conversation messages', { sessionId });
     const response = await this.client.get<Message[]>(
       `/sessions/${sessionId}/messages`
     );
@@ -184,7 +184,8 @@ export class AgonAPIClient {
     const request: SubmitMessageRequest = { content };
     const response = await this.client.post<SessionResponse | null>(
       `/sessions/${sessionId}/messages`,
-      request
+      request,
+      { timeout: 120000 } // Follow-up responses can take longer than default request timeout.
     );
     this.logger.info('Message submitted successfully', { sessionId });
 
@@ -200,6 +201,14 @@ export class AgonAPIClient {
   // Helper methods
 
   private shouldRetry(error: AxiosError): boolean {
+    if (error.code === 'ECONNABORTED') return false; // Request timed out.
+
+    const method = error.config?.method?.toLowerCase() ?? '';
+    const url = error.config?.url ?? '';
+    if (method === 'post' && url.includes('/messages')) {
+      return false; // Avoid duplicate message submission retries.
+    }
+
     // Retry on network errors or 5xx server errors
     if (!error.response) return true; // Network error
     const status = error.response.status;
@@ -248,10 +257,20 @@ export class AgonAPIClient {
 
     // Network error
     this.logger.error('Network error', { message: error.message });
+
+    const timeoutMessage = (error.message || '').toLowerCase().includes('timeout');
+    const timeoutSuggestions = [
+      'The backend may still be processing your request',
+      'Run `agon show verdict --refresh` to check for new assistant output',
+      'Retry with the same message if no new response appears'
+    ];
+
     return new AgonError(
       ErrorCode.NETWORK_ERROR,
       error.message || 'Network error',
-      ['Check your internet connection', 'Verify the API URL is correct']
+      timeoutMessage
+        ? timeoutSuggestions
+        : ['Check your internet connection', 'Verify the API URL is correct']
     );
   }
 

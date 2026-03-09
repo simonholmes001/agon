@@ -525,6 +525,45 @@ public class SessionServiceTests
             () => svc.SubmitMessageAsync(state.SessionId, "Test", CancellationToken.None));
     }
 
+    [Fact]
+    public async Task SubmitMessageAsync_Should_CallPostDeliveryFollowUp_WhenInDeliverPhase()
+    {
+        // Arrange
+        var state = BuildState(phase: SessionPhase.Deliver);
+        var sessionRepo = StubSessionRepo(returns: state);
+        var orchestrator = Substitute.For<IOrchestrator>();
+        var svc = BuildServiceWithOrchestrator(sessionRepo: sessionRepo, orchestrator: orchestrator);
+
+        // Act
+        await svc.SubmitMessageAsync(state.SessionId, "Please refine the PRD sections", CancellationToken.None);
+
+        // Assert
+        await orchestrator.Received(1).RunPostDeliveryFollowUpAsync(
+            Arg.Is<SessionState>(s => s.SessionId == state.SessionId && s.UserMessages.Count == 1),
+            Arg.Is<string>(m => m == "Please refine the PRD sections"),
+            Arg.Any<CancellationToken>());
+        await orchestrator.DidNotReceive().RunModeratorAsync(Arg.Any<SessionState>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task SubmitMessageAsync_Should_CallPostDeliveryFollowUp_WhenInPostDeliveryPhase()
+    {
+        // Arrange
+        var state = BuildState(phase: SessionPhase.PostDelivery);
+        var sessionRepo = StubSessionRepo(returns: state);
+        var orchestrator = Substitute.For<IOrchestrator>();
+        var svc = BuildServiceWithOrchestrator(sessionRepo: sessionRepo, orchestrator: orchestrator);
+
+        // Act
+        await svc.SubmitMessageAsync(state.SessionId, "Adjust this to a more technical tone", CancellationToken.None);
+
+        // Assert
+        await orchestrator.Received(1).RunPostDeliveryFollowUpAsync(
+            Arg.Is<SessionState>(s => s.SessionId == state.SessionId && s.UserMessages.Count == 1),
+            Arg.Is<string>(m => m == "Adjust this to a more technical tone"),
+            Arg.Any<CancellationToken>());
+    }
+
     // ── Helper for Orchestrator Injection ─────────────────────────────────────
 
     private static SessionService BuildServiceWithOrchestrator(
@@ -544,4 +583,3 @@ public class SessionServiceTests
                 : new Lazy<IOrchestrator>(() => Substitute.For<IOrchestrator>()));
     }
 }
-

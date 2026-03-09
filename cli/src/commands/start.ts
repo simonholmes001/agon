@@ -12,6 +12,7 @@
 import { Command, Flags, Args } from '@oclif/core';
 import chalk from 'chalk';
 import inquirer from 'inquirer';
+import ora from 'ora';
 import { AgonAPIClient } from '../api/agon-client.js';
 import { SessionManager } from '../state/session-manager.js';
 import { ConfigManager } from '../state/config-manager.js';
@@ -76,28 +77,45 @@ export default class Start extends Command {
       const friction = flags.friction ?? config.defaultFriction;
       const researchEnabled = flags.research ?? config.researchEnabled;
 
-      this.log(`🎯 Creating session with friction level ${friction}...`);
-
       // Initialize API client
       const apiClient = new AgonAPIClient(config.apiUrl);
 
       // Create session
-      const session = await apiClient.createSession({
-        idea: args.idea,
-        friction,
-        researchEnabled
-      });
+      const createSpinner = ora({
+        text: `Creating session with friction level ${friction}...`,
+        color: 'cyan'
+      }).start();
+      let session;
+      try {
+        session = await apiClient.createSession({
+          idea: args.idea,
+          friction,
+          researchEnabled
+        });
+        createSpinner.succeed(`Session created: ${session.id}`);
+      } catch (createError) {
+        createSpinner.fail('Failed to create session');
+        throw createError;
+      }
 
       // Save session to local cache
       await sessionManager.saveSession(session);
       await sessionManager.setCurrentSessionId(session.id);
 
-      this.log(`✓ Session created: ${session.id}`);
       this.log('');
 
       // Start the debate (triggers clarification phase)
-      this.log('🚀 Starting debate...');
-      await apiClient.startSession(session.id);
+      const startSpinner = ora({
+        text: 'Starting debate...',
+        color: 'cyan'
+      }).start();
+      try {
+        await apiClient.startSession(session.id);
+        startSpinner.succeed('Debate started');
+      } catch (startError) {
+        startSpinner.fail('Failed to start debate');
+        throw startError;
+      }
       
       // Wait a moment for the backend to process
       this.log('🤔 Moderator is analyzing your idea...');
@@ -148,14 +166,14 @@ export default class Start extends Command {
         this.log('');
         
         // Prompt for response with explicit visual cue
-        this.log(chalk.cyan('Please answer the Moderator\'s questions:'));
+        this.log(chalk.bgBlue.white(' YOUR RESPONSE ') + chalk.dim(' Type below and press Enter'));
         this.log('');
         
         const { response } = await inquirer.prompt([
           {
             type: 'input',
             name: 'response',
-            message: chalk.bold('Your response'),
+            message: chalk.cyan('❯'),
             validate: (input: string) => {
               if (!input || input.trim().length === 0) {
                 return 'Please provide a response';
@@ -166,12 +184,19 @@ export default class Start extends Command {
         ]);
 
         // Submit the response
-        this.log('');
-        this.log('📤 Submitting your response...');
-        await apiClient.submitMessage(session.id, response);
+        const submitSpinner = ora({
+          text: 'Submitting your response...',
+          color: 'cyan'
+        }).start();
+        try {
+          await apiClient.submitMessage(session.id, response);
+          submitSpinner.succeed('Response submitted');
+        } catch (submitError) {
+          submitSpinner.fail('Failed to submit response');
+          throw submitError;
+        }
         lastAnsweredModeratorMessageKey = moderatorMessageKey;
         
-        this.log(chalk.green('✓ Response submitted!'));
         this.log('');
         this.log('🤔 Moderator is processing your response...');
         this.log('');
@@ -267,62 +292,96 @@ export default class Start extends Command {
   ): Promise<void> {
     const seenMessageKeys = new Set<string>();
     let lastPhase = '';
+    const progressSpinner = ora({
+      text: 'Agents are analyzing your idea...',
+      color: 'cyan'
+    }).start();
 
-    while (true) {
-      const [session, messages] = await Promise.all([
-        apiClient.getSession(sessionId),
-        apiClient.getMessages(sessionId)
-      ]);
+    try {
+      while (true) {
+        const [session, messages] = await Promise.all([
+          apiClient.getSession(sessionId),
+          apiClient.getMessages(sessionId)
+        ]);
 
-      await sessionManager.saveSession(session);
+        await sessionManager.saveSession(session);
+        progressSpinner.text = `Agents are analyzing... (${this.formatPhaseForDisplay(session.phase)})`;
 
-      const agentMessages = messages
-        .filter(m => m.agentId !== 'moderator')
-        .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+        const agentMessages = messages
+          .filter(m => m.agentId !== 'moderator')
+          .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
 
-      for (const msg of agentMessages) {
-        const key = `${msg.agentId}:${msg.round}:${msg.createdAt}:${msg.message.length}`;
-        if (seenMessageKeys.has(key)) continue;
-        seenMessageKeys.add(key);
+        let pausedForOutput = false;
+        const stopSpinnerForOutput = (): void => {
+          if (!pausedForOutput) {
+            progressSpinner.stop();
+            pausedForOutput = true;
+          }
+        };
 
-        this.log('━'.repeat(60));
-        this.log(chalk.bold(`${msg.agentId} (Round ${msg.round})`));
-        this.log('');
-        this.log(renderMarkdown(msg.message));
-        this.log('');
-      }
+        for (const msg of agentMessages) {
+          const key = `${msg.agentId}:${msg.round}:${msg.createdAt}:${msg.message.length}`;
+          if (seenMessageKeys.has(key)) continue;
+          seenMessageKeys.add(key);
 
-      const normalizedStatus = this.normalizeStatus(session.status);
-      const normalizedPhase = this.normalizePhase(session.phase);
-      if (normalizedPhase !== lastPhase) {
-        this.log(chalk.dim(`⏱️  Current phase: ${this.formatPhaseForDisplay(session.phase)}`));
-        this.log('');
-        lastPhase = normalizedPhase;
-      }
-
-      if (normalizedStatus === 'complete' || normalizedStatus === 'complete_with_gaps') {
-        this.log(chalk.green('✓ Debate complete. Fetching final verdict...'));
-        this.log('');
-        try {
-          const verdict = await apiClient.getArtifact(sessionId, 'verdict');
-          await sessionManager.saveArtifact(sessionId, 'verdict', verdict.content);
-
+          stopSpinnerForOutput();
           this.log('━'.repeat(60));
-          this.log(chalk.bold('Final Verdict'));
+          this.log(chalk.bold(`${msg.agentId} (Round ${msg.round})`));
           this.log('');
-          this.log(renderMarkdown(verdict.content));
+          this.log(renderMarkdown(msg.message));
           this.log('');
-          this.log('Next steps:');
-          this.log('  • Ask follow-up questions (post-delivery chat support is the next backend step)');
-          this.log('  • View again: agon show verdict --refresh');
-        } catch {
-          this.log(chalk.yellow('⚠️  Session completed, but verdict artifact is not ready yet.'));
-          this.log('Run: agon show verdict --refresh');
         }
-        return;
-      }
 
-      await new Promise(resolve => setTimeout(resolve, 2500));
+        const normalizedStatus = this.normalizeStatus(session.status);
+        const normalizedPhase = this.normalizePhase(session.phase);
+        if (normalizedPhase !== lastPhase) {
+          stopSpinnerForOutput();
+          this.log(chalk.dim(`⏱️  Current phase: ${this.formatPhaseForDisplay(session.phase)}`));
+          this.log('');
+          lastPhase = normalizedPhase;
+        }
+
+        if (normalizedStatus === 'complete' || normalizedStatus === 'complete_with_gaps') {
+          stopSpinnerForOutput();
+          this.log(chalk.green('✓ Debate complete. Fetching final verdict...'));
+          this.log('');
+          try {
+            const verdictSpinner = ora({
+              text: 'Preparing final output...',
+              color: 'cyan'
+            }).start();
+            const verdict = await apiClient.getArtifact(sessionId, 'verdict');
+            await sessionManager.saveArtifact(sessionId, 'verdict', verdict.content);
+            verdictSpinner.succeed('Final output ready');
+
+            this.log('━'.repeat(60));
+            this.log(chalk.bold('BEGIN FINAL OUTPUT'));
+            this.log('━'.repeat(60));
+            this.log(chalk.bold('Final Verdict'));
+            this.log('');
+            this.log(renderMarkdown(verdict.content));
+            this.log('');
+            this.log('━'.repeat(60));
+            this.log(chalk.bold('END FINAL OUTPUT'));
+            this.log('');
+            this.log('Next steps:');
+            this.log('  • Ask follow-up questions: agon follow-up "<follow-up request>"');
+            this.log('  • View again: agon show verdict --refresh');
+          } catch {
+            this.log(chalk.yellow('⚠️  Session completed, but verdict artifact is not ready yet.'));
+            this.log('Run: agon show verdict --refresh');
+          }
+          return;
+        }
+
+        if (pausedForOutput) {
+          progressSpinner.start();
+        }
+
+        await new Promise(resolve => setTimeout(resolve, 2500));
+      }
+    } finally {
+      progressSpinner.stop();
     }
   }
 }

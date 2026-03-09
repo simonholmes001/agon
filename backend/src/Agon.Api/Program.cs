@@ -262,6 +262,27 @@ if (!builder.Environment.IsEnvironment("Testing"))
             parser: parser);
     });
 
+    // Post-delivery assistant: single-agent ChatGPT-style follow-up using OpenAI GPT
+    builder.Services.AddScoped<ICouncilAgent>(sp =>
+    {
+        var config = sp.GetRequiredService<LlmConfiguration>();
+        var parser = sp.GetRequiredService<IAgentResponseParser>();
+
+        IChatClient chatClient = new OpenAIClient(config.OpenAI.ApiKey)
+            .GetChatClient(config.OpenAI.Model)
+            .AsIChatClient();
+
+        var aiAgent = chatClient.AsAIAgent(
+                instructions: AgentSystemPrompts.PostDeliveryAssistant,
+                name: AgentId.PostDeliveryAssistant);
+
+        return new MafCouncilAgent(
+            agentId: AgentId.PostDeliveryAssistant,
+            modelProvider: $"OpenAI {config.OpenAI.Model}",
+            underlyingAgent: aiAgent,
+            parser: parser);
+    });
+
     // Register the collection of council agents
     builder.Services.AddScoped<IReadOnlyList<ICouncilAgent>>(sp =>
         sp.GetServices<ICouncilAgent>().ToList());

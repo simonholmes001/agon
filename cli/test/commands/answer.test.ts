@@ -15,6 +15,11 @@ import { AgonAPIClient } from '../../src/api/agon-client.js';
 import { SessionManager } from '../../src/state/session-manager.js';
 import { ConfigManager } from '../../src/state/config-manager.js';
 import type { SessionResponse, Message } from '../../src/api/types.js';
+import Answer from '../../src/commands/answer.js';
+import {
+  getLatestPostDeliveryAssistantMessage,
+  getLatestResponseMessage
+} from '../../src/commands/answer.js';
 
 // Mock dependencies
 vi.mock('../../src/api/agon-client.js');
@@ -37,7 +42,9 @@ describe('agon answer', () => {
     
     // Setup session manager mock
     mockSessionManager = {
-      getCurrentSessionId: vi.fn()
+      getCurrentSessionId: vi.fn(),
+      listSessions: vi.fn(),
+      setCurrentSessionId: vi.fn()
     };
     
     // Setup config manager mock
@@ -53,6 +60,10 @@ describe('agon answer', () => {
     vi.mocked(AgonAPIClient).mockImplementation(() => mockApiClient);
     vi.mocked(SessionManager).mockImplementation(() => mockSessionManager);
     vi.mocked(ConfigManager).mockImplementation(() => mockConfigManager);
+  });
+
+  it('should expose the follow-up command alias', () => {
+    expect(Answer.aliases).toContain('follow-up');
   });
 
   describe('with valid response', () => {
@@ -138,10 +149,86 @@ describe('agon answer', () => {
 
     it('should handle missing session', async () => {
       mockSessionManager.getCurrentSessionId.mockResolvedValue(null);
+      mockSessionManager.listSessions.mockResolvedValue([]);
 
       const result = await mockSessionManager.getCurrentSessionId();
 
       expect(result).toBeNull();
+    });
+
+    it('should fall back to latest cached session when current session is missing', async () => {
+      const sessions: SessionResponse[] = [
+        {
+          id: 'older-session',
+          status: 'complete',
+          phase: 'Deliver',
+          createdAt: '2026-03-09T10:00:00Z',
+          updatedAt: '2026-03-09T10:10:00Z'
+        },
+        {
+          id: 'latest-session',
+          status: 'complete',
+          phase: 'PostDelivery',
+          createdAt: '2026-03-09T11:00:00Z',
+          updatedAt: '2026-03-09T11:30:00Z'
+        }
+      ];
+
+      mockSessionManager.getCurrentSessionId.mockResolvedValue(null);
+      mockSessionManager.listSessions.mockResolvedValue(sessions);
+
+      const listed = await mockSessionManager.listSessions();
+
+      expect(listed[1].id).toBe('latest-session');
+    });
+  });
+
+  describe('message selection', () => {
+    it('should select latest moderator message during clarification', () => {
+      const messages: Message[] = [
+        { agentId: 'moderator', message: 'First question', round: 0, createdAt: '2026-03-09T10:00:00Z' },
+        { agentId: 'moderator', message: 'Second question', round: 1, createdAt: '2026-03-09T10:05:00Z' },
+        { agentId: 'gpt_agent', message: 'Analysis', round: 1, createdAt: '2026-03-09T10:06:00Z' }
+      ];
+
+      const selected = getLatestResponseMessage('Clarification', messages);
+
+      expect(selected?.agentId).toBe('moderator');
+      expect(selected?.message).toBe('Second question');
+    });
+
+    it('should select post-delivery assistant message when available', () => {
+      const messages: Message[] = [
+        { agentId: 'synthesizer', message: 'Final verdict', round: 2, createdAt: '2026-03-09T10:10:00Z' },
+        { agentId: 'post_delivery_assistant', message: 'Revised PRD section', round: 2, createdAt: '2026-03-09T10:12:00Z' }
+      ];
+
+      const selected = getLatestResponseMessage('PostDelivery', messages);
+
+      expect(selected?.agentId).toBe('post_delivery_assistant');
+      expect(selected?.message).toBe('Revised PRD section');
+    });
+
+    it('should not fall back to stale non-assistant messages in post-delivery mode', () => {
+      const messages: Message[] = [
+        { agentId: 'synthesizer', message: 'Final verdict', round: 2, createdAt: '2026-03-09T10:10:00Z' },
+        { agentId: 'gpt_agent', message: 'Analysis output', round: 2, createdAt: '2026-03-09T10:11:00Z' }
+      ];
+
+      const selected = getLatestResponseMessage('PostDelivery', messages);
+
+      expect(selected).toBeUndefined();
+    });
+
+    it('should return only new post-delivery assistant messages after a known timestamp', () => {
+      const messages: Message[] = [
+        { agentId: 'post_delivery_assistant', message: 'Older reply', round: 2, createdAt: '2026-03-09T10:12:00Z' },
+        { agentId: 'post_delivery_assistant', message: 'New reply', round: 2, createdAt: '2026-03-09T10:15:00Z' }
+      ];
+
+      const selected = getLatestPostDeliveryAssistantMessage(messages, '2026-03-09T10:13:00Z');
+
+      expect(selected?.message).toBe('New reply');
     });
   });
 });

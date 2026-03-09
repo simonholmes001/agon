@@ -67,6 +67,19 @@ public class OrchestratorTests
               .Returns(Task.FromResult(
                   new AgentResponse(AgentId.Moderator, "Moderator response", null, 100, false, null)));
 
+        runner.RunPostDeliveryFollowUpAsync(
+                Arg.Any<SessionState>(),
+                Arg.Any<string>(),
+                Arg.Any<CancellationToken>())
+              .Returns(Task.FromResult(
+                  new AgentResponse(
+                      AgentId.PostDeliveryAssistant,
+                      "Post-delivery response",
+                      null,
+                      120,
+                      false,
+                      null)));
+
         return runner;
     }
 
@@ -106,6 +119,44 @@ public class OrchestratorTests
 
         await sessionService.Received(1).AdvancePhaseAsync(
             state, SessionPhase.Clarification, Arg.Any<CancellationToken>());
+    }
+
+    // ── RunPostDeliveryFollowUpAsync ─────────────────────────────────────────
+
+    [Fact]
+    public async Task RunPostDeliveryFollowUpAsync_WhenInDeliver_TransitionsToPostDeliveryAndCallsRunner()
+    {
+        var runner = StubRunner();
+        var sessionService = StubSessionService();
+        var orchestrator = BuildOrchestrator(runner: runner, sessionService: sessionService);
+        var state = BuildState(SessionPhase.Deliver);
+
+        await orchestrator.RunPostDeliveryFollowUpAsync(state, "Please shorten section 2", CancellationToken.None);
+
+        await sessionService.Received(1).AdvancePhaseAsync(
+            state, SessionPhase.PostDelivery, Arg.Any<CancellationToken>());
+        await runner.Received(1).RunPostDeliveryFollowUpAsync(
+            state,
+            "Please shorten section 2",
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task RunPostDeliveryFollowUpAsync_WhenAlreadyPostDelivery_DoesNotReAdvancePhase()
+    {
+        var runner = StubRunner();
+        var sessionService = StubSessionService();
+        var orchestrator = BuildOrchestrator(runner: runner, sessionService: sessionService);
+        var state = BuildState(SessionPhase.PostDelivery);
+
+        await orchestrator.RunPostDeliveryFollowUpAsync(state, "Refine the acceptance criteria", CancellationToken.None);
+
+        await sessionService.DidNotReceive().AdvancePhaseAsync(
+            state, SessionPhase.PostDelivery, Arg.Any<CancellationToken>());
+        await runner.Received(1).RunPostDeliveryFollowUpAsync(
+            state,
+            "Refine the acceptance criteria",
+            Arg.Any<CancellationToken>());
     }
 
     // ── RunFullDebateChainAsync ──────────────────────────────────────────────

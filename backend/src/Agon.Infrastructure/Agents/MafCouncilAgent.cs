@@ -1,4 +1,5 @@
 using Agon.Application.Interfaces;
+using Agon.Domain.Sessions;
 using Microsoft.Agents.AI;
 using System.Text;
 using System.Text.Json;
@@ -98,7 +99,9 @@ public sealed class MafCouncilAgent : ICouncilAgent
         if (context.UserMessages.Count > 0)
         {
             sb.AppendLine("# User Responses");
-            sb.AppendLine("The user has provided the following clarification responses:");
+            sb.AppendLine(context.Phase == SessionPhase.Clarification
+                ? "The user has provided the following clarification responses:"
+                : "The user has provided the following conversation messages:");
             sb.AppendLine();
             for (int i = 0; i < context.UserMessages.Count; i++)
             {
@@ -129,25 +132,28 @@ public sealed class MafCouncilAgent : ICouncilAgent
         }
 
         sb.AppendLine("# Required Output Format");
-        sb.AppendLine("Your response MUST include both sections:");
         sb.AppendLine();
         sb.AppendLine("## MESSAGE");
-        sb.AppendLine("Your analysis in Markdown format.");
-        sb.AppendLine();
-        sb.AppendLine("## PATCH");
-        sb.AppendLine("```json");
-        sb.AppendLine("{");
-        sb.AppendLine("  \"ops\": [");
-        sb.AppendLine("    {\"op\": \"add\", \"path\": \"/claims/-\", \"value\": {...}}");
-        sb.AppendLine("  ],");
-        sb.AppendLine("  \"meta\": {");
-        sb.AppendLine($"    \"agent\": \"{AgentId}\",");
-        sb.AppendLine($"    \"round\": {context.RoundNumber},");
-        sb.AppendLine($"    \"reason\": \"Brief explanation\",");
-        sb.AppendLine($"    \"session_id\": \"{context.SessionId}\"");
-        sb.AppendLine("  }");
-        sb.AppendLine("}");
-        sb.AppendLine("```");
+        sb.AppendLine("Your response in Markdown format.");
+
+        if (context.Phase != SessionPhase.PostDelivery)
+        {
+            sb.AppendLine();
+            sb.AppendLine("## PATCH");
+            sb.AppendLine("```json");
+            sb.AppendLine("{");
+            sb.AppendLine("  \"ops\": [");
+            sb.AppendLine("    {\"op\": \"add\", \"path\": \"/claims/-\", \"value\": {...}}");
+            sb.AppendLine("  ],");
+            sb.AppendLine("  \"meta\": {");
+            sb.AppendLine($"    \"agent\": \"{AgentId}\",");
+            sb.AppendLine($"    \"round\": {context.RoundNumber},");
+            sb.AppendLine($"    \"reason\": \"Brief explanation\",");
+            sb.AppendLine($"    \"session_id\": \"{context.SessionId}\"");
+            sb.AppendLine("  }");
+            sb.AppendLine("}");
+            sb.AppendLine("```");
+        }
 
         return sb.ToString();
     }

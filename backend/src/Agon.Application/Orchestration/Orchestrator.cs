@@ -124,6 +124,27 @@ public sealed class Orchestrator : IOrchestrator
         }
     }
 
+    /// <summary>
+    /// Runs a single-agent post-delivery follow-up response.
+    /// If the session is still in Deliver/DeliverWithGaps, it is transitioned to PostDelivery.
+    /// </summary>
+    public async Task RunPostDeliveryFollowUpAsync(
+        SessionState state,
+        string userMessage,
+        CancellationToken cancellationToken)
+    {
+        if (state.Phase is SessionPhase.Deliver or SessionPhase.DeliverWithGaps)
+        {
+            await _sessionService.AdvancePhaseAsync(state, SessionPhase.PostDelivery, cancellationToken);
+        }
+
+        _logger?.LogInformation(
+            "Session {SessionId}: Running post-delivery follow-up assistant",
+            state.SessionId);
+
+        await _agentRunner.RunPostDeliveryFollowUpAsync(state, userMessage, cancellationToken);
+    }
+
     private static DebateBrief ExtractDebateBrief(Domain.TruthMap.TruthMap truthMap)
     {
         // Extract the debate brief from the Truth Map's current state
