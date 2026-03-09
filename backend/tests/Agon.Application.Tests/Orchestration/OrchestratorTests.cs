@@ -5,6 +5,7 @@ using Agon.Domain.Agents;
 using Agon.Domain.Sessions;
 using Agon.Domain.TruthMap.Entities;
 using FluentAssertions;
+using Microsoft.Extensions.DependencyInjection;
 using NSubstitute;
 using TruthMapModel = Agon.Domain.TruthMap.TruthMap;
 
@@ -84,9 +85,11 @@ public class OrchestratorTests
         ISessionService? sessionService = null,
         RoundPolicy? policy = null)
     {
+        var scopeFactory = Substitute.For<IServiceScopeFactory>();
         return new Orchestrator(
             runner ?? StubRunner(),
             sessionService ?? StubSessionService(),
+            scopeFactory,
             policy ?? DefaultPolicy());
     }
 
@@ -103,6 +106,26 @@ public class OrchestratorTests
 
         await sessionService.Received(1).AdvancePhaseAsync(
             state, SessionPhase.Clarification, Arg.Any<CancellationToken>());
+    }
+
+    // ── RunFullDebateChainAsync ──────────────────────────────────────────────
+
+    [Fact]
+    public async Task RunFullDebateChainAsync_WhenUnexpectedErrorOccurs_TerminatesWithGaps()
+    {
+        var runner = Substitute.For<IAgentRunner>();
+        runner.RunAnalysisRoundAsync(Arg.Any<SessionState>(), Arg.Any<CancellationToken>())
+            .Returns<Task<IReadOnlyList<AgentResponse>>>(_ => throw new InvalidOperationException("boom"));
+
+        var sessionService = StubSessionService();
+        var orchestrator = BuildOrchestrator(runner: runner, sessionService: sessionService);
+        var state = BuildState(SessionPhase.AnalysisRound);
+
+        await orchestrator.RunFullDebateChainAsync(state, CancellationToken.None);
+
+        state.Status.Should().Be(SessionStatus.CompleteWithGaps);
+        await sessionService.Received(1).AdvancePhaseAsync(
+            state, SessionPhase.DeliverWithGaps, Arg.Any<CancellationToken>());
     }
 
     // ── SignalClarificationCompleteAsync ──────────────────────────────────────
@@ -205,12 +228,16 @@ public class OrchestratorTests
     public async Task RunAnalysisRoundAsync_RecordsRoundSnapshot()
     {
         var sessionService = StubSessionService();
-        var orchestrator = BuildOrchestrator(sessionService: sessionService);
+        var runner = StubRunner();
+        var orchestrator = BuildOrchestrator(runner: runner, sessionService: sessionService);
         var state = BuildState(SessionPhase.AnalysisRound);
 
         await orchestrator.RunAnalysisRoundAsync(state, CancellationToken.None);
 
-        await sessionService.Received(1).RecordRoundSnapshotAsync(state, Arg.Any<CancellationToken>());
+        // Verify the analysis agent runner was called (the snapshot is recorded by the chain)
+        await runner.Received(1).RunAnalysisRoundAsync(state, Arg.Any<CancellationToken>());
+        // At minimum, one snapshot must have been recorded
+        await sessionService.ReceivedWithAnyArgs().RecordRoundSnapshotAsync(default!, default);
     }
 
     [Fact]
@@ -222,7 +249,10 @@ public class OrchestratorTests
 
         await orchestrator.RunAnalysisRoundAsync(state, CancellationToken.None);
 
-        await sessionService.Received(1).AdvancePhaseAsync(
+        // Analysis must transition to Critique as part of the chain
+        await sessionService.ReceivedWithAnyArgs().AdvancePhaseAsync(
+            default!, default, default);
+        await sessionService.Received().AdvancePhaseAsync(
             state, SessionPhase.Critique, Arg.Any<CancellationToken>());
     }
 
@@ -260,12 +290,16 @@ public class OrchestratorTests
     public async Task RunCritiqueRoundAsync_RecordsRoundSnapshot()
     {
         var sessionService = StubSessionService();
-        var orchestrator = BuildOrchestrator(sessionService: sessionService);
+        var runner = StubRunner();
+        var orchestrator = BuildOrchestrator(runner: runner, sessionService: sessionService);
         var state = BuildState(SessionPhase.Critique);
 
         await orchestrator.RunCritiqueRoundAsync(state, CancellationToken.None);
 
-        await sessionService.Received(1).RecordRoundSnapshotAsync(state, Arg.Any<CancellationToken>());
+        // Critique runner must have been called
+        await runner.Received(1).RunCritiqueRoundAsync(state, Arg.Any<CancellationToken>());
+        // At minimum one snapshot recorded
+        await sessionService.ReceivedWithAnyArgs().RecordRoundSnapshotAsync(default!, default);
     }
 
     [Fact]
@@ -277,7 +311,8 @@ public class OrchestratorTests
 
         await orchestrator.RunCritiqueRoundAsync(state, CancellationToken.None);
 
-        await sessionService.Received(1).AdvancePhaseAsync(
+        // Critique must transition to Synthesis
+        await sessionService.Received().AdvancePhaseAsync(
             state, SessionPhase.Synthesis, Arg.Any<CancellationToken>());
     }
 
@@ -308,7 +343,8 @@ public class OrchestratorTests
 
         await orchestrator.RunSynthesisAsync(state, CancellationToken.None);
 
-        await runner.Received(1).RunSynthesisAsync(state, Arg.Any<CancellationToken>());
+        // Synthesis runner must be called (chain may call it multiple times via targeted loops)
+        await runner.ReceivedWithAnyArgs().RunSynthesisAsync(default!, default);
     }
 
     [Fact]
@@ -358,7 +394,8 @@ public class OrchestratorTests
 
         await orchestrator.RunSynthesisAsync(state, CancellationToken.None);
 
-        await sessionService.Received(1).AdvancePhaseAsync(
+        // TargetedLoop must be entered at least once (chain will exhaust MaxTargetedLoops=2)
+        await sessionService.Received().AdvancePhaseAsync(
             state, SessionPhase.TargetedLoop, Arg.Any<CancellationToken>());
     }
 
@@ -426,21 +463,27 @@ public class OrchestratorTests
     [Fact]
     public async Task RunTargetedLoopAsync_IncrementsTargetedLoopCounter()
     {
-        var orchestrator = BuildOrchestrator();
+        var policy = new RoundPolicy { MaxTargetedLoops = 2 };
+        var orchestrator = BuildOrchestrator(policy: policy);
         var state = BuildState(SessionPhase.TargetedLoop);
+        // Set to MaxTargetedLoops-1 so the chain terminates after one synthesis re-entry
         state.TargetedLoopCount = 1;
 
         await orchestrator.RunTargetedLoopAsync(
             state, [AgentId.ClaudeAgent], "Fix coherence.", CancellationToken.None);
 
-        state.TargetedLoopCount.Should().Be(2);
+        // Must have been incremented at least once (to 2); chain won't loop again since 2 >= MaxTargetedLoops
+        state.TargetedLoopCount.Should().BeGreaterThanOrEqualTo(2);
     }
 
     [Fact]
     public async Task RunTargetedLoopAsync_IncrementsRoundCounter()
     {
-        var orchestrator = BuildOrchestrator();
+        var policy = new RoundPolicy { MaxTargetedLoops = 1 };
+        var orchestrator = BuildOrchestrator(policy: policy);
         var state = BuildState(SessionPhase.TargetedLoop);
+        // MaxTargetedLoops=1 so after one targeted loop + synthesis, chain terminates
+        state.TargetedLoopCount = 0;
         state.CurrentRound = 3;
 
         await orchestrator.RunTargetedLoopAsync(
@@ -453,13 +496,20 @@ public class OrchestratorTests
     public async Task RunTargetedLoopAsync_RecordsSnapshot()
     {
         var sessionService = StubSessionService();
-        var orchestrator = BuildOrchestrator(sessionService: sessionService);
+        var runner = StubRunner();
+        var orchestrator = BuildOrchestrator(runner: runner, sessionService: sessionService);
         var state = BuildState(SessionPhase.TargetedLoop);
 
         await orchestrator.RunTargetedLoopAsync(
             state, [AgentId.GptAgent], "Gap directive.", CancellationToken.None);
 
-        await sessionService.Received(1).RecordRoundSnapshotAsync(state, Arg.Any<CancellationToken>());
+        // The targeted loop agent runner must have been called (snapshot recorded within the loop)
+        await runner.Received(1).RunTargetedLoopAsync(
+            state,
+            Arg.Any<IReadOnlyList<string>>(),
+            "Gap directive.",
+            Arg.Any<CancellationToken>());
+        await sessionService.ReceivedWithAnyArgs().RecordRoundSnapshotAsync(default!, default);
     }
 
     [Fact]
@@ -472,7 +522,8 @@ public class OrchestratorTests
         await orchestrator.RunTargetedLoopAsync(
             state, [AgentId.GptAgent], "Gap directive.", CancellationToken.None);
 
-        await sessionService.Received(1).AdvancePhaseAsync(
+        // Must advance to Synthesis at least once after the targeted loop
+        await sessionService.Received().AdvancePhaseAsync(
             state, SessionPhase.Synthesis, Arg.Any<CancellationToken>());
     }
 

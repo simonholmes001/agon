@@ -18,4 +18,10 @@ public interface IOrchestrator
     /// The Moderator either asks clarifying questions or signals READY.
     /// </summary>
     Task RunModeratorAsync(SessionState state, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Runs the Analysis Round, then automatically continues the full debate chain:
+    /// Analysis → Critique → Synthesis → (TargetedLoop if needed) → Deliver/DeliverWithGaps.
+    /// </summary>
+    Task RunFullDebateChainAsync(SessionState state, CancellationToken cancellationToken);
 }

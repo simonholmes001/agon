@@ -124,6 +124,7 @@ public class SessionEntity
     public int FrictionLevel { get; set; }
     public string Status { get; set; } = string.Empty; // "active", "complete", etc.
     public string Phase { get; set; } = string.Empty; // Current session phase
+    public int ClarificationRoundCount { get; set; }
     public Guid? ForkedFrom { get; set; }
     public Guid? ForkSnapshotId { get; set; }
     public DateTime CreatedAt { get; set; }

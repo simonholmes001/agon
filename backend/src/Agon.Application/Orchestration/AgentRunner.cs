@@ -103,12 +103,18 @@ public sealed class AgentRunner : IAgentRunner
     /// <summary>
     /// Dispatches all council agents in parallel for the Analysis Round.
     /// Applies valid patches sequentially (alphabetical order) then updates token budget.
+    /// Stores all agent messages to conversation history for CLI retrieval.
     /// </summary>
     public async Task<IReadOnlyList<AgentResponse>> RunAnalysisRoundAsync(
         SessionState state,
         CancellationToken cancellationToken)
     {
-        var contexts = _agents.Select(a =>
+        var councilAgents = _agents
+            .Where(a => Domain.Agents.AgentId.CouncilAgents.Contains(a.AgentId))
+            .OrderBy(a => a.AgentId)
+            .ToList();
+
+        var contexts = councilAgents.Select(_ =>
             AgentContext.ForAnalysis(
                 state.SessionId,
                 state.TruthMap,
@@ -117,25 +123,43 @@ public sealed class AgentRunner : IAgentRunner
                 state.ResearchToolsEnabled))
             .ToList();
 
-        var responses = await DispatchParallelAsync(_agents, contexts, cancellationToken);
+        var responses = await DispatchParallelAsync(councilAgents, contexts, cancellationToken);
         await ApplyPatchesAsync(state, responses, cancellationToken);
         AccumulateTokens(state, responses);
+
+        // Store all agent messages so the CLI can fetch them
+        foreach (var response in responses.Where(r => !r.TimedOut && !string.IsNullOrWhiteSpace(r.Message)))
+        {
+            await _conversationHistory.StoreMessageAsync(
+                state.SessionId,
+                response.AgentId,
+                response.Message,
+                state.CurrentRound,
+                cancellationToken);
+        }
+
         return responses;
     }
 
     /// <summary>
     /// Dispatches all council agents in parallel for the Critique Round.
     /// Each agent receives the MESSAGEs of the other two agents (never its own).
+    /// Stores all agent messages to conversation history for CLI retrieval.
     /// </summary>
     public async Task<IReadOnlyList<AgentResponse>> RunCritiqueRoundAsync(
         SessionState state,
         CancellationToken cancellationToken)
     {
-        var allAgentIds = _agents.Select(a => a.AgentId).ToList();
+        var councilAgents = _agents
+            .Where(a => Domain.Agents.AgentId.CouncilAgents.Contains(a.AgentId))
+            .OrderBy(a => a.AgentId)
+            .ToList();
 
-        var contexts = _agents.Select(a =>
+        var allCouncilIds = councilAgents.Select(a => a.AgentId).ToList();
+
+        var contexts = councilAgents.Select(a =>
         {
-            var targets = GetCritiqueTargetMessages(a.AgentId, allAgentIds, state.LastRoundMessages);
+            var targets = GetCritiqueTargetMessages(a.AgentId, allCouncilIds, state.LastRoundMessages);
             return AgentContext.ForCritique(
                 state.SessionId,
                 state.TruthMap,
@@ -145,14 +169,27 @@ public sealed class AgentRunner : IAgentRunner
                 state.ResearchToolsEnabled);
         }).ToList();
 
-        var responses = await DispatchParallelAsync(_agents, contexts, cancellationToken);
+        var responses = await DispatchParallelAsync(councilAgents, contexts, cancellationToken);
         await ApplyPatchesAsync(state, responses, cancellationToken);
         AccumulateTokens(state, responses);
+
+        // Store all critique agent messages so the CLI can fetch them
+        foreach (var response in responses.Where(r => !r.TimedOut && !string.IsNullOrWhiteSpace(r.Message)))
+        {
+            await _conversationHistory.StoreMessageAsync(
+                state.SessionId,
+                response.AgentId + "_critique",
+                response.Message,
+                state.CurrentRound,
+                cancellationToken);
+        }
+
         return responses;
     }
 
     /// <summary>
     /// Dispatches the Synthesizer agent for the Synthesis phase.
+    /// Stores the synthesizer message to conversation history for CLI retrieval.
     /// </summary>
     public async Task<AgentResponse> RunSynthesisAsync(
         SessionState state,
@@ -177,6 +214,18 @@ public sealed class AgentRunner : IAgentRunner
             await ApplyPatchesAsync(state, [response], cancellationToken);
 
         AccumulateTokens(state, [response]);
+
+        // Store synthesizer message so the CLI can fetch it
+        if (!response.TimedOut && !string.IsNullOrWhiteSpace(response.Message))
+        {
+            await _conversationHistory.StoreMessageAsync(
+                state.SessionId,
+                response.AgentId,
+                response.Message,
+                state.CurrentRound,
+                cancellationToken);
+        }
+
         return response;
     }
 
@@ -234,14 +283,30 @@ public sealed class AgentRunner : IAgentRunner
         AgentContext context,
         CancellationToken sessionCancellationToken)
     {
-        using var agentTimeout = new CancellationTokenSource(
-            TimeSpan.FromSeconds(_agentTimeoutSeconds));
+        using var agentTimeout = new CancellationTokenSource();
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(
             agentTimeout.Token, sessionCancellationToken);
 
         try
         {
-            return await agent.RunAsync(context, linked.Token);
+            var runTask = agent.RunAsync(context, linked.Token);
+            var timeoutTask = Task.Delay(
+                TimeSpan.FromSeconds(_agentTimeoutSeconds),
+                CancellationToken.None);
+
+            var completedTask = await Task.WhenAny(runTask, timeoutTask);
+            if (completedTask == timeoutTask)
+            {
+                // Best-effort cancellation for providers that honor cancellation tokens.
+                agentTimeout.Cancel();
+
+                _logger?.LogWarning(
+                    "Agent {AgentId} timed out after {TimeoutSeconds}s (hard timeout)",
+                    agent.AgentId, _agentTimeoutSeconds);
+                return AgentResponse.CreateTimedOut(agent.AgentId);
+            }
+
+            return await runTask;
         }
         catch (OperationCanceledException ex) when (agentTimeout.IsCancellationRequested)
         {

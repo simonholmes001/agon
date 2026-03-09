@@ -106,6 +106,7 @@ PATCH RULES:
 - Add: claims, assumptions, risks, open_questions, decisions (preliminary)
 - Update: constraints (if you identify implicit ones), success_metrics
 - All claims must have confidence scores
+- **CRITICAL: When adding decisions, you MUST include a 'rationale' field explaining your reasoning. Decisions without rationale will be rejected.**
 
 OUTPUT FORMAT:
 ## MESSAGE
@@ -150,6 +151,7 @@ PATCH RULES:
 - Add: claims, assumptions, risks, open_questions
 - Update: constraints (if you identify implicit ones)
 - All claims must have confidence scores
+- **CRITICAL: When adding decisions, you MUST include a 'rationale' field explaining your reasoning. Decisions without rationale will be rejected.**
 
 OUTPUT FORMAT:
 ## MESSAGE
@@ -194,6 +196,7 @@ PATCH RULES:
 - Add: claims, assumptions, risks, open_questions
 - Update: constraints (if you identify implicit ones)
 - All claims must have confidence scores
+- **CRITICAL: When adding decisions, you MUST include a 'rationale' field explaining your reasoning. Decisions without rationale will be rejected.**
 
 OUTPUT FORMAT:
 ## MESSAGE
@@ -308,6 +311,7 @@ INSTRUCTIONS — VALIDATION (immediately after synthesis):
 
 PATCH RULES:
 - Write: decisions (final, binding).
+- **CRITICAL: Every decision MUST include a 'rationale' field explaining the reasoning and tradeoffs considered. Decisions without rationale will be rejected.**
 - Update: assumptions (add validation steps where missing).
 - Update: convergence scores (all dimensions + overall).
 - Add: open_questions (any must-answer gaps identified in validation).

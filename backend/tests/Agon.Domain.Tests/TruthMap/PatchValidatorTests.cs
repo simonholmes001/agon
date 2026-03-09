@@ -1,6 +1,7 @@
 using Agon.Domain.TruthMap;
 using Agon.Domain.TruthMap.Entities;
 using FluentAssertions;
+using System.Text.Json;
 
 namespace Agon.Domain.Tests.TruthMap;
 
@@ -266,5 +267,31 @@ public class PatchValidatorTests
     {
         var patch = new TruthMapPatch([], Meta());
         PatchValidator.Validate(patch, EmptyMap()).IsValid.Should().BeTrue();
+    }
+
+    // ── JsonElement value (real LLM deserialization path) ────────────────────
+
+    [Fact]
+    public void Rule4_AddDecision_WithRationale_AsJsonElement_IsValid()
+    {
+        // This simulates what System.Text.Json produces when Value is typed as object?
+        var json = """{"ops":[{"op":"add","path":"/decisions/-","value":{"id":"d1","text":"Use iOS-first","rationale":"Largest user base for the target demographic."}}],"meta":{"agent":"gpt_agent","round":1,"reason":"analysis","sessionId":"00000000-0000-0000-0000-000000000001"}}""";
+        var patch = JsonSerializer.Deserialize<TruthMapPatch>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true })!;
+
+        var result = PatchValidator.Validate(patch, EmptyMap());
+
+        result.IsValid.Should().BeTrue("JsonElement with rationale should pass Rule 4");
+    }
+
+    [Fact]
+    public void Rule4_AddDecision_WithoutRationale_AsJsonElement_IsRejected()
+    {
+        var json = """{"ops":[{"op":"add","path":"/decisions/-","value":{"id":"d1","text":"Use iOS-first"}}],"meta":{"agent":"gpt_agent","round":1,"reason":"analysis","sessionId":"00000000-0000-0000-0000-000000000001"}}""";
+        var patch = JsonSerializer.Deserialize<TruthMapPatch>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true })!;
+
+        var result = PatchValidator.Validate(patch, EmptyMap());
+
+        result.IsValid.Should().BeFalse("JsonElement without rationale should fail Rule 4");
+        result.Reason.Should().ContainAny("rationale", "Rationale");
     }
 }

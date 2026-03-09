@@ -182,11 +182,18 @@ export class AgonAPIClient {
 
     this.logger.info('Submitting message', { sessionId, contentLength: content.length });
     const request: SubmitMessageRequest = { content };
-    const response = await this.client.post<SessionResponse>(
+    const response = await this.client.post<SessionResponse | null>(
       `/sessions/${sessionId}/messages`,
       request
     );
     this.logger.info('Message submitted successfully', { sessionId });
+
+    // Some backend paths return 202 Accepted with no response body.
+    // In that case, fetch the current session state explicitly.
+    if (!response.data || typeof response.data !== 'object' || !('phase' in response.data)) {
+      return this.getSession(sessionId);
+    }
+
     return response.data;
   }
 

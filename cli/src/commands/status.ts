@@ -25,8 +25,9 @@ export default class Status extends Command {
   static override readonly flags = {
     refresh: Flags.boolean({
       char: 'r',
-      description: 'Force refresh from server (skip cache)',
-      default: false
+      description: 'Fetch latest status from server (use --no-refresh to use cache)',
+      default: true,
+      allowNo: true
     })
   };
 
@@ -63,17 +64,25 @@ export default class Status extends Command {
         sessionId = currentId;
       }
 
-      // Try cache first unless refresh flag is set
+      // Try cache first only when explicitly requested
       let session: SessionResponse | null = null;
-      
       if (!flags.refresh) {
         session = await sessionManager.getSession(sessionId);
       }
 
-      // Fetch from API if cache miss or refresh requested
-      if (!session) {
-        session = await apiClient.getSession(sessionId);
-        await sessionManager.saveSession(session);
+      // Fetch live status unless cache-only mode is used
+      if (flags.refresh || !session) {
+        try {
+          session = await apiClient.getSession(sessionId);
+          await sessionManager.saveSession(session);
+        } catch {
+          // Fall back to cache if available and API is temporarily unavailable
+          if (!session) {
+            throw new Error('Unable to fetch live session status and no cached session is available.');
+          }
+          this.log('⚠️  API unavailable. Showing cached session status.');
+          this.log('');
+        }
       }
 
       // Display session status
@@ -142,14 +151,17 @@ export default class Status extends Command {
     }
 
     // Status-specific messages
-    if (session.status === 'complete') {
+    const normalizedStatus = this.normalizeStatus(session.status);
+    const normalizedPhase = this.normalizePhase(session.phase);
+
+    if (normalizedStatus === 'complete') {
       this.log('✅ Session complete! View artifacts with: agon show <artifact-type>');
-    } else if (session.status === 'complete_with_gaps') {
+    } else if (normalizedStatus === 'complete_with_gaps') {
       this.log('⚠️  Session complete with gaps. Some dimensions did not meet convergence threshold.');
       this.log('   View artifacts with: agon show <artifact-type>');
-    } else if (session.status === 'active') {
-      if (session.phase === 'Clarification') {
-        this.log('💡 Answer clarification questions with: agon clarify');
+    } else if (normalizedStatus === 'active') {
+      if (normalizedPhase === 'clarification') {
+        this.log('💡 Answer clarification questions with: agon answer "<your response>"');
       } else {
         this.log('⏳ Debate in progress. Check back soon or wait for completion.');
       }
@@ -161,6 +173,7 @@ export default class Status extends Command {
   }
 
   private formatStatus(status: string): string {
+    const normalized = this.normalizeStatus(status);
     const statusMap: Record<string, string> = {
       'active': '🟢 Active',
       'paused': '🟡 Paused',
@@ -169,23 +182,47 @@ export default class Status extends Command {
       'closed': '🔴 Closed'
     };
     
-    return statusMap[status] || status;
+    return statusMap[normalized] || status;
   }
 
   private formatPhase(phase: string): string {
+    const normalized = this.normalizePhase(phase);
     const phaseMap: Record<string, string> = {
-      'INTAKE': 'Intake',
-      'CLARIFICATION': 'Clarification',
-      'ANALYSIS_ROUND': 'Analysis Round',
-      'CRITIQUE': 'Critique',
-      'SYNTHESIS': 'Synthesis',
-      'TARGETED_LOOP': 'Targeted Loop',
-      'DELIVER': 'Delivery',
-      'DELIVER_WITH_GAPS': 'Delivery (with gaps)',
-      'POST_DELIVERY': 'Post-Delivery'
+      'intake': 'Intake',
+      'clarification': 'Clarification',
+      'analysis_round': 'Analysis Round',
+      'critique': 'Critique',
+      'synthesis': 'Synthesis',
+      'targeted_loop': 'Targeted Loop',
+      'deliver': 'Delivery',
+      'deliver_with_gaps': 'Delivery (with gaps)',
+      'post_delivery': 'Post-Delivery'
     };
     
-    return phaseMap[phase] || phase;
+    return phaseMap[normalized] || phase;
+  }
+
+  private normalizeStatus(status: string): string {
+    const compact = status.replace(/[\s_-]/g, '').toLowerCase();
+    if (compact === 'completewithgaps') return 'complete_with_gaps';
+    return compact;
+  }
+
+  private normalizePhase(phase: string): string {
+    const compact = phase.replace(/[\s_-]/g, '').toLowerCase();
+    const phaseMap: Record<string, string> = {
+      'intake': 'intake',
+      'clarification': 'clarification',
+      'analysisround': 'analysis_round',
+      'critique': 'critique',
+      'synthesis': 'synthesis',
+      'targetedloop': 'targeted_loop',
+      'deliver': 'deliver',
+      'deliverwithgaps': 'deliver_with_gaps',
+      'postdelivery': 'post_delivery'
+    };
+
+    return phaseMap[compact] || compact;
   }
 
   private formatConvergence(value: number): string {

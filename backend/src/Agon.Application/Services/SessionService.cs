@@ -113,9 +113,9 @@ public sealed class SessionService : ISessionService
         }
 
         // ⚡ NEW: Call Orchestrator to run Moderator agent
-        if (_lazyOrchestrator?.Value is not null)
+        if (_lazyOrchestrator?.Value is { } orchestrator)
         {
-            await _lazyOrchestrator?.Value.RunModeratorAsync(state, cancellationToken);
+            await orchestrator.RunModeratorAsync(state, cancellationToken);
         }
     }
 
@@ -145,14 +145,15 @@ public sealed class SessionService : ISessionService
         
         state.UserMessages.Add(userMessage);
 
-        // Persist the updated state
-        await _sessionRepo.UpdateAsync(state, cancellationToken);
-
         // Call Orchestrator to run Moderator agent with the new message
+        // (Orchestrator may increment ClarificationRoundCount)
         if (_lazyOrchestrator?.Value is not null)
         {
-            await _lazyOrchestrator?.Value.RunModeratorAsync(state, cancellationToken);
+            await _lazyOrchestrator.Value.RunModeratorAsync(state, cancellationToken);
         }
+
+        // Persist the updated state AFTER orchestrator (to capture any state changes)
+        await _sessionRepo.UpdateAsync(state, cancellationToken);
     }
 
     public async Task AdvancePhaseAsync(

@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Agon.Domain.TruthMap.Entities;
 
 namespace Agon.Domain.TruthMap;
@@ -152,12 +153,30 @@ public static class PatchValidator
 
     /// <summary>
     /// Attempts to read a named property from an anonymous value object.
-    /// Supports both strongly-typed records (via reflection) and
+    /// Supports <see cref="JsonElement"/> (produced by System.Text.Json when deserializing
+    /// <c>object?</c> fields), strongly-typed records (via reflection), and
     /// <see cref="System.Collections.Generic.Dictionary{TKey,TValue}"/>.
     /// </summary>
     private static string? ExtractStringField(object? value, string fieldName)
     {
         if (value is null) return null;
+
+        // JsonElement — produced by System.Text.Json when Value is typed as object?
+        if (value is JsonElement jsonElement)
+        {
+            if (jsonElement.ValueKind == JsonValueKind.Object)
+            {
+                // Try exact match first, then case-insensitive
+                foreach (var prop in jsonElement.EnumerateObject())
+                {
+                    if (string.Equals(prop.Name, fieldName, StringComparison.OrdinalIgnoreCase))
+                        return prop.Value.ValueKind == JsonValueKind.String
+                            ? prop.Value.GetString()
+                            : prop.Value.ToString();
+                }
+            }
+            return null;
+        }
 
         // Dictionary<string,object>
         if (value is System.Collections.Generic.Dictionary<string, object> dict)
@@ -166,11 +185,11 @@ public static class PatchValidator
         }
 
         // Record / class — use reflection
-        var prop = value.GetType().GetProperty(fieldName,
+        var prop2 = value.GetType().GetProperty(fieldName,
             System.Reflection.BindingFlags.Public
             | System.Reflection.BindingFlags.Instance
             | System.Reflection.BindingFlags.IgnoreCase);
 
-        return prop?.GetValue(value)?.ToString();
+        return prop2?.GetValue(value)?.ToString();
     }
 }

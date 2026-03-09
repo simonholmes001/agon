@@ -62,11 +62,12 @@ export default class Answer extends Command {
       console.log(chalk.blue('📤 Submitting your response...'));
       
       const updatedSession = await apiClient.submitMessage(sessionId, response);
+      await this.sessionManager.saveSession(updatedSession);
 
       console.log(chalk.green('✓ Response submitted\n'));
 
       // Check if clarification is complete
-      if (updatedSession.phase !== 'Clarification') {
+      if (!this.isClarificationPhase(updatedSession.phase)) {
         console.log(chalk.green('✓ Clarification complete!'));
         console.log(chalk.blue('🔄 Starting debate phase...\n'));
         console.log('The council agents are now analyzing your idea.');
@@ -95,5 +96,9 @@ export default class Answer extends Command {
       console.error(formatError(error as Error));
       this.exit(1);
     }
+  }
+
+  private isClarificationPhase(phase: string): boolean {
+    return phase.replace(/[\s_-]/g, '').toLowerCase() === 'clarification';
   }
 }

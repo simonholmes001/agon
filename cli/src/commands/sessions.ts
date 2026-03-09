@@ -12,7 +12,7 @@ import { Command, Flags } from '@oclif/core';
 import Table from 'cli-table3';
 import chalk from 'chalk';
 import { SessionManager } from '../state/session-manager.js';
-import type { SessionResponse, SessionStatus } from '../api/types.js';
+import type { SessionResponse } from '../api/types.js';
 
 export default class Sessions extends Command {
   static override readonly description = 'List all cached sessions';
@@ -42,9 +42,10 @@ export default class Sessions extends Command {
       
       // Filter sessions if --all flag not set
       if (!flags.all) {
-        sessions = sessions.filter(s => 
-          s.status === 'active' || s.status === 'paused'
-        );
+        sessions = sessions.filter(s => {
+          const status = this.normalizeStatus(s.status);
+          return status === 'active' || status === 'paused';
+        });
       }
 
       // Check if there are any sessions
@@ -166,8 +167,9 @@ export default class Sessions extends Command {
     return chalk.gray(date.toLocaleDateString());
   }
 
-  private formatStatus(status: SessionStatus): string {
-    const statusMap: Record<SessionStatus, string> = {
+  private formatStatus(status: string): string {
+    const normalized = this.normalizeStatus(status);
+    const statusMap: Record<string, string> = {
       'active': chalk.green('🟢 Active'),
       'paused': chalk.yellow('🟡 Paused'),
       'complete': chalk.blue('✅ Complete'),
@@ -175,23 +177,30 @@ export default class Sessions extends Command {
       'closed': chalk.gray('🔴 Closed')
     };
     
-    return statusMap[status] || status;
+    return statusMap[normalized] || status;
   }
 
   private formatPhase(phase: string): string {
+    const normalized = phase.replace(/[\s_-]/g, '').toLowerCase();
     const phaseShortNames: Record<string, string> = {
-      'INTAKE': 'Intake',
-      'CLARIFICATION': 'Clarifying',
-      'ANALYSIS_ROUND': 'Analyzing',
-      'CRITIQUE': 'Critiquing',
-      'SYNTHESIS': 'Synthesizing',
-      'TARGETED_LOOP': 'Deep Dive',
-      'DELIVER': 'Delivered',
-      'DELIVER_WITH_GAPS': 'Delivered',
-      'POST_DELIVERY': 'Post-Delivery'
+      'intake': 'Intake',
+      'clarification': 'Clarifying',
+      'analysisround': 'Analyzing',
+      'critique': 'Critiquing',
+      'synthesis': 'Synthesizing',
+      'targetedloop': 'Deep Dive',
+      'deliver': 'Delivered',
+      'deliverwithgaps': 'Delivered',
+      'postdelivery': 'Post-Delivery'
     };
     
-    return phaseShortNames[phase] || phase;
+    return phaseShortNames[normalized] || phase;
+  }
+
+  private normalizeStatus(status: string): string {
+    const compact = status.replace(/[\s_-]/g, '').toLowerCase();
+    if (compact === 'completewithgaps') return 'complete_with_gaps';
+    return compact;
   }
 
   private formatConvergence(value: number): string {

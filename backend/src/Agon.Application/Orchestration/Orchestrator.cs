@@ -3,6 +3,7 @@ using Agon.Application.Services;
 using Agon.Domain.Agents;
 using Agon.Domain.Engines;
 using Agon.Domain.Sessions;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace Agon.Application.Orchestration;
@@ -21,6 +22,7 @@ public sealed class Orchestrator : IOrchestrator
 {
     private readonly IAgentRunner _agentRunner;
     private readonly ISessionService _sessionService;
+    private readonly IServiceScopeFactory _scopeFactory;
     private readonly RoundPolicy _policy;
     private readonly ConfidenceDecayEngine _decayEngine;
     private readonly ILogger<Orchestrator>? _logger;
@@ -28,11 +30,13 @@ public sealed class Orchestrator : IOrchestrator
     public Orchestrator(
         IAgentRunner agentRunner,
         ISessionService sessionService,
+        IServiceScopeFactory scopeFactory,
         RoundPolicy policy,
         ILogger<Orchestrator>? logger = null)
     {
         _agentRunner = agentRunner;
         _sessionService = sessionService;
+        _scopeFactory = scopeFactory;
         _policy = policy;
         _decayEngine = new ConfidenceDecayEngine(policy.ConfidenceDecay);
         _logger = logger;
@@ -67,9 +71,14 @@ public sealed class Orchestrator : IOrchestrator
         // Check if Moderator signaled READY
         var signaledReady = response.Message.Contains("READY", StringComparison.OrdinalIgnoreCase);
 
-        // CRITICAL RULE: If Moderator asked questions, IGNORE the READY signal
-        // The LLM sometimes outputs both - we enforce the rule here
-        if (signaledReady && !askedQuestions)
+        // READY takes priority if: (a) no questions asked, OR (b) READY signalled AND
+        // this is not the first round — the LLM often includes rhetorical "?" in a
+        // summary paragraph even when genuinely ready. On round 0 we always require
+        // an explicit Q&A cycle before accepting READY.
+        var isFirstRound = state.ClarificationRoundCount == 0;
+        var honourReady = signaledReady && (!askedQuestions || !isFirstRound);
+
+        if (honourReady && !askedQuestions)
         {
             _logger?.LogInformation(
                 "Session {SessionId}: Moderator signaled READY → transitioning to ANALYSIS_ROUND",
@@ -79,16 +88,21 @@ public sealed class Orchestrator : IOrchestrator
             var brief = ExtractDebateBrief(state.TruthMap);
             await SignalClarificationCompleteAsync(state, brief, cancellationToken);
         }
+        else if (honourReady && askedQuestions)
+        {
+            // Moderator signalled READY but included rhetorical questions in its summary.
+            // After round 0 we trust the READY signal — it has already seen user answers.
+            _logger?.LogInformation(
+                "Session {SessionId}: Moderator signaled READY with rhetorical questions — honouring READY (round {Round})",
+                state.SessionId,
+                state.ClarificationRoundCount);
+
+            var brief = ExtractDebateBrief(state.TruthMap);
+            await SignalClarificationCompleteAsync(state, brief, cancellationToken);
+        }
         else
         {
-            if (signaledReady && askedQuestions)
-            {
-                _logger?.LogWarning(
-                    "Session {SessionId}: Moderator signaled READY but also asked questions - ignoring READY signal",
-                    state.SessionId);
-            }
-
-            // Moderator asked questions - increment clarification round count
+            // Moderator asked genuine questions — increment clarification round count
             state.ClarificationRoundCount++;
             await _sessionService.RecordRoundSnapshotAsync(state, cancellationToken);
 
@@ -140,7 +154,7 @@ public sealed class Orchestrator : IOrchestrator
 
     /// <summary>
     /// Called when the Moderator signals READY at the end of the Clarification phase.
-    /// Stores the completed Debate Brief and transitions to ANALYSIS_ROUND.
+    /// Stores the completed Debate Brief and fires the full debate chain in background.
     /// </summary>
     public async Task SignalClarificationCompleteAsync(
         SessionState state,
@@ -151,9 +165,40 @@ public sealed class Orchestrator : IOrchestrator
         state.ClarificationIncomplete = false;
 
         _logger?.LogInformation(
-            "Session {SessionId}: CLARIFICATION complete → ANALYSIS_ROUND", state.SessionId);
+            "Session {SessionId}: CLARIFICATION complete → starting full debate chain", state.SessionId);
 
         await _sessionService.AdvancePhaseAsync(state, SessionPhase.AnalysisRound, cancellationToken);
+
+        // Fire-and-forget: run the full debate chain in its own DI scope so the HTTP
+        // request can return immediately while agents work in the background.
+        var sessionId = state.SessionId;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Yield();
+                using var scope = _scopeFactory.CreateScope();
+                var scopedOrchestrator = scope.ServiceProvider.GetRequiredService<IOrchestrator>();
+                var scopedSessionService = scope.ServiceProvider.GetRequiredService<ISessionService>();
+                var scopedState = await scopedSessionService.GetAsync(sessionId, CancellationToken.None);
+
+                if (scopedState is null)
+                {
+                    _logger?.LogWarning("Session {SessionId}: State not found for background debate chain", sessionId);
+                    return;
+                }
+
+                // Copy over in-memory state that isn't persisted to the DB between calls
+                scopedState.DebateBrief = brief;
+
+                await scopedOrchestrator.RunFullDebateChainAsync(scopedState, CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError(ex, "Session {SessionId}: Full debate chain failed", sessionId);
+                await MarkSessionFailedAsync(sessionId, "background debate chain failure");
+            }
+        }, CancellationToken.None);
     }
 
     /// <summary>
@@ -173,6 +218,62 @@ public sealed class Orchestrator : IOrchestrator
             state.SessionId);
 
         await _sessionService.AdvancePhaseAsync(state, SessionPhase.AnalysisRound, cancellationToken);
+
+        var sessionId = state.SessionId;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Yield();
+                using var scope = _scopeFactory.CreateScope();
+                var scopedOrchestrator = scope.ServiceProvider.GetRequiredService<IOrchestrator>();
+                var scopedSessionService = scope.ServiceProvider.GetRequiredService<ISessionService>();
+                var scopedState = await scopedSessionService.GetAsync(sessionId, CancellationToken.None);
+
+                if (scopedState is null)
+                {
+                    _logger?.LogWarning("Session {SessionId}: State not found for background debate chain (timed out clarification)", sessionId);
+                    return;
+                }
+
+                scopedState.DebateBrief = partialBrief;
+                await scopedOrchestrator.RunFullDebateChainAsync(scopedState, CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError(ex, "Session {SessionId}: Full debate chain failed (timed out clarification)", sessionId);
+                await MarkSessionFailedAsync(sessionId, "background debate chain failure after timed out clarification");
+            }
+        }, CancellationToken.None);
+    }
+
+    /// <summary>
+    /// Runs the complete debate chain: Analysis → Critique → Synthesis → (Targeted loops) → Deliver.
+    /// Called as a single unit from the background task so that every phase flows into the next.
+    /// </summary>
+    public async Task RunFullDebateChainAsync(SessionState state, CancellationToken cancellationToken)
+    {
+        _logger?.LogInformation(
+            "Session {SessionId}: Starting full debate chain (Analysis → Critique → Synthesis)",
+            state.SessionId);
+
+        try
+        {
+            await RunAnalysisRoundAsync(state, cancellationToken);
+            // Each phase method below continues the chain automatically.
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(
+                ex,
+                "Session {SessionId}: Debate chain failed unexpectedly. Terminating with gaps.",
+                state.SessionId);
+
+            await TerminateWithGapsAsync(
+                state,
+                "unexpected error during debate chain",
+                cancellationToken);
+        }
     }
 
     /// <summary>
@@ -180,7 +281,7 @@ public sealed class Orchestrator : IOrchestrator
     /// 1. Dispatches all council agents in parallel.
     /// 2. Applies patches, runs decay engine.
     /// 3. Records snapshot.
-    /// 4. Transitions to CRITIQUE (or terminates early if budget exhausted or max rounds hit).
+    /// 4. Transitions to CRITIQUE and continues the chain.
     /// </summary>
     public async Task RunAnalysisRoundAsync(SessionState state, CancellationToken cancellationToken)
     {
@@ -196,7 +297,24 @@ public sealed class Orchestrator : IOrchestrator
         RunDecayEngine(state);
         await _sessionService.RecordRoundSnapshotAsync(state, cancellationToken);
 
-        await TransitionAfterRoundAsync(state, responses, isDebateRound: true, cancellationToken);
+        // Check termination conditions before continuing
+        if (_policy.IsBudgetExhausted(state.TokensUsed))
+        {
+            await TerminateWithGapsAsync(state, "budget exhausted after analysis", cancellationToken);
+            return;
+        }
+
+        if (state.CurrentRound >= _policy.MaxDebateRounds && !IsConverged(state))
+        {
+            await TerminateWithGapsAsync(
+                state, $"max debate rounds ({_policy.MaxDebateRounds}) reached without convergence",
+                cancellationToken);
+            return;
+        }
+
+        // Transition to Critique and immediately run it
+        await _sessionService.AdvancePhaseAsync(state, SessionPhase.Critique, cancellationToken);
+        await RunCritiqueRoundAsync(state, cancellationToken);
     }
 
     /// <summary>
@@ -204,7 +322,7 @@ public sealed class Orchestrator : IOrchestrator
     /// 1. Dispatches all council agents in parallel with cross-agent critique targets.
     /// 2. Applies patches, runs decay engine.
     /// 3. Records snapshot.
-    /// 4. Transitions to SYNTHESIS.
+    /// 4. Transitions to SYNTHESIS and immediately runs it.
     /// </summary>
     public async Task RunCritiqueRoundAsync(SessionState state, CancellationToken cancellationToken)
     {
@@ -222,7 +340,9 @@ public sealed class Orchestrator : IOrchestrator
             return;
         }
 
+        // Transition to Synthesis and immediately run it
         await _sessionService.AdvancePhaseAsync(state, SessionPhase.Synthesis, cancellationToken);
+        await RunSynthesisAsync(state, cancellationToken);
     }
 
     /// <summary>
@@ -260,6 +380,7 @@ public sealed class Orchestrator : IOrchestrator
 
             state.Status = SessionStatus.Complete;
             await _sessionService.AdvancePhaseAsync(state, SessionPhase.Deliver, cancellationToken);
+            // Deliver is terminal — no further chain continuation needed.
         }
         else if (state.TargetedLoopCount < _policy.MaxTargetedLoops)
         {
@@ -268,6 +389,19 @@ public sealed class Orchestrator : IOrchestrator
                 state.SessionId, convergence.Overall, state.TargetedLoopCount, _policy.MaxTargetedLoops);
 
             await _sessionService.AdvancePhaseAsync(state, SessionPhase.TargetedLoop, cancellationToken);
+
+            // Run a targeted loop: target all non-synthesizer agents for the gaps
+            var targetAgentIds = new List<string>
+            {
+                Domain.Agents.AgentId.GptAgent,
+                Domain.Agents.AgentId.GeminiAgent,
+                Domain.Agents.AgentId.ClaudeAgent
+            };
+
+            var gapDirective = "Address the remaining convergence gaps identified in the previous synthesis. " +
+                               "Focus only on open questions and unresolved claims. Do not introduce new major topics.";
+
+            await RunTargetedLoopAsync(state, targetAgentIds, gapDirective, cancellationToken);
         }
         else
         {
@@ -308,39 +442,11 @@ public sealed class Orchestrator : IOrchestrator
         }
 
         await _sessionService.AdvancePhaseAsync(state, SessionPhase.Synthesis, cancellationToken);
+        // Re-enter synthesis to evaluate convergence again after the targeted loop.
+        await RunSynthesisAsync(state, cancellationToken);
     }
 
     // ── Internals ─────────────────────────────────────────────────────────────
-
-    /// <summary>
-    /// Determines next phase after a debate round (Analysis).
-    /// Handles: budget exhaustion, max rounds, or normal → CRITIQUE transition.
-    /// </summary>
-    private async Task TransitionAfterRoundAsync(
-        SessionState state,
-        IReadOnlyList<AgentResponse> responses,
-        bool isDebateRound,
-        CancellationToken cancellationToken)
-    {
-        _ = responses; // reserved for future extension (e.g., checking timed-out ratio)
-
-        if (_policy.IsBudgetExhausted(state.TokensUsed))
-        {
-            await TerminateWithGapsAsync(state, "budget exhausted", cancellationToken);
-            return;
-        }
-
-        if (isDebateRound && state.CurrentRound >= _policy.MaxDebateRounds
-            && !IsConverged(state))
-        {
-            await TerminateWithGapsAsync(
-                state, $"max debate rounds ({_policy.MaxDebateRounds}) reached without convergence",
-                cancellationToken);
-            return;
-        }
-
-        await _sessionService.AdvancePhaseAsync(state, SessionPhase.Critique, cancellationToken);
-    }
 
     private void RunDecayEngine(SessionState state)
     {
@@ -379,5 +485,41 @@ public sealed class Orchestrator : IOrchestrator
         return _policy.ShouldConverge(
             c.Overall, c.AssumptionExplicitness, c.EvidenceQuality,
             state.TruthMap.HasBlockingOpenQuestions(), state.FrictionLevel);
+    }
+
+    private async Task MarkSessionFailedAsync(Guid sessionId, string reason)
+    {
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var scopedSessionService = scope.ServiceProvider.GetRequiredService<ISessionService>();
+            var scopedState = await scopedSessionService.GetAsync(sessionId, CancellationToken.None);
+
+            if (scopedState is null)
+            {
+                _logger?.LogWarning(
+                    "Session {SessionId}: Unable to mark failed session (state not found)", sessionId);
+                return;
+            }
+
+            if (scopedState.Status is SessionStatus.Complete or SessionStatus.CompleteWithGaps)
+            {
+                // Already terminal.
+                return;
+            }
+
+            scopedState.Status = SessionStatus.CompleteWithGaps;
+            await scopedSessionService.AdvancePhaseAsync(
+                scopedState,
+                SessionPhase.DeliverWithGaps,
+                CancellationToken.None);
+        }
+        catch (Exception markEx)
+        {
+            _logger?.LogError(
+                markEx,
+                "Session {SessionId}: Failed to mark session as complete_with_gaps after background failure",
+                sessionId);
+        }
     }
 }
