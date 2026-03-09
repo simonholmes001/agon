@@ -308,9 +308,14 @@ export default class Start extends Command {
           await sessionManager.saveArtifact(sessionId, 'verdict', verdict.content);
 
           this.log('━'.repeat(60));
+          this.log(chalk.bold('BEGIN FINAL OUTPUT'));
+          this.log('━'.repeat(60));
           this.log(chalk.bold('Final Verdict'));
           this.log('');
           this.log(renderMarkdown(verdict.content));
+          this.log('');
+          this.log('━'.repeat(60));
+          this.log(chalk.bold('END FINAL OUTPUT'));
           this.log('');
           this.log('Next steps:');
           this.log('  • Ask follow-up questions: agon answer "<follow-up request>"');

@@ -8,14 +8,14 @@
  *   agon answer "Our target customers are small business owners"
  */
 
-import { Command, Args } from '@oclif/core';
+import { Command, Args, Flags } from '@oclif/core';
 import { AgonAPIClient } from '../api/agon-client.js';
 import { SessionManager } from '../state/session-manager.js';
 import { ConfigManager } from '../state/config-manager.js';
 import { Logger } from '../utils/logger.js';
 import { formatError } from '../utils/error-handler.js';
 import chalk from 'chalk';
-import type { Message } from '../api/types.js';
+import type { Message, SessionResponse } from '../api/types.js';
 
 export function normalizePhase(phase: string): string {
   return phase.replace(/[\s_-]/g, '').toLowerCase();
@@ -70,12 +70,19 @@ export default class Answer extends Command {
     }),
   };
 
+  static override readonly flags = {
+    session: Flags.string({
+      char: 's',
+      description: 'Session ID to use (overrides current session)'
+    })
+  };
+
   private readonly logger = new Logger('AnswerCommand');
   private readonly sessionManager = new SessionManager();
   private readonly configManager = new ConfigManager();
 
   public async run(): Promise<void> {
-    const { args } = await this.parse(Answer);
+    const { args, flags } = await this.parse(Answer);
     const { response } = args;
 
     try {
@@ -84,8 +91,8 @@ export default class Answer extends Command {
         throw new Error('Response cannot be empty');
       }
 
-      // Get current session
-      const sessionId = await this.sessionManager.getCurrentSessionId();
+      // Resolve target session
+      const sessionId = await this.resolveSessionId(flags.session);
       if (!sessionId) {
         console.error(chalk.red('✗ No active session found'));
         console.log('\nStart a new session with:');
@@ -193,5 +200,36 @@ export default class Answer extends Command {
     }
 
     return undefined;
+  }
+
+  private async resolveSessionId(explicitSessionId?: string): Promise<string | null> {
+    if (explicitSessionId && explicitSessionId.trim().length > 0) {
+      await this.sessionManager.setCurrentSessionId(explicitSessionId);
+      return explicitSessionId.trim();
+    }
+
+    const currentSessionId = await this.sessionManager.getCurrentSessionId();
+    if (currentSessionId) {
+      return currentSessionId;
+    }
+
+    const sessions = await this.sessionManager.listSessions();
+    const latestSession = this.getLatestSession(sessions);
+    if (!latestSession) {
+      return null;
+    }
+
+    await this.sessionManager.setCurrentSessionId(latestSession.id);
+    return latestSession.id;
+  }
+
+  private getLatestSession(sessions: SessionResponse[]): SessionResponse | undefined {
+    if (sessions.length === 0) {
+      return undefined;
+    }
+
+    return [...sessions].sort(
+      (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+    )[0];
   }
 }

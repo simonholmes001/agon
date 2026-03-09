@@ -41,7 +41,9 @@ describe('agon answer', () => {
     
     // Setup session manager mock
     mockSessionManager = {
-      getCurrentSessionId: vi.fn()
+      getCurrentSessionId: vi.fn(),
+      listSessions: vi.fn(),
+      setCurrentSessionId: vi.fn()
     };
     
     // Setup config manager mock
@@ -142,10 +144,37 @@ describe('agon answer', () => {
 
     it('should handle missing session', async () => {
       mockSessionManager.getCurrentSessionId.mockResolvedValue(null);
+      mockSessionManager.listSessions.mockResolvedValue([]);
 
       const result = await mockSessionManager.getCurrentSessionId();
 
       expect(result).toBeNull();
+    });
+
+    it('should fall back to latest cached session when current session is missing', async () => {
+      const sessions: SessionResponse[] = [
+        {
+          id: 'older-session',
+          status: 'complete',
+          phase: 'Deliver',
+          createdAt: '2026-03-09T10:00:00Z',
+          updatedAt: '2026-03-09T10:10:00Z'
+        },
+        {
+          id: 'latest-session',
+          status: 'complete',
+          phase: 'PostDelivery',
+          createdAt: '2026-03-09T11:00:00Z',
+          updatedAt: '2026-03-09T11:30:00Z'
+        }
+      ];
+
+      mockSessionManager.getCurrentSessionId.mockResolvedValue(null);
+      mockSessionManager.listSessions.mockResolvedValue(sessions);
+
+      const listed = await mockSessionManager.listSessions();
+
+      expect(listed[1].id).toBe('latest-session');
     });
   });
 
