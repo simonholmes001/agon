@@ -5,7 +5,7 @@
  * Supports both clarification and post-delivery follow-up chat.
  * 
  * Usage:
- *   agon answer "Our target customers are small business owners"
+ *   agon follow-up "Our target customers are small business owners"
  */
 
 import { Command, Args, Flags } from '@oclif/core';
@@ -15,7 +15,9 @@ import { ConfigManager } from '../state/config-manager.js';
 import { Logger } from '../utils/logger.js';
 import { formatError } from '../utils/error-handler.js';
 import chalk from 'chalk';
+import ora from 'ora';
 import type { Message, SessionResponse } from '../api/types.js';
+import { renderMarkdown } from '../utils/markdown.js';
 
 export function normalizePhase(phase: string): string {
   return phase.replace(/[\s_-]/g, '').toLowerCase();
@@ -56,6 +58,7 @@ export function getLatestPostDeliveryAssistantMessage(
 
 export default class Answer extends Command {
   static override readonly description = 'Submit a message for clarification or post-delivery follow-up';
+  static override readonly aliases = ['follow-up'];
 
   static override readonly examples = [
     '<%= config.bin %> <%= command.id %> "Our target customers are enterprise healthcare organizations"',
@@ -108,22 +111,30 @@ export default class Answer extends Command {
 
       // Submit response
       this.logger.info('Submitting response', { sessionId, responseLength: response.length });
-      console.log(chalk.blue('📤 Submitting your response...'));
-      
-      const updatedSession = await apiClient.submitMessage(sessionId, response);
-      await this.sessionManager.saveSession(updatedSession);
+      const submitSpinner = ora({
+        text: 'Submitting your response...',
+        color: 'cyan'
+      }).start();
+      let updatedSession: SessionResponse;
+      try {
+        updatedSession = await apiClient.submitMessage(sessionId, response);
+        await this.sessionManager.saveSession(updatedSession);
+        submitSpinner.succeed('Response submitted');
+      } catch (submitError) {
+        submitSpinner.fail('Failed to submit response');
+        throw submitError;
+      }
 
-      console.log(chalk.green('✓ Response submitted\n'));
+      console.log('');
 
       const messages = await apiClient.getMessages(sessionId);
       let latestMessage = getLatestResponseMessage(updatedSession.phase, messages);
 
       if (this.isClarificationPhase(updatedSession.phase)) {
         if (latestMessage) {
-          console.log(chalk.bold('Moderator:\n'));
-          console.log(latestMessage.message);
+          this.renderMessagePanel('Moderator', latestMessage.message, 'cyan');
           console.log('\n' + chalk.dim('Answer with:'));
-          console.log(chalk.cyan('  agon answer "<your response>"\n'));
+          console.log(chalk.cyan('  agon follow-up "<your response>"\n'));
         } else {
           console.log(chalk.yellow('⏳ Waiting for Moderator response...'));
           console.log(`Run ${chalk.cyan('agon status')} to check session state.`);
@@ -138,18 +149,22 @@ export default class Answer extends Command {
         );
 
         if (!latestMessage) {
+          const waitSpinner = ora({
+            text: 'Waiting for assistant response...',
+            color: 'cyan'
+          }).start();
           latestMessage = await this.waitForPostDeliveryResponse(
             apiClient,
             sessionId,
             previousAssistantMessage?.createdAt
           );
+          waitSpinner.stop();
         }
 
         if (latestMessage) {
-          console.log(chalk.bold('Assistant:\n'));
-          console.log(latestMessage.message);
+          this.renderMessagePanel('Assistant', latestMessage.message, 'green');
           console.log('\n' + chalk.dim('Continue with:'));
-          console.log(chalk.cyan('  agon answer "<follow-up request>"\n'));
+          console.log(chalk.cyan('  agon follow-up "<follow-up request>"\n'));
         } else {
           console.log(chalk.yellow('⏳ Waiting for assistant follow-up response...'));
           console.log(`Run ${chalk.cyan('agon show verdict --refresh')} to review current output.`);
@@ -231,5 +246,14 @@ export default class Answer extends Command {
     return [...sessions].sort(
       (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
     )[0];
+  }
+
+  private renderMessagePanel(title: string, markdown: string, color: 'cyan' | 'green'): void {
+    const border = color === 'green' ? chalk.green : chalk.cyan;
+    console.log(border('━'.repeat(60)));
+    console.log(border.bold(`${title}`));
+    console.log('');
+    console.log(renderMarkdown(markdown));
+    console.log(border('━'.repeat(60)));
   }
 }

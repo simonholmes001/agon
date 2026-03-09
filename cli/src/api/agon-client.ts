@@ -159,7 +159,7 @@ export class AgonAPIClient {
    * Get conversation messages for a session
    */
   async getMessages(sessionId: string): Promise<Message[]> {
-    this.logger.info('Fetching conversation messages', { sessionId });
+    this.logger.debug('Fetching conversation messages', { sessionId });
     const response = await this.client.get<Message[]>(
       `/sessions/${sessionId}/messages`
     );

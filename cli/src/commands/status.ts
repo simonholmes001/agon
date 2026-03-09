@@ -161,7 +161,7 @@ export default class Status extends Command {
       this.log('   View artifacts with: agon show <artifact-type>');
     } else if (normalizedStatus === 'active') {
       if (normalizedPhase === 'clarification') {
-        this.log('💡 Answer clarification questions with: agon answer "<your response>"');
+        this.log('💡 Answer clarification questions with: agon follow-up "<your response>"');
       } else {
         this.log('⏳ Debate in progress. Check back soon or wait for completion.');
       }

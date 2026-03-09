@@ -15,6 +15,7 @@ import { AgonAPIClient } from '../../src/api/agon-client.js';
 import { SessionManager } from '../../src/state/session-manager.js';
 import { ConfigManager } from '../../src/state/config-manager.js';
 import type { SessionResponse, Message } from '../../src/api/types.js';
+import Answer from '../../src/commands/answer.js';
 import {
   getLatestPostDeliveryAssistantMessage,
   getLatestResponseMessage
@@ -59,6 +60,10 @@ describe('agon answer', () => {
     vi.mocked(AgonAPIClient).mockImplementation(() => mockApiClient);
     vi.mocked(SessionManager).mockImplementation(() => mockSessionManager);
     vi.mocked(ConfigManager).mockImplementation(() => mockConfigManager);
+  });
+
+  it('should expose the follow-up command alias', () => {
+    expect(Answer.aliases).toContain('follow-up');
   });
 
   describe('with valid response', () => {

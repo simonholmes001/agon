@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { renderMarkdown, stripAnsi } from '../../src/utils/markdown.js';
+import { renderMarkdown, stripAnsi, normalizeMarkdownStructure } from '../../src/utils/markdown.js';
 
 describe('Markdown Renderer', () => {
   describe('renderMarkdown', () => {
@@ -18,8 +18,11 @@ describe('Markdown Renderer', () => {
     it('should render headings', () => {
       const text = '# Heading 1\n## Heading 2';
       const rendered = renderMarkdown(text);
-      expect(stripAnsi(rendered)).toContain('Heading 1');
-      expect(stripAnsi(rendered)).toContain('Heading 2');
+      const plain = stripAnsi(rendered);
+      expect(plain).toContain('Heading 1');
+      expect(plain).toContain('Heading 2');
+      expect(plain).not.toContain('# Heading 1');
+      expect(plain).not.toContain('## Heading 2');
     });
 
     it('should render bold text', () => {
@@ -71,6 +74,26 @@ describe('Markdown Renderer', () => {
       expect(stripAnsi(rendered)).toContain('Paragraph 1');
       expect(stripAnsi(rendered)).toContain('Paragraph 2');
       expect(stripAnsi(rendered)).toContain('Paragraph 3');
+    });
+  });
+
+  describe('normalizeMarkdownStructure', () => {
+    it('should nest examples under numbered items and remove extra blank lines', () => {
+      const text = [
+        '1. Primary persona question',
+        '',
+        '',
+        '* Examples: "A", "B"',
+        '2. Next question'
+      ].join('\n');
+
+      const normalized = normalizeMarkdownStructure(text);
+
+      expect(normalized).toBe([
+        '1. Primary persona question',
+        '   - Examples: "A", "B"',
+        '2. Next question'
+      ].join('\n'));
     });
   });
 
