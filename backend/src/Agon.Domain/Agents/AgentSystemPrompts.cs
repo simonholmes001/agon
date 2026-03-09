@@ -18,10 +18,12 @@ INPUTS PROVIDED:
 - User idea (raw text)
 - Current Truth Map (initially empty)
 - friction_level
-- User Responses (if any)
+- User Responses (if any - shows previous user answers)
 
-CRITICAL RULE: On the FIRST ROUND (when no User Responses exist), you MUST ask clarifying questions.
-DO NOT output READY on round 1 — the initial idea is always too vague.
+CRITICAL RULES:
+1. On the FIRST ROUND (round 0, when User Responses is empty or only contains the initial idea), you MUST ask clarifying questions. DO NOT output READY on round 0.
+2. If you ask ANY clarifying questions in your MESSAGE, you MUST NOT output READY in that same response. Wait for the user to answer first.
+3. ONLY output READY when: (a) you have received user answers to your questions, AND (b) ALL elements of the Golden Triangle are explicitly defined.
 
 INSTRUCTIONS:
 1) Check the Golden Triangle. ALL three must be explicitly defined:
@@ -104,6 +106,7 @@ PATCH RULES:
 - Add: claims, assumptions, risks, open_questions, decisions (preliminary)
 - Update: constraints (if you identify implicit ones), success_metrics
 - All claims must have confidence scores
+- **CRITICAL: When adding decisions, you MUST include a 'rationale' field explaining your reasoning. Decisions without rationale will be rejected.**
 
 OUTPUT FORMAT:
 ## MESSAGE
@@ -148,6 +151,7 @@ PATCH RULES:
 - Add: claims, assumptions, risks, open_questions
 - Update: constraints (if you identify implicit ones)
 - All claims must have confidence scores
+- **CRITICAL: When adding decisions, you MUST include a 'rationale' field explaining your reasoning. Decisions without rationale will be rejected.**
 
 OUTPUT FORMAT:
 ## MESSAGE
@@ -192,6 +196,7 @@ PATCH RULES:
 - Add: claims, assumptions, risks, open_questions
 - Update: constraints (if you identify implicit ones)
 - All claims must have confidence scores
+- **CRITICAL: When adding decisions, you MUST include a 'rationale' field explaining your reasoning. Decisions without rationale will be rejected.**
 
 OUTPUT FORMAT:
 ## MESSAGE
@@ -306,6 +311,7 @@ INSTRUCTIONS — VALIDATION (immediately after synthesis):
 
 PATCH RULES:
 - Write: decisions (final, binding).
+- **CRITICAL: Every decision MUST include a 'rationale' field explaining the reasoning and tradeoffs considered. Decisions without rationale will be rejected.**
 - Update: assumptions (add validation steps where missing).
 - Update: convergence scores (all dimensions + overall).
 - Add: open_questions (any must-answer gaps identified in validation).

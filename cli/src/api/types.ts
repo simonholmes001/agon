@@ -17,15 +17,15 @@ export interface SessionResponse {
 export type SessionStatus = 'active' | 'paused' | 'complete' | 'complete_with_gaps' | 'closed';
 
 export type SessionPhase = 
-  | 'INTAKE' 
-  | 'CLARIFICATION' 
-  | 'ANALYSIS_ROUND' 
-  | 'CRITIQUE' 
-  | 'SYNTHESIS' 
-  | 'TARGETED_LOOP' 
-  | 'DELIVER' 
-  | 'DELIVER_WITH_GAPS' 
-  | 'POST_DELIVERY';
+  | 'Intake' 
+  | 'Clarification' 
+  | 'AnalysisRound' 
+  | 'Critique' 
+  | 'Synthesis' 
+  | 'TargetedLoop' 
+  | 'Deliver' 
+  | 'DeliverWithGaps' 
+  | 'PostDelivery';
 
 export interface ConvergenceScore {
   overall: number;

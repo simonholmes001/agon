@@ -97,6 +97,7 @@ export default class Resume extends Command {
   }
 
   private formatStatus(status: string): string {
+    const normalized = this.normalizeStatus(status);
     const statusMap: Record<string, string> = {
       'active': '🟢 Active',
       'paused': '🟡 Paused',
@@ -105,38 +106,42 @@ export default class Resume extends Command {
       'closed': '🔴 Closed'
     };
     
-    return statusMap[status] || status;
+    return statusMap[normalized] || status;
   }
 
   private formatPhase(phase: string): string {
+    const normalized = phase.replace(/[\s_-]/g, '').toLowerCase();
     const phaseMap: Record<string, string> = {
-      'INTAKE': 'Intake',
-      'CLARIFICATION': 'Clarification',
-      'ANALYSIS_ROUND': 'Analysis Round',
-      'CRITIQUE': 'Critique',
-      'SYNTHESIS': 'Synthesis',
-      'TARGETED_LOOP': 'Targeted Loop',
-      'DELIVER': 'Delivery',
-      'DELIVER_WITH_GAPS': 'Delivery (with gaps)',
-      'POST_DELIVERY': 'Post-Delivery'
+      'intake': 'Intake',
+      'clarification': 'Clarification',
+      'analysisround': 'Analysis Round',
+      'critique': 'Critique',
+      'synthesis': 'Synthesis',
+      'targetedloop': 'Targeted Loop',
+      'deliver': 'Delivery',
+      'deliverwithgaps': 'Delivery (with gaps)',
+      'postdelivery': 'Post-Delivery'
     };
     
-    return phaseMap[phase] || phase;
+    return phaseMap[normalized] || phase;
   }
 
   private showNextSteps(status: string, phase: string): void {
+    const normalizedStatus = this.normalizeStatus(status);
+    const normalizedPhase = phase.replace(/[\s_-]/g, '').toLowerCase();
+
     this.log('Next steps:');
     
-    if (status === 'complete' || status === 'complete_with_gaps') {
+    if (normalizedStatus === 'complete' || normalizedStatus === 'complete_with_gaps') {
       this.log('  • View artifacts: agon show <artifact-type>');
       this.log('  • Check status: agon status');
-    } else if (phase === 'CLARIFICATION') {
-      this.log('  • Answer questions: agon clarify');
+    } else if (normalizedPhase === 'clarification') {
+      this.log('  • Answer questions: agon answer "<your response>"');
       this.log('  • Check status: agon status');
-    } else if (status === 'active') {
+    } else if (normalizedStatus === 'active') {
       this.log('  • Check status: agon status');
       this.log('  • Wait for completion');
-    } else if (status === 'paused') {
+    } else if (normalizedStatus === 'paused') {
       this.log('  • Check status: agon status');
       this.log('  • Continue debate (feature coming soon)');
     } else {
@@ -144,5 +149,11 @@ export default class Resume extends Command {
     }
     
     this.log('');
+  }
+
+  private normalizeStatus(status: string): string {
+    const compact = status.replace(/[\s_-]/g, '').toLowerCase();
+    if (compact === 'completewithgaps') return 'complete_with_gaps';
+    return compact;
   }
 }

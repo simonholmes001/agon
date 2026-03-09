@@ -44,6 +44,12 @@ export default class Start extends Command {
       description: 'Interactive mode (clarification Q&A)',
       default: true,
       allowNo: true
+    }),
+    watch: Flags.boolean({
+      char: 'w',
+      description: 'Keep terminal open and stream agent discussion until debate completes',
+      default: true,
+      allowNo: true
     })
   };
 
@@ -97,35 +103,59 @@ export default class Start extends Command {
       this.log('🤔 Moderator is analyzing your idea...');
       await new Promise(resolve => setTimeout(resolve, 2000));
       
-      // Fetch conversation messages immediately (before phase might change)
-      const messages = await apiClient.getMessages(session.id);
-      const moderatorMessages = messages.filter(m => m.agentId === 'moderator');
-      
       // Refresh session to get updated phase
       const updatedSession = await apiClient.getSession(session.id);
       await sessionManager.saveSession(updatedSession);
 
-      // Display Moderator's message if we got one
-      if (flags.interactive && moderatorMessages.length > 0) {
+      // Continuous conversation loop: keep prompting until phase changes
+      let currentPhase = updatedSession.phase;
+      let lastAnsweredModeratorMessageKey: string | null = null;
+      
+      while (flags.interactive && this.isClarificationPhase(currentPhase)) {
+        // Fetch latest messages
+        const messages = await apiClient.getMessages(session.id);
+        const moderatorMessages = messages.filter(m => m.agentId === 'moderator');
+
+        if (moderatorMessages.length === 0) {
+          // No messages yet, wait a bit and check again
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          const latestSession = await apiClient.getSession(session.id);
+          await sessionManager.saveSession(latestSession);
+          currentPhase = latestSession.phase;
+          continue;
+        }
+
+        const latestMessage = moderatorMessages.at(-1)!;
+        const moderatorMessageKey = `${latestMessage.round}:${latestMessage.createdAt}`;
+        if (moderatorMessageKey === lastAnsweredModeratorMessageKey) {
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          const latestSession = await apiClient.getSession(session.id);
+          await sessionManager.saveSession(latestSession);
+          currentPhase = latestSession.phase;
+          continue;
+        }
+
+        // Display Moderator's message
         this.log('');
         this.log('━'.repeat(60));
         this.log(chalk.bold('Moderator:'));
         this.log('');
 
-        // Display the latest moderator message with markdown formatting
-        const latestMessage = moderatorMessages.at(-1)!;
         const formattedMessage = renderMarkdown(latestMessage.message);
         this.log(formattedMessage);
 
         this.log('━'.repeat(60));
         this.log('');
         
-        // Prompt for response (even if phase changed - backend transitions fast)
+        // Prompt for response with explicit visual cue
+        this.log(chalk.cyan('Please answer the Moderator\'s questions:'));
+        this.log('');
+        
         const { response } = await inquirer.prompt([
           {
             type: 'input',
             name: 'response',
-            message: 'Your response:',
+            message: chalk.bold('Your response'),
             validate: (input: string) => {
               if (!input || input.trim().length === 0) {
                 return 'Please provide a response';
@@ -139,11 +169,31 @@ export default class Start extends Command {
         this.log('');
         this.log('📤 Submitting your response...');
         await apiClient.submitMessage(session.id, response);
+        lastAnsweredModeratorMessageKey = moderatorMessageKey;
         
         this.log(chalk.green('✓ Response submitted!'));
         this.log('');
-        this.log(chalk.dim('The Moderator will process your response.'));
-        this.log(chalk.dim('Use ') + chalk.cyan('agon answer') + chalk.dim(' to continue the conversation.'));
+        this.log('🤔 Moderator is processing your response...');
+        this.log('');
+
+        // Wait for Moderator to process and check phase again
+        await new Promise(resolve => setTimeout(resolve, 3000));
+        const latestSession = await apiClient.getSession(session.id);
+        await sessionManager.saveSession(latestSession);
+        currentPhase = latestSession.phase;
+      }
+
+      // Clarification complete
+      if (!this.isClarificationPhase(currentPhase)) {
+        this.log(chalk.green('✓ Clarification complete. Debate is starting!'));
+        this.log('');
+        this.log(chalk.dim('The council agents are now analyzing your idea...'));
+        if (flags.watch) {
+          this.log(chalk.dim('Streaming discussion below. Press Ctrl+C to stop watching.'));
+          this.log('');
+          await this.watchDebateProgress(apiClient, sessionManager, session.id);
+          return;
+        }
         this.log(chalk.dim('Use ') + chalk.cyan('agon status') + chalk.dim(' to check debate progress.'));
 
       } else if (flags.interactive) {
@@ -165,6 +215,114 @@ export default class Start extends Command {
       this.error(`❌ Failed to start session: ${errorMessage}`, {
         exit: 1
       });
+    }
+  }
+
+  private isClarificationPhase(phase: string): boolean {
+    return phase.replace(/[\s_-]/g, '').toLowerCase() === 'clarification';
+  }
+
+  private normalizeStatus(status: string): string {
+    const compact = status.replace(/[\s_-]/g, '').toLowerCase();
+    if (compact === 'completewithgaps') return 'complete_with_gaps';
+    return compact;
+  }
+
+  private normalizePhase(phase: string): string {
+    const compact = phase.replace(/[\s_-]/g, '').toLowerCase();
+    const phaseMap: Record<string, string> = {
+      'intake': 'intake',
+      'clarification': 'clarification',
+      'analysisround': 'analysis_round',
+      'critique': 'critique',
+      'synthesis': 'synthesis',
+      'targetedloop': 'targeted_loop',
+      'deliver': 'deliver',
+      'deliverwithgaps': 'deliver_with_gaps',
+      'postdelivery': 'post_delivery'
+    };
+    return phaseMap[compact] || compact;
+  }
+
+  private formatPhaseForDisplay(phase: string): string {
+    const normalized = this.normalizePhase(phase);
+    const displayMap: Record<string, string> = {
+      'intake': 'Intake',
+      'clarification': 'Clarification',
+      'analysis_round': 'Analysis Round',
+      'critique': 'Critique',
+      'synthesis': 'Synthesis',
+      'targeted_loop': 'Targeted Loop',
+      'deliver': 'Deliver',
+      'deliver_with_gaps': 'Deliver With Gaps',
+      'post_delivery': 'Post-Delivery'
+    };
+    return displayMap[normalized] || phase;
+  }
+
+  private async watchDebateProgress(
+    apiClient: AgonAPIClient,
+    sessionManager: SessionManager,
+    sessionId: string
+  ): Promise<void> {
+    const seenMessageKeys = new Set<string>();
+    let lastPhase = '';
+
+    while (true) {
+      const [session, messages] = await Promise.all([
+        apiClient.getSession(sessionId),
+        apiClient.getMessages(sessionId)
+      ]);
+
+      await sessionManager.saveSession(session);
+
+      const agentMessages = messages
+        .filter(m => m.agentId !== 'moderator')
+        .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+
+      for (const msg of agentMessages) {
+        const key = `${msg.agentId}:${msg.round}:${msg.createdAt}:${msg.message.length}`;
+        if (seenMessageKeys.has(key)) continue;
+        seenMessageKeys.add(key);
+
+        this.log('━'.repeat(60));
+        this.log(chalk.bold(`${msg.agentId} (Round ${msg.round})`));
+        this.log('');
+        this.log(renderMarkdown(msg.message));
+        this.log('');
+      }
+
+      const normalizedStatus = this.normalizeStatus(session.status);
+      const normalizedPhase = this.normalizePhase(session.phase);
+      if (normalizedPhase !== lastPhase) {
+        this.log(chalk.dim(`⏱️  Current phase: ${this.formatPhaseForDisplay(session.phase)}`));
+        this.log('');
+        lastPhase = normalizedPhase;
+      }
+
+      if (normalizedStatus === 'complete' || normalizedStatus === 'complete_with_gaps') {
+        this.log(chalk.green('✓ Debate complete. Fetching final verdict...'));
+        this.log('');
+        try {
+          const verdict = await apiClient.getArtifact(sessionId, 'verdict');
+          await sessionManager.saveArtifact(sessionId, 'verdict', verdict.content);
+
+          this.log('━'.repeat(60));
+          this.log(chalk.bold('Final Verdict'));
+          this.log('');
+          this.log(renderMarkdown(verdict.content));
+          this.log('');
+          this.log('Next steps:');
+          this.log('  • Ask follow-up questions (post-delivery chat support is the next backend step)');
+          this.log('  • View again: agon show verdict --refresh');
+        } catch {
+          this.log(chalk.yellow('⚠️  Session completed, but verdict artifact is not ready yet.'));
+          this.log('Run: agon show verdict --refresh');
+        }
+        return;
+      }
+
+      await new Promise(resolve => setTimeout(resolve, 2500));
     }
   }
 }

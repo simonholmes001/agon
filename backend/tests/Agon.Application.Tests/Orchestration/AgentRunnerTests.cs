@@ -8,6 +8,7 @@ using Agon.Domain.TruthMap;
 using Agon.Domain.TruthMap.Entities;
 using FluentAssertions;
 using NSubstitute;
+using System.Diagnostics;
 using TruthMapModel = Agon.Domain.TruthMap.TruthMap;
 
 namespace Agon.Application.Tests.Orchestration;
@@ -161,6 +162,28 @@ public class AgentRunnerTests
         gptResponse.TimedOut.Should().BeTrue();
         var claudeResponse = responses.Single(r => r.AgentId == AgentId.ClaudeAgent);
         claudeResponse.TimedOut.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task RunAnalysisRoundAsync_NonCooperativeAgent_HardTimeoutStillReturnsTimedOutResponse()
+    {
+        var claude = StubAgent(AgentId.ClaudeAgent, SuccessResponse(AgentId.ClaudeAgent));
+
+        var hungAgent = Substitute.For<ICouncilAgent>();
+        hungAgent.AgentId.Returns(AgentId.GptAgent);
+        hungAgent.ModelProvider.Returns("fake/model");
+        hungAgent.RunAsync(Arg.Any<AgentContext>(), Arg.Any<CancellationToken>())
+            .Returns(_ => new TaskCompletionSource<AgentResponse>().Task);
+
+        var runner = BuildRunner([claude, hungAgent], agentTimeoutSeconds: 1);
+        var state = BuildSessionState();
+
+        var stopwatch = Stopwatch.StartNew();
+        var responses = await runner.RunAnalysisRoundAsync(state, CancellationToken.None);
+        stopwatch.Stop();
+
+        responses.Single(r => r.AgentId == AgentId.GptAgent).TimedOut.Should().BeTrue();
+        stopwatch.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(3));
     }
 
     // ── Critique Round — cross-agent assignment ────────────────────────────────

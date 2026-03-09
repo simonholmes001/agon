@@ -35,8 +35,8 @@ public sealed class SessionRepository : ISessionRepository
             Phase = sessionState.Phase.ToString(),
             ForkedFrom = null, // TODO: Add to SessionState when fork support is added
             ForkSnapshotId = null, // TODO: Add to SessionState when fork support is added
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow
+            CreatedAt = sessionState.CreatedAt.UtcDateTime,
+            UpdatedAt = sessionState.UpdatedAt.UtcDateTime
         };
 
         _dbContext.Sessions.Add(entity);
@@ -79,8 +79,10 @@ public sealed class SessionRepository : ISessionRepository
         sessionState.CurrentRound = 0; // TODO: Store in entity if needed
         sessionState.TokensUsed = 0; // TODO: Store in entity if needed
         sessionState.TargetedLoopCount = 0; // TODO: Store in entity if needed
-        sessionState.ClarificationRoundCount = 0; // TODO: Store in entity if needed
+        sessionState.ClarificationRoundCount = entity.ClarificationRoundCount;
         sessionState.ClarificationIncomplete = false; // TODO: Store in entity if needed
+        sessionState.CreatedAt = DateTime.SpecifyKind(entity.CreatedAt, DateTimeKind.Utc);
+        sessionState.UpdatedAt = DateTime.SpecifyKind(entity.UpdatedAt, DateTimeKind.Utc);
 
         return sessionState;
     }
@@ -101,7 +103,12 @@ public sealed class SessionRepository : ISessionRepository
         // Update mutable fields
         entity.Phase = sessionState.Phase.ToString();
         entity.Status = sessionState.Status.ToString();
+        entity.ClarificationRoundCount = sessionState.ClarificationRoundCount;
         entity.UpdatedAt = DateTime.UtcNow;
+        sessionState.UpdatedAt = DateTime.SpecifyKind(entity.UpdatedAt, DateTimeKind.Utc);
+
+        // Explicitly mark entity as modified to ensure EF Core tracks the changes
+        _dbContext.Entry(entity).State = Microsoft.EntityFrameworkCore.EntityState.Modified;
 
         await _dbContext.SaveChangesAsync(cancellationToken);
     }
@@ -130,6 +137,8 @@ public sealed class SessionRepository : ISessionRepository
 
             sessionState.Phase = Enum.Parse<SessionPhase>(entity.Phase);
             sessionState.Status = Enum.Parse<SessionStatus>(entity.Status);
+            sessionState.CreatedAt = DateTime.SpecifyKind(entity.CreatedAt, DateTimeKind.Utc);
+            sessionState.UpdatedAt = DateTime.SpecifyKind(entity.UpdatedAt, DateTimeKind.Utc);
 
             sessionStates.Add(sessionState);
         }

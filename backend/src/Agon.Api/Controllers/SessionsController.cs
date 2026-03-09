@@ -279,6 +279,139 @@ public class SessionsController : ControllerBase
         return Ok(response);
     }
 
+    /// <summary>
+    /// GET /sessions/{id}/artifacts/{type} — Retrieves a synthesized artifact from the debate.
+    /// Maps artifact types to agent messages:
+    ///   verdict   → synthesizer's final message
+    ///   plan      → synthesizer's message with "plan" framing
+    ///   risks     → claims/risks from Truth Map
+    ///   assumptions → assumptions from Truth Map
+    ///   (others)  → synthesizer message with type label
+    /// </summary>
+    [HttpGet("{id}/artifacts/{type}")]
+    [ProducesResponseType(typeof(ArtifactResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetArtifact(
+        [FromRoute] Guid id,
+        [FromRoute] string type,
+        CancellationToken cancellationToken)
+    {
+        var sessionState = await _sessionService.GetAsync(id, cancellationToken);
+        if (sessionState is null)
+            return NotFound(new { error = $"Session {id} not found" });
+
+        var messages = await _conversationHistory.GetMessagesAsync(id, cancellationToken);
+
+        string? content = type.ToLowerInvariant() switch
+        {
+            // Risks and assumptions come from the Truth Map
+            "risks" => BuildRisksArtifact(sessionState.TruthMap),
+            "assumptions" => BuildAssumptionsArtifact(sessionState.TruthMap),
+
+            // Everything else comes from the synthesizer's most recent message
+            _ => messages
+                .Where(m => m.AgentId == "synthesizer")
+                .OrderByDescending(m => m.CreatedAt)
+                .Select(m => m.Message)
+                .FirstOrDefault()
+        };
+
+        if (string.IsNullOrWhiteSpace(content))
+        {
+            // Fall back to any agent message if synthesizer hasn't run yet
+            var anyMessage = messages
+                .Where(m => m.AgentId != "moderator")
+                .OrderByDescending(m => m.CreatedAt)
+                .Select(m => $"**{m.AgentId}** (Round {m.Round}):\n\n{m.Message}")
+                .FirstOrDefault();
+
+            if (anyMessage is null)
+            {
+                return NotFound(new
+                {
+                    error = $"Artifact '{type}' is not yet available. The debate may still be in progress.",
+                    hint = "Run 'agon status' to check debate progress."
+                });
+            }
+
+            content = anyMessage;
+        }
+
+        return Ok(new ArtifactResponse(
+            Type: type,
+            Content: content,
+            Version: sessionState.TruthMap.Version,
+            CreatedAt: DateTimeOffset.UtcNow));
+    }
+
+    /// <summary>
+    /// GET /sessions/{id}/artifacts — Lists available artifacts for a session.
+    /// </summary>
+    [HttpGet("{id}/artifacts")]
+    [ProducesResponseType(typeof(IReadOnlyList<ArtifactResponse>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> ListArtifacts(
+        [FromRoute] Guid id,
+        CancellationToken cancellationToken)
+    {
+        var messages = await _conversationHistory.GetMessagesAsync(id, cancellationToken);
+        var sessionState = await _sessionService.GetAsync(id, cancellationToken);
+        if (sessionState is null)
+            return NotFound(new { error = $"Session {id} not found" });
+
+        var artifacts = new List<ArtifactResponse>();
+
+        var synthMessage = messages
+            .Where(m => m.AgentId == "synthesizer")
+            .OrderByDescending(m => m.CreatedAt)
+            .FirstOrDefault();
+
+        if (synthMessage is not null)
+        {
+            var now = synthMessage.CreatedAt;
+            artifacts.Add(new ArtifactResponse("verdict", synthMessage.Message, sessionState.TruthMap.Version, now));
+            artifacts.Add(new ArtifactResponse("plan", synthMessage.Message, sessionState.TruthMap.Version, now));
+        }
+
+        var risksContent = BuildRisksArtifact(sessionState.TruthMap);
+        if (!string.IsNullOrWhiteSpace(risksContent))
+            artifacts.Add(new ArtifactResponse("risks", risksContent, sessionState.TruthMap.Version, DateTimeOffset.UtcNow));
+
+        var assumptionsContent = BuildAssumptionsArtifact(sessionState.TruthMap);
+        if (!string.IsNullOrWhiteSpace(assumptionsContent))
+            artifacts.Add(new ArtifactResponse("assumptions", assumptionsContent, sessionState.TruthMap.Version, DateTimeOffset.UtcNow));
+
+        return Ok(artifacts);
+    }
+
+    private static string BuildRisksArtifact(Domain.TruthMap.TruthMap truthMap)
+    {
+        if (!truthMap.Risks.Any()) return string.Empty;
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine("# Risk Analysis\n");
+        foreach (var risk in truthMap.Risks)
+        {
+            sb.AppendLine($"## Risk: {risk.Id}");
+            sb.AppendLine($"**Severity:** {risk.Severity}  |  **Likelihood:** {risk.Likelihood}  |  **Category:** {risk.Category}");
+            sb.AppendLine($"\n{risk.Text}\n");
+            if (!string.IsNullOrWhiteSpace(risk.Mitigation))
+                sb.AppendLine($"**Mitigation:** {risk.Mitigation}\n");
+        }
+        return sb.ToString();
+    }
+
+    private static string BuildAssumptionsArtifact(Domain.TruthMap.TruthMap truthMap)
+    {
+        if (!truthMap.Assumptions.Any()) return string.Empty;
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine("# Assumptions\n");
+        foreach (var assumption in truthMap.Assumptions)
+        {
+            sb.AppendLine($"- **{assumption.Text}**");
+            sb.AppendLine($"  Status: {assumption.Status} | Validation: {assumption.ValidationStep}\n");
+        }
+        return sb.ToString();
+    }
+
     private static SessionResponse MapToResponse(Application.Models.SessionState sessionState)
     {
         return new SessionResponse(
@@ -289,7 +422,7 @@ public class SessionsController : ControllerBase
             sessionState.CurrentRound,
             sessionState.TokensUsed,
             sessionState.CreatedAt,
-            sessionState.CreatedAt); // TODO: Add UpdatedAt to SessionState
+            sessionState.UpdatedAt);
     }
 }
 
@@ -322,4 +455,10 @@ public record MessageResponse(
     string AgentId,
     string Message,
     int Round,
+    DateTimeOffset CreatedAt);
+
+public record ArtifactResponse(
+    string Type,
+    string Content,
+    int Version,
     DateTimeOffset CreatedAt);

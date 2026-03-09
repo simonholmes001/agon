@@ -114,7 +114,14 @@ if (!builder.Environment.IsEnvironment("Testing"))
 builder.Services.AddScoped<IEventBroadcaster, SignalREventBroadcaster>();
 
 // ── Application Layer Services ──────────────────────────────────────────
-builder.Services.AddScoped<ISessionService, SessionService>();
+// SessionService registered via factory so Lazy<IOrchestrator> is resolved from DI
+// when available (non-Testing env), and null otherwise (Testing env).
+builder.Services.AddScoped<ISessionService>(sp => new SessionService(
+    sp.GetRequiredService<ISessionRepository>(),
+    sp.GetRequiredService<ITruthMapRepository>(),
+    sp.GetRequiredService<ISnapshotStore>(),
+    sp.GetService<IEventBroadcaster>(),
+    sp.GetService<Lazy<IOrchestrator>>()));
 builder.Services.AddScoped<ConversationHistoryService>();
 
 // ── Domain: RoundPolicy (Session Configuration) ─────────────────────────

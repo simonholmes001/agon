@@ -25,7 +25,8 @@ public sealed class SessionState
     public bool ClarificationIncomplete { get; set; }
     public TruthMapModel TruthMap { get; set; } = default!;
     public DebateBrief? DebateBrief { get; set; }
-    public DateTimeOffset CreatedAt { get; init; }
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
 
     /// <summary>Messages from the most recent analysis round, keyed by agent ID.</summary>
     public Dictionary<string, string> LastRoundMessages { get; } = new();
@@ -55,7 +56,8 @@ public sealed class SessionState
             FrictionLevel = frictionLevel,
             ResearchToolsEnabled = researchToolsEnabled,
             TruthMap = initialTruthMap,
-            CreatedAt = DateTimeOffset.UtcNow
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
         };
 
     // Legacy factory method for backward compatibility
