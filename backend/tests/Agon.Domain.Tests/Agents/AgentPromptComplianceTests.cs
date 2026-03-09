@@ -56,6 +56,19 @@ public class AgentPromptComplianceTests
             "Synthesizer prompt must explicitly mention validation_step requirement");
     }
 
+    [Fact]
+    public void SynthesizerPrompt_ShouldInstructAgent_ToProduceDetailedPrdWhenRequested()
+    {
+        var prompt = AgentSystemPrompts.Synthesizer;
+        var lowerPrompt = prompt.ToLowerInvariant();
+
+        lowerPrompt.Should().Contain("full prd",
+            "when users request a PRD, the synthesizer should generate a full draft");
+
+        lowerPrompt.Should().Contain("not just an outline",
+            "the prompt should discourage shallow PRD outputs");
+    }
+
     // ── Patch schema compliance ──────────────────────────────────────────────
 
     [Theory]

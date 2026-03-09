@@ -15,7 +15,10 @@ import { AgonAPIClient } from '../../src/api/agon-client.js';
 import { SessionManager } from '../../src/state/session-manager.js';
 import { ConfigManager } from '../../src/state/config-manager.js';
 import type { SessionResponse, Message } from '../../src/api/types.js';
-import { getLatestResponseMessage } from '../../src/commands/answer.js';
+import {
+  getLatestPostDeliveryAssistantMessage,
+  getLatestResponseMessage
+} from '../../src/commands/answer.js';
 
 // Mock dependencies
 vi.mock('../../src/api/agon-client.js');
@@ -170,6 +173,28 @@ describe('agon answer', () => {
 
       expect(selected?.agentId).toBe('post_delivery_assistant');
       expect(selected?.message).toBe('Revised PRD section');
+    });
+
+    it('should not fall back to stale non-assistant messages in post-delivery mode', () => {
+      const messages: Message[] = [
+        { agentId: 'synthesizer', message: 'Final verdict', round: 2, createdAt: '2026-03-09T10:10:00Z' },
+        { agentId: 'gpt_agent', message: 'Analysis output', round: 2, createdAt: '2026-03-09T10:11:00Z' }
+      ];
+
+      const selected = getLatestResponseMessage('PostDelivery', messages);
+
+      expect(selected).toBeUndefined();
+    });
+
+    it('should return only new post-delivery assistant messages after a known timestamp', () => {
+      const messages: Message[] = [
+        { agentId: 'post_delivery_assistant', message: 'Older reply', round: 2, createdAt: '2026-03-09T10:12:00Z' },
+        { agentId: 'post_delivery_assistant', message: 'New reply', round: 2, createdAt: '2026-03-09T10:15:00Z' }
+      ];
+
+      const selected = getLatestPostDeliveryAssistantMessage(messages, '2026-03-09T10:13:00Z');
+
+      expect(selected?.message).toBe('New reply');
     });
   });
 });

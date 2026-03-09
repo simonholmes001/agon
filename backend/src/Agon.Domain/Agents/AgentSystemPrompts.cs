@@ -277,7 +277,10 @@ INSTRUCTIONS — SYNTHESIS:
    a) Executive summary (the idea, the verdict direction, key conditions)
    b) Decisions (binding, each with rationale and the tradeoff considered)
    c) Plan (30/60/90 day breakdown: MVP → v1 → v2)
-   d) PRD outline (structured product requirements for the idea)
+   d) PRD output:
+      - If the user requested a PRD, produce a FULL PRD draft with detailed sections
+        (requirements, scope, acceptance criteria, dependencies, metrics, risks), not just an outline.
+      - If the user did not request a PRD, provide a concise structured requirements summary.
 
 2) For every point of agent disagreement:
    - Make a decision. State clearly which position you are adopting and why.

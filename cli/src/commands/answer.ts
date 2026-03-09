@@ -32,11 +32,26 @@ export function getLatestResponseMessage(phase: string, messages: Message[]): Me
   }
 
   if (normalizedPhase === 'deliver' || normalizedPhase === 'deliverwithgaps' || normalizedPhase === 'postdelivery') {
-    return ordered.find(m => m.agentId === 'post_delivery_assistant')
-      ?? ordered.find(m => m.agentId !== 'moderator');
+    return ordered.find(m => m.agentId === 'post_delivery_assistant');
   }
 
   return ordered.find(m => m.agentId !== 'moderator');
+}
+
+export function getLatestPostDeliveryAssistantMessage(
+  messages: Message[],
+  afterCreatedAt?: string
+): Message | undefined {
+  const ordered = [...messages]
+    .filter(m => m.agentId === 'post_delivery_assistant')
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+  if (!afterCreatedAt) {
+    return ordered[0];
+  }
+
+  const threshold = new Date(afterCreatedAt).getTime();
+  return ordered.find(m => new Date(m.createdAt).getTime() > threshold);
 }
 
 export default class Answer extends Command {
@@ -81,6 +96,8 @@ export default class Answer extends Command {
       // Get API client
       const config = await this.configManager.load();
       const apiClient = new AgonAPIClient(config.apiUrl);
+      const messagesBeforeSubmit = await apiClient.getMessages(sessionId);
+      const previousAssistantMessage = getLatestPostDeliveryAssistantMessage(messagesBeforeSubmit);
 
       // Submit response
       this.logger.info('Submitting response', { sessionId, responseLength: response.length });
@@ -92,7 +109,7 @@ export default class Answer extends Command {
       console.log(chalk.green('✓ Response submitted\n'));
 
       const messages = await apiClient.getMessages(sessionId);
-      const latestMessage = getLatestResponseMessage(updatedSession.phase, messages);
+      let latestMessage = getLatestResponseMessage(updatedSession.phase, messages);
 
       if (this.isClarificationPhase(updatedSession.phase)) {
         if (latestMessage) {
@@ -108,6 +125,19 @@ export default class Answer extends Command {
       }
 
       if (this.isPostDeliveryPhase(updatedSession.phase)) {
+        latestMessage = getLatestPostDeliveryAssistantMessage(
+          messages,
+          previousAssistantMessage?.createdAt
+        );
+
+        if (!latestMessage) {
+          latestMessage = await this.waitForPostDeliveryResponse(
+            apiClient,
+            sessionId,
+            previousAssistantMessage?.createdAt
+          );
+        }
+
         if (latestMessage) {
           console.log(chalk.bold('Assistant:\n'));
           console.log(latestMessage.message);
@@ -144,5 +174,24 @@ export default class Answer extends Command {
     return normalized === 'deliver'
       || normalized === 'deliverwithgaps'
       || normalized === 'postdelivery';
+  }
+
+  private async waitForPostDeliveryResponse(
+    apiClient: AgonAPIClient,
+    sessionId: string,
+    previousCreatedAt?: string
+  ): Promise<Message | undefined> {
+    const deadline = Date.now() + 15000;
+
+    while (Date.now() < deadline) {
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      const messages = await apiClient.getMessages(sessionId);
+      const candidate = getLatestPostDeliveryAssistantMessage(messages, previousCreatedAt);
+      if (candidate) {
+        return candidate;
+      }
+    }
+
+    return undefined;
   }
 }
