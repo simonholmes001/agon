@@ -88,9 +88,9 @@ export class AgonAPIClient {
       );
     }
 
-    this.logger.info('Creating new session', { ideaLength: request.idea.length });
+    this.logger.debug('Creating new session', { ideaLength: request.idea.length });
     const response = await this.client.post<SessionResponse>('/sessions', request);
-    this.logger.info('Session created successfully', { sessionId: response.data.id });
+    this.logger.debug('Session created successfully', { sessionId: response.data.id });
     return response.data;
   }
 
@@ -106,9 +106,9 @@ export class AgonAPIClient {
    * Start a session (begin debate/clarification)
    */
   async startSession(sessionId: string): Promise<void> {
-    this.logger.info('Starting session', { sessionId });
+    this.logger.debug('Starting session', { sessionId });
     await this.client.post(`/sessions/${sessionId}/start`);
-    this.logger.info('Session started successfully', { sessionId });
+    this.logger.debug('Session started successfully', { sessionId });
   }
 
   /**
@@ -180,14 +180,14 @@ export class AgonAPIClient {
       );
     }
 
-    this.logger.info('Submitting message', { sessionId, contentLength: content.length });
+    this.logger.debug('Submitting message', { sessionId, contentLength: content.length });
     const request: SubmitMessageRequest = { content };
     const response = await this.client.post<SessionResponse | null>(
       `/sessions/${sessionId}/messages`,
       request,
       { timeout: 120000 } // Follow-up responses can take longer than default request timeout.
     );
-    this.logger.info('Message submitted successfully', { sessionId });
+    this.logger.debug('Message submitted successfully', { sessionId });
 
     // Some backend paths return 202 Accepted with no response body.
     // In that case, fetch the current session state explicitly.

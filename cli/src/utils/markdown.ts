@@ -36,9 +36,10 @@ export function normalizeMarkdownStructure(markdown: string): string {
 
   const lines = markdown.split('\n');
   const normalized: string[] = [];
-  const numberedPattern = /^(\d+)\.\s+(.+)$/;
-  const bulletPattern = /^[-*]\s+(.+)$/;
-  const continuationPattern = /^(and|or|also|plus|including|where)\b/i;
+  const numberedPattern = /^(\d+)[.)]\s+(.+)$/;
+  const bulletPattern = /^[-*•●▪◦∙·]\s+(.+)$/;
+  const continuationPattern = /^(and|or|also|plus|including|where|pick|choose|reply|current|desired|what(?:'s| is)?|budget|timeline|tech|non-negotiables?)\b/i;
+  const listTerminationPattern = /^(once|after that|after you answer|then i(?:'|)ll|thanks)\b/i;
   let insideNumberedList = false;
   let numberedItemCounter = 0;
   let pendingBlank = false;
@@ -100,7 +101,7 @@ export function normalizeMarkdownStructure(markdown: string): string {
     if (insideNumberedList) {
       const previous = normalized.at(-1) ?? '';
       const followsSubItem = /^\s+-\s+/.test(previous) || /^\s{5,}\S+/.test(previous);
-      if (followsSubItem) {
+      if (followsSubItem && !listTerminationPattern.test(trimmed)) {
         normalized.push(`     ${trimmed}`);
         continue;
       }
@@ -132,9 +133,9 @@ export function renderMarkdown(markdown: string): string {
   
   try {
     const normalized = normalizeMarkdownStructure(markdown);
-    // Escape ordered-list prefixes so marked-terminal doesn't auto-renumber
-    // and collapse spacing in moderator-style question blocks.
-    const safeForRenderer = normalized.replace(/^(\d+)\.\s+/gm, '$1\\. ');
+    // Escape ordered-list prefixes (including indented items) so marked-terminal
+    // doesn't auto-renumber and collapse spacing in moderator-style question blocks.
+    const safeForRenderer = normalized.replace(/^(\s*)(\d+)([.)])\s+/gm, '$1$2\\$3 ');
     const rendered = marked(safeForRenderer) as string;
     return rendered.trim();
   } catch {

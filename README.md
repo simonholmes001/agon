@@ -34,24 +34,24 @@ Unlike a linear "input → debate → output" pipeline, Agon maintains a continu
 Agon/
 ├── backend/              # .NET 9 backend
 │   ├── src/
-│   │   ├── Agon.Domain/              # ✅ Pure business logic (66 tests)
-│   │   ├── Agon.Application/         # ✅ Orchestration & use-cases (56 tests)
-│   │   └── Agon.Infrastructure/      # ✅ Persistence, MAF, SignalR (42 tests)
+│   │   ├── Agon.Domain/              # Pure business logic
+│   │   ├── Agon.Application/         # Orchestration & use-cases
+│   │   ├── Agon.Infrastructure/      # Persistence, MAF, SignalR
+│   │   └── Agon.Api/                 # REST + SignalR host
 │   ├── tests/
 │   │   ├── Agon.Domain.Tests/
 │   │   ├── Agon.Application.Tests/
-│   │   └── Agon.Infrastructure.Tests/
+│   │   ├── Agon.Infrastructure.Tests/
+│   │   └── Agon.Integration.Tests/
 │   └── Agon.sln
 │
-├── frontend/             # Next.js App Router frontend
-│   ├── app/              # App Router pages
-│   ├── components/       # React components (to be created)
-│   └── lib/              # Utilities, logger, API client (to be created)
+├── cli/                  # TypeScript oclif CLI + interactive shell
+├── frontend/             # Next.js App Router frontend (scaffold/WIP)
 │
 └── .github/
+    ├── workflows/        # CI + badge automation
+    ├── scripts/          # Badge update script
     └── instructions/     # Architecture & coding rules
-
-Total Tests: 164 passing (164/164)
 ```
 
 ---
@@ -75,7 +75,7 @@ The backend follows **Clean Architecture** with strict layer separation:
 
 ```
 ┌─────────────────────────────────────┐
-│         API Layer (future)          │  ← HTTP endpoints, middleware
+│         API Layer                    │  ← HTTP endpoints, middleware
 │  ┌───────────────────────────────┐  │
 │  │   Infrastructure Layer        │  │  ← Database, SignalR, MAF, Redis
 │  │  ┌─────────────────────────┐  │  │
@@ -98,21 +98,18 @@ cd backend
 dotnet test
 ```
 
-**Current status:** ✅ 164/164 tests passing
+**Current status:** See the `Tests` badge at the top of this README (auto-updated on `main`).
 
 ### Test Coverage
 
-| Layer | Tests | Status |
-|---|---|---|
-| Domain | 66 | ✅ Complete |
-| Application | 56 | ✅ Complete |
-| Infrastructure | 42 | ✅ Complete |
-| - AgentResponseParser | 8 | ✅ |
-| - MafCouncilAgent | 3 | ✅ |
-| - TruthMapRepository | 8 | ✅ |
-| - SessionRepository | 9 | ✅ |
-| - RedisSnapshotStore | 7 | ✅ |
-| - SignalREventBroadcaster | 8 | ✅ |
+Coverage and aggregate test counts are maintained by CI badges at the top of this README.
+
+Backend test projects:
+
+- `backend/tests/Agon.Domain.Tests`
+- `backend/tests/Agon.Application.Tests`
+- `backend/tests/Agon.Infrastructure.Tests`
+- `backend/tests/Agon.Integration.Tests`
 
 ### Key Technologies
 
@@ -245,7 +242,7 @@ npm run build
 - **Domain**: Pure unit tests (no mocks, blazing fast)
 - **Application**: Unit tests with mocked repositories
 - **Infrastructure**: Integration tests with in-memory DB and mocked external services
-- **Frontend**: (to be added) Component tests with React Testing Library
+- **Frontend**: UI tests are currently optional/WIP and are not required CI/merge gates
 
 ---
 
@@ -266,35 +263,33 @@ Full architecture, round policy, agent roster, and coding guidelines are in `.gi
 
 ### ✅ Completed
 
-- **Domain Layer**: All business logic, engines, validators (66 tests passing)
-- **Application Layer**: Orchestrator, AgentRunner, SessionService (56 tests passing)
-- **Infrastructure Layer**: PostgreSQL, Redis, SignalR, MAF integration (42 tests passing)
-- **Root .gitignore**: Consolidated ignore patterns for monorepo
-- **TDD Discipline**: 164/164 tests passing, all following RED-GREEN-REFACTOR
+- **Backend API layer**: Session/message/artifact endpoints are implemented in `Agon.Api`.
+- **Debate orchestration**: `Orchestrator` + `AgentRunner` are active and tested.
+- **CLI shell**: `agon` default interactive shell with slash commands and follow-up flow.
+- **Root .gitignore**: Consolidated ignore patterns for monorepo.
+- **TDD discipline**: backend + CLI test suites run in local hooks and CI.
 
 ### 🚧 In Progress
 
-- **API Layer**: ASP.NET Core Web API with REST endpoints (not started)
-- **Frontend**: Next.js UI with SignalR client (not started)
+- **Frontend**: Next.js UI iteration and backend integration.
 
 ### 📋 Next Steps
 
-1. **API Layer** (backend):
-   - Create `Agon.Api` project
-   - Implement REST endpoints (`POST /sessions`, `GET /sessions/{id}/truthmap`, etc.)
-   - Add SignalR hub registration
-   - Configure DI container with all repositories and services
-
-2. **Frontend**:
+1. **Frontend**:
    - Scaffold core layout (Thread View + Truth Map Drawer)
    - Implement SignalR client connection manager
    - Build session creation flow
    - Implement real-time agent token streaming
 
-3. **Integration**:
+2. **Integration**:
    - Connect frontend to backend API
    - End-to-end testing with real LLM providers
    - Performance optimization (streaming latency, patch application)
+
+3. **CLI polish**:
+   - Continue shell UX refinements (formatting, streaming indicators, guidance text)
+   - Expand command help and parameter controls
+   - Harden long-running follow-up/debate visibility behavior
 
 ---
 
@@ -321,3 +316,75 @@ Proprietary — All rights reserved.
 ## Contact
 
 For questions or contributions, contact the development team.
+
+---
+
+## Addendum (March 2026): Backend + CLI Functionality
+
+[![CI](https://github.com/simonholmes001/agon/actions/workflows/ci.yaml/badge.svg)](https://github.com/simonholmes001/agon/actions/workflows/ci.yaml)
+[![Update Badges](https://github.com/simonholmes001/agon/actions/workflows/update-badges.yaml/badge.svg)](https://github.com/simonholmes001/agon/actions/workflows/update-badges.yaml)
+
+This addendum documents the currently implemented runtime capabilities and how README test/coverage badges are maintained.
+
+### Backend (Agon.Api) — Implemented Capabilities
+
+- Session lifecycle endpoints are implemented in `backend/src/Agon.Api/Controllers/SessionsController.cs`:
+  - `POST /sessions`
+  - `GET /sessions/{id}`
+  - `POST /sessions/{id}/start`
+  - `POST /sessions/{id}/messages`
+  - `GET /sessions/{id}/messages`
+  - `GET /sessions/{id}/truthmap`
+  - `GET /sessions/{id}/snapshots`
+  - `GET /sessions/{id}/artifacts/{type}`
+  - `GET /sessions/{id}/artifacts`
+- Debate orchestration is wired through `Orchestrator` and `AgentRunner` in `backend/src/Agon.Application/Orchestration/`.
+- Real-time signaling is enabled through SignalR (`/hubs/debate`) in `backend/src/Agon.Api/Program.cs`.
+- Artifact synthesis currently includes verdict/plan plus derived risks/assumptions in controller output.
+
+### CLI — Implemented Capabilities
+
+- Command-driven usage:
+  - `agon start "<idea>"`
+  - `agon follow-up "<message>"` (alias of `answer`)
+  - `agon status`
+  - `agon show <artifact>`
+  - `agon sessions`
+  - `agon resume <session-id>`
+  - `agon config`
+- Default interactive shell:
+  - Running `agon` (no subcommand) launches a codex-style interactive shell.
+  - Supported slash commands:
+    - `/help`
+    - `/params`
+    - `/set <apiUrl|defaultFriction|researchEnabled|logLevel> <value>`
+    - `/new`
+    - `/session <session-id>`
+    - `/status [session-id]`
+    - `/show <artifact> [--refresh] [--raw]`
+    - `/follow-up <message>`
+    - `/exit` (alias: `/quit`, `/eot`)
+
+### Test + Coverage Badges (Auto-Updated on `main`)
+
+- README badges are automatically refreshed on every push/merge to `main` by:
+  - Workflow: `.github/workflows/update-badges.yaml`
+  - Script: `.github/scripts/update-readme-badges.sh`
+- The workflow:
+  1. Runs CLI tests with coverage (`vitest --coverage` in `cli/`)
+  2. Runs backend tests (`dotnet test`)
+  3. Computes total passing test count
+  4. Updates the `Tests` badge and `Coverage` badge in `README.md`
+  5. Commits and pushes badge changes back to `main` (if changed)
+- Coverage percentage shown in the README badge is the line coverage percentage parsed from `cli/coverage/coverage-summary.json`.
+
+### Local Hooks and Quality Gates
+
+- Local pre-commit test gate is available at `.githooks/pre-commit` and runs:
+  - CLI tests
+  - backend tests
+- To enable local git hooks for this repo:
+
+```bash
+git config core.hooksPath .githooks
+```

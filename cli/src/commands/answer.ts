@@ -18,43 +18,15 @@ import chalk from 'chalk';
 import ora from 'ora';
 import type { Message, SessionResponse } from '../api/types.js';
 import { renderMarkdown } from '../utils/markdown.js';
+import {
+  getLatestPostDeliveryAssistantMessage,
+  getLatestResponseMessage,
+  isClarificationPhase,
+  isPostDeliveryPhase,
+  normalizePhase
+} from '../utils/session-flow.js';
 
-export function normalizePhase(phase: string): string {
-  return phase.replace(/[\s_-]/g, '').toLowerCase();
-}
-
-export function getLatestResponseMessage(phase: string, messages: Message[]): Message | undefined {
-  const normalizedPhase = normalizePhase(phase);
-  const ordered = [...messages].sort(
-    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-  );
-
-  if (normalizedPhase === 'clarification') {
-    return ordered.find(m => m.agentId === 'moderator');
-  }
-
-  if (normalizedPhase === 'deliver' || normalizedPhase === 'deliverwithgaps' || normalizedPhase === 'postdelivery') {
-    return ordered.find(m => m.agentId === 'post_delivery_assistant');
-  }
-
-  return ordered.find(m => m.agentId !== 'moderator');
-}
-
-export function getLatestPostDeliveryAssistantMessage(
-  messages: Message[],
-  afterCreatedAt?: string
-): Message | undefined {
-  const ordered = [...messages]
-    .filter(m => m.agentId === 'post_delivery_assistant')
-    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-
-  if (!afterCreatedAt) {
-    return ordered[0];
-  }
-
-  const threshold = new Date(afterCreatedAt).getTime();
-  return ordered.find(m => new Date(m.createdAt).getTime() > threshold);
-}
+export { normalizePhase, getLatestResponseMessage, getLatestPostDeliveryAssistantMessage };
 
 export default class Answer extends Command {
   static override readonly description = 'Submit a message for clarification or post-delivery follow-up';
@@ -130,7 +102,7 @@ export default class Answer extends Command {
       const messages = await apiClient.getMessages(sessionId);
       let latestMessage = getLatestResponseMessage(updatedSession.phase, messages);
 
-      if (this.isClarificationPhase(updatedSession.phase)) {
+      if (isClarificationPhase(updatedSession.phase)) {
         if (latestMessage) {
           this.renderMessagePanel('Moderator', latestMessage.message, 'cyan');
           console.log('\n' + chalk.dim('Answer with:'));
@@ -142,7 +114,7 @@ export default class Answer extends Command {
         return;
       }
 
-      if (this.isPostDeliveryPhase(updatedSession.phase)) {
+      if (isPostDeliveryPhase(updatedSession.phase)) {
         latestMessage = getLatestPostDeliveryAssistantMessage(
           messages,
           previousAssistantMessage?.createdAt
@@ -172,7 +144,7 @@ export default class Answer extends Command {
         return;
       }
 
-      if (!this.isClarificationPhase(updatedSession.phase)) {
+      if (!isClarificationPhase(updatedSession.phase)) {
         console.log(chalk.green('✓ Clarification complete!'));
         console.log(chalk.blue('🔄 Starting debate phase...\n'));
         console.log('The council agents are now analyzing your idea.');
@@ -185,17 +157,6 @@ export default class Answer extends Command {
       console.error(formatError(error as Error));
       this.exit(1);
     }
-  }
-
-  private isClarificationPhase(phase: string): boolean {
-    return normalizePhase(phase) === 'clarification';
-  }
-
-  private isPostDeliveryPhase(phase: string): boolean {
-    const normalized = normalizePhase(phase);
-    return normalized === 'deliver'
-      || normalized === 'deliverwithgaps'
-      || normalized === 'postdelivery';
   }
 
   private async waitForPostDeliveryResponse(

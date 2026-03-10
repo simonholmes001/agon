@@ -1,18 +1,5 @@
 #!/bin/sh
 
-echo "🧪 Running frontend tests before commit..."
-cd frontend && npm run test
-
-if [ $? -ne 0 ]; then
-  echo "❌ Frontend tests failed. Commit aborted."
-  exit 1
-fi
-
-echo "✅ Frontend tests passed."
-
-# Return to repo root
-cd ..
-
 # CLI tests
 if [ -f "cli/package.json" ]; then
   echo ""

@@ -146,10 +146,91 @@ describe('Markdown Renderer', () => {
         '2. Second question',
         '   - must-have A',
         '   - must-have B',
-        '     Pick 1-2 as "must-have."',
+        '   Pick 1-2 as "must-have."',
         '',
         '3. Third question'
       ].join('\n'));
+    });
+
+    it('should keep numbered question blocks progressing as 1, 2, 3 in moderator prompts', () => {
+      const text = [
+        '1. What exactly does "categorize" mean for them?',
+        'Pick the primary job-to-be-done:',
+        '',
+        '* A) Auto-tagging',
+        '* B) Organizing by client/project/shoot',
+        '',
+        '1. Where do the images live and how will photographers use the product?',
+        '',
+        '* Current tools: Lightroom / Capture One',
+        '* Desired form factor: desktop app, web app, or plugin',
+        '',
+        '1. Constraints you do have (need at least budget + timeline):',
+        '',
+        '* What\'s your budget range?',
+        '* What\'s your timeline?',
+        '',
+        'Once you answer these, I\'ll propose candidate stacks.'
+      ].join('\n');
+
+      const normalized = normalizeMarkdownStructure(text);
+      expect(normalized).toContain('1. What exactly does "categorize" mean for them?');
+      expect(normalized).toContain('2. Where do the images live and how will photographers use the product?');
+      expect(normalized).toContain('3. Constraints you do have (need at least budget + timeline):');
+      expect(normalized).not.toContain('\n1. Where do the images live');
+      expect(normalized).not.toContain('\n1. Constraints you do have');
+    });
+
+    it('should preserve 1/2/3 numbering for golden-triangle clarification blocks with nested bullets', () => {
+      const text = [
+        'To shape this into a PRD-ready Debate Brief, I need to pin down the Golden Triangle.',
+        '',
+        '1. What exactly does "categorize" mean for them?',
+        'Pick the primary job-to-be-done (or describe in your words):',
+        '',
+        '* A) Auto-tagging (people/objects/scenes) for search',
+        '* B) Organizing by client/project/shoot + metadata hygiene',
+        '',
+        '1. Where do the images live and how will photographers use the product?',
+        '',
+        '* Current tools: Lightroom / Capture One / Finder/Explorer folders',
+        '* Desired form factor: desktop app, web app, or Lightroom plugin?',
+        '',
+        '1. Constraints you do have (need at least budget + timeline):',
+        '',
+        '* What’s your budget range for an MVP?',
+        '* What’s your timeline?',
+        '',
+        'Once you answer these, I’ll propose candidate stacks.'
+      ].join('\n');
+
+      const normalized = normalizeMarkdownStructure(text);
+      expect(normalized).toContain('1. What exactly does "categorize" mean for them?');
+      expect(normalized).toContain('2. Where do the images live and how will photographers use the product?');
+      expect(normalized).toContain('3. Constraints you do have (need at least budget + timeline):');
+      expect(normalized).not.toContain('\n1. Where do the images live');
+      expect(normalized).not.toContain('\n1. Constraints you do have');
+    });
+
+    it('should keep numbering progression when option bullets use unicode bullet characters', () => {
+      const text = [
+        '1. Primary persona',
+        '• Examples: A, B, C',
+        '',
+        '1. Success metric definition',
+        '• e.g., 1,000 users/month',
+        '',
+        '1. Constraints you\'ve left vague',
+        '• Budget',
+        '• Timeline'
+      ].join('\n');
+
+      const normalized = normalizeMarkdownStructure(text);
+      expect(normalized).toContain('1. Primary persona');
+      expect(normalized).toContain('2. Success metric definition');
+      expect(normalized).toContain('3. Constraints you\'ve left vague');
+      expect(normalized).not.toContain('\n1. Success metric definition');
+      expect(normalized).not.toContain('\n1. Constraints you\'ve left vague');
     });
   });
 
@@ -173,6 +254,36 @@ describe('Markdown Renderer', () => {
       expect(rendered).toContain('3. Constraints');
       expect(rendered).not.toContain('1. Constraints');
       expect(rendered).toMatch(/1\. Primary persona[\s\S]*\n\n2\. AI scope/);
+    });
+
+    it('should preserve numbering for indented ordered items that restart as 1 in source', () => {
+      const text = [
+        '   1. Timeline: pick one',
+        '   2. Primary audience',
+        '',
+        '   1. Downloads + accounts (scope)'
+      ].join('\n');
+
+      const rendered = stripAnsi(renderMarkdown(normalizeMarkdownStructure(text)));
+      expect(rendered).toContain('1. Timeline: pick one');
+      expect(rendered).toContain('2. Primary audience');
+      expect(rendered).toContain('3. Downloads + accounts (scope)');
+      expect(rendered).not.toContain('1. Downloads + accounts (scope)');
+    });
+
+    it('should preserve ordered list progression when source uses parenthesized markers', () => {
+      const text = [
+        '1) Primary persona',
+        '2) AI scope',
+        '',
+        '1) Constraints'
+      ].join('\n');
+
+      const rendered = stripAnsi(renderMarkdown(text));
+      expect(rendered).toContain('1. Primary persona');
+      expect(rendered).toContain('2. AI scope');
+      expect(rendered).toContain('3. Constraints');
+      expect(rendered).not.toContain('1. Constraints');
     });
   });
 

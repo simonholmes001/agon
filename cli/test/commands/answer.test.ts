@@ -220,6 +220,18 @@ describe('agon answer', () => {
       expect(selected).toBeUndefined();
     });
 
+    it('should ignore user-authored messages when selecting latest debate response', () => {
+      const messages: Message[] = [
+        { agentId: 'gpt_agent', message: 'Previous analysis', round: 0, createdAt: '2026-03-09T10:10:00Z' },
+        { agentId: 'user', message: 'My follow-up answer', round: 0, createdAt: '2026-03-09T10:11:00Z' }
+      ];
+
+      const selected = getLatestResponseMessage('AnalysisRound', messages);
+
+      expect(selected?.agentId).toBe('gpt_agent');
+      expect(selected?.message).toBe('Previous analysis');
+    });
+
     it('should return only new post-delivery assistant messages after a known timestamp', () => {
       const messages: Message[] = [
         { agentId: 'post_delivery_assistant', message: 'Older reply', round: 2, createdAt: '2026-03-09T10:12:00Z' },

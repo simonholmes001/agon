@@ -27,14 +27,14 @@ jobs:
         with:
           node-version: 20
           cache: npm
-          cache-dependency-path: frontend/package-lock.json
+          cache-dependency-path: cli/package-lock.json
 
-      - name: Install frontend dependencies
+      - name: Install CLI dependencies
         run: npm ci
-        working-directory: frontend
+        working-directory: cli
 
-      - name: Run frontend tests with coverage
-        id: frontend-tests
+      - name: Run CLI tests with coverage
+        id: cli-tests
         run: |
           OUTPUT=$(npx vitest run --coverage --reporter=verbose 2>&1)
           echo "$OUTPUT"
@@ -42,7 +42,7 @@ jobs:
           CLEAN=$(echo "$OUTPUT" | sed 's/\x1b\[[0-9;]*m//g')
           TEST_COUNT=$(echo "$CLEAN" | grep -E 'Tests\s+[0-9]+\s+passed' | grep -oE '[0-9]+' | head -1 || echo "0")
           echo "test_count=$TEST_COUNT" >> "$GITHUB_OUTPUT"
-        working-directory: frontend
+        working-directory: cli
 
       - name: Check for .NET solution
         id: check-backend
@@ -78,16 +78,16 @@ jobs:
 
       - name: Combine test counts and update badges
         run: |
-          FRONTEND_COUNT="${{ steps.frontend-tests.outputs.test_count }}"
+          CLI_COUNT="${{ steps.cli-tests.outputs.test_count }}"
           BACKEND_COUNT="${{ steps.backend-tests.outputs.test_count }}"
-          FRONTEND_COUNT=${FRONTEND_COUNT:-0}
+          CLI_COUNT=${CLI_COUNT:-0}
           BACKEND_COUNT=${BACKEND_COUNT:-0}
-          TOTAL_COUNT=$((FRONTEND_COUNT + BACKEND_COUNT))
-          echo "📊 Frontend: $FRONTEND_COUNT | Backend: $BACKEND_COUNT | Total: $TOTAL_COUNT"
+          TOTAL_COUNT=$((CLI_COUNT + BACKEND_COUNT))
+          echo "📊 CLI: $CLI_COUNT | Backend: $BACKEND_COUNT | Total: $TOTAL_COUNT"
 
           bash .github/scripts/update-readme-badges.sh \
             "$TOTAL_COUNT" \
-            "frontend/coverage/coverage-summary.json" \
+            "cli/coverage/coverage-summary.json" \
             "README.md"
 
       - name: Commit updated badges
