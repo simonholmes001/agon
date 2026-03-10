@@ -134,7 +134,9 @@ export default class Shell extends Command {
           const color = title === 'Moderator' ? 'cyan' : 'green';
           renderMessagePanel(title, outcome.response.message, color, (line) => this.log(line));
         } else {
-          this.log(chalk.yellow('No new assistant/moderator response yet.'));
+          const phase = this.formatPhaseForDisplay(outcome.phase);
+          this.log(chalk.yellow(`No new assistant/moderator response yet. Current phase: ${phase}.`));
+          this.log(chalk.dim(`Session ${outcome.sessionId} is ${outcome.status}. You can wait, or run /status.`));
         }
         return;
       case 'status':
@@ -261,12 +263,8 @@ export default class Shell extends Command {
         }
 
         if (str && !isCtrl && !isMeta && str !== '\r' && str !== '\n') {
-          if (value.length < frame.maxInputChars) {
-            value += str;
-            redraw();
-          } else {
-            output.write('\u0007');
-          }
+          value += str;
+          redraw();
         }
       };
 
@@ -281,6 +279,22 @@ export default class Shell extends Command {
     }
 
     output.write('\u001b[0m\r\n');
+  }
+
+  private formatPhaseForDisplay(phase: string): string {
+    const compact = phase.replace(/[\s_-]/g, '').toLowerCase();
+    const displayMap: Record<string, string> = {
+      intake: 'Intake',
+      clarification: 'Clarification',
+      analysisround: 'Analysis Round',
+      critique: 'Critique',
+      synthesis: 'Synthesis',
+      targetedloop: 'Targeted Loop',
+      deliver: 'Deliver',
+      deliverwithgaps: 'Deliver With Gaps',
+      postdelivery: 'Post-Delivery'
+    };
+    return displayMap[compact] ?? phase;
   }
 }
 

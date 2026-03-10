@@ -46,6 +46,21 @@ export function getLatestResponseMessage(phase: string, messages: Message[]): Me
   return ordered.find(m => m.agentId !== 'moderator');
 }
 
+export function getLatestResponseMessageAfter(
+  phase: string,
+  messages: Message[],
+  afterCreatedAt?: string
+): Message | undefined {
+  const latest = getLatestResponseMessage(phase, messages);
+  if (!latest || !afterCreatedAt) {
+    return latest;
+  }
+
+  return new Date(latest.createdAt).getTime() > new Date(afterCreatedAt).getTime()
+    ? latest
+    : undefined;
+}
+
 export function getLatestPostDeliveryAssistantMessage(
   messages: Message[],
   afterCreatedAt?: string

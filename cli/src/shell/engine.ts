@@ -41,7 +41,13 @@ export type ShellEngineOutcome =
   | { kind: 'noop' }
   | { kind: 'notice'; message: string }
   | { kind: 'started'; sessionId: string; response?: { agentId?: string; message: string } }
-  | { kind: 'follow-up'; response?: { agentId?: string; message: string } }
+  | {
+      kind: 'follow-up';
+      sessionId: string;
+      status: string;
+      phase: string;
+      response?: { agentId?: string; message: string };
+    }
   | { kind: 'status'; status: string; phase: string; sessionId: string }
   | { kind: 'artifact'; content: string; raw: boolean; sessionId: string };
 
@@ -89,6 +95,9 @@ export class ShellEngine {
       const followUp = await this.controller.submitFollowUp(parsed.text);
       return {
         kind: 'follow-up',
+        sessionId: followUp.session.id,
+        status: followUp.session.status,
+        phase: followUp.session.phase,
         response: followUp.responseMessage
           ? {
               agentId: followUp.responseMessage.agentId,
@@ -171,6 +180,9 @@ export class ShellEngine {
         const followUp = await this.controller.submitFollowUp(parsed.message);
         return {
           kind: 'follow-up',
+          sessionId: followUp.session.id,
+          status: followUp.session.status,
+          phase: followUp.session.phase,
           response: followUp.responseMessage
             ? {
                 agentId: followUp.responseMessage.agentId,

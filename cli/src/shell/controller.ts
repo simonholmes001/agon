@@ -1,9 +1,9 @@
 import type { ArtifactType, Message, SessionResponse } from '../api/types.js';
 import {
   getLatestPostDeliveryAssistantMessage,
-  getLatestResponseMessage,
-  isClarificationPhase,
-  isPostDeliveryPhase
+  getLatestResponseMessageAfter,
+  isPostDeliveryPhase,
+  normalizeStatus
 } from '../utils/session-flow.js';
 import type { ShellSettableKey } from './types.js';
 
@@ -62,7 +62,7 @@ export class ShellController {
     this.sessionManager = deps.sessionManager;
     this.configManager = deps.configManager;
     this.followUpPollIntervalMs = deps.followUpPollIntervalMs ?? 1000;
-    this.followUpTimeoutMs = deps.followUpTimeoutMs ?? 15000;
+    this.followUpTimeoutMs = deps.followUpTimeoutMs ?? 30000;
   }
 
   async getParamsSnapshot(): Promise<{
@@ -94,15 +94,17 @@ export class ShellController {
     const latest = await this.apiClient.getSession(created.id);
     await this.sessionManager.saveSession(latest);
 
-    let responseMessage: Message | undefined;
+    let session = latest;
     const currentMessages = await this.apiClient.getMessages(created.id);
-    responseMessage = getLatestResponseMessage(latest.phase, currentMessages);
+    let responseMessage = this.getLatestResponseForPhase(latest.phase, currentMessages, {});
 
-    if (!responseMessage && (isClarificationPhase(latest.phase) || isPostDeliveryPhase(latest.phase))) {
-      responseMessage = await this.waitForInitialResponse(created.id, latest.phase);
+    if (!responseMessage) {
+      const polled = await this.waitForNextResponse(created.id, {});
+      session = polled.session;
+      responseMessage = polled.responseMessage;
     }
 
-    return { session: latest, responseMessage };
+    return { session, responseMessage };
   }
 
   async submitFollowUp(
@@ -116,6 +118,7 @@ export class ShellController {
 
     const beforeMessages = await this.apiClient.getMessages(sessionId);
     const previousAssistant = getLatestPostDeliveryAssistantMessage(beforeMessages);
+    const previousResponseTimestamp = this.getLatestMessageCreatedAt(beforeMessages);
 
     const updated = await this.apiClient.submitMessage(sessionId, content);
     await this.sessionManager.saveSession(updated);
@@ -123,18 +126,24 @@ export class ShellController {
     this.shellSessionId = sessionId;
     this.awaitingNewIdea = false;
 
+    let latestSession = updated;
     const currentMessages = await this.apiClient.getMessages(sessionId);
-    let latest = getLatestResponseMessage(updated.phase, currentMessages);
+    let latest = this.getLatestResponseForPhase(updated.phase, currentMessages, {
+      afterCreatedAt: previousResponseTimestamp,
+      previousPostDeliveryCreatedAt: previousAssistant?.createdAt
+    });
 
-    if (isPostDeliveryPhase(updated.phase)) {
-      latest = getLatestPostDeliveryAssistantMessage(currentMessages, previousAssistant?.createdAt);
-      if (!latest) {
-        latest = await this.waitForPostDeliveryResponse(sessionId, previousAssistant?.createdAt);
-      }
+    if (!latest) {
+      const polled = await this.waitForNextResponse(sessionId, {
+        afterCreatedAt: previousResponseTimestamp,
+        previousPostDeliveryCreatedAt: previousAssistant?.createdAt
+      });
+      latestSession = polled.session;
+      latest = polled.responseMessage;
     }
 
     return {
-      session: updated,
+      session: latestSession,
       responseMessage: latest
     };
   }
@@ -279,39 +288,61 @@ export class ShellController {
     return latest?.id ?? null;
   }
 
-  private async waitForPostDeliveryResponse(
-    sessionId: string,
-    previousCreatedAt?: string
-  ): Promise<Message | undefined> {
-    const deadline = Date.now() + this.followUpTimeoutMs;
-
-    while (Date.now() < deadline) {
-      await new Promise(resolve => setTimeout(resolve, this.followUpPollIntervalMs));
-      const messages = await this.apiClient.getMessages(sessionId);
-      const candidate = getLatestPostDeliveryAssistantMessage(messages, previousCreatedAt);
-      if (candidate) {
-        return candidate;
-      }
+  private getLatestMessageCreatedAt(messages: Message[]): string | undefined {
+    if (messages.length === 0) {
+      return undefined;
     }
 
-    return undefined;
+    return [...messages].sort(
+      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    )[0]?.createdAt;
   }
 
-  private async waitForInitialResponse(
+  private getLatestResponseForPhase(
+    phase: string,
+    messages: Message[],
+    options: {
+      afterCreatedAt?: string;
+      previousPostDeliveryCreatedAt?: string;
+    }
+  ): Message | undefined {
+    if (isPostDeliveryPhase(phase)) {
+      return getLatestPostDeliveryAssistantMessage(messages, options.previousPostDeliveryCreatedAt);
+    }
+
+    return getLatestResponseMessageAfter(phase, messages, options.afterCreatedAt);
+  }
+
+  private async waitForNextResponse(
     sessionId: string,
-    phase: string
-  ): Promise<Message | undefined> {
+    options: {
+      afterCreatedAt?: string;
+      previousPostDeliveryCreatedAt?: string;
+    }
+  ): Promise<{ session: SessionResponse; responseMessage?: Message }> {
     const deadline = Date.now() + this.followUpTimeoutMs;
+    let latestSession = await this.apiClient.getSession(sessionId);
+    await this.sessionManager.saveSession(latestSession);
 
     while (Date.now() < deadline) {
       await new Promise(resolve => setTimeout(resolve, this.followUpPollIntervalMs));
-      const messages = await this.apiClient.getMessages(sessionId);
-      const candidate = getLatestResponseMessage(phase, messages);
+      const [session, messages] = await Promise.all([
+        this.apiClient.getSession(sessionId),
+        this.apiClient.getMessages(sessionId)
+      ]);
+      latestSession = session;
+      await this.sessionManager.saveSession(session);
+      const candidate = this.getLatestResponseForPhase(session.phase, messages, options);
       if (candidate) {
-        return candidate;
+        return { session, responseMessage: candidate };
+      }
+
+      const normalizedStatus = normalizeStatus(session.status);
+      if (normalizedStatus === 'complete' || normalizedStatus === 'complete_with_gaps') {
+        return { session };
       }
     }
 
-    return undefined;
+    return { session: latestSession };
   }
 }

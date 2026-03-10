@@ -38,7 +38,8 @@ export function normalizeMarkdownStructure(markdown: string): string {
   const normalized: string[] = [];
   const numberedPattern = /^(\d+)\.\s+(.+)$/;
   const bulletPattern = /^[-*]\s+(.+)$/;
-  const continuationPattern = /^(and|or|also|plus|including|where)\b/i;
+  const continuationPattern = /^(and|or|also|plus|including|where|pick|choose|reply|current|desired|what(?:'s| is)?|budget|timeline|tech|non-negotiables?)\b/i;
+  const listTerminationPattern = /^(once|after that|after you answer|then i(?:'|)ll|thanks)\b/i;
   let insideNumberedList = false;
   let numberedItemCounter = 0;
   let pendingBlank = false;
@@ -100,7 +101,7 @@ export function normalizeMarkdownStructure(markdown: string): string {
     if (insideNumberedList) {
       const previous = normalized.at(-1) ?? '';
       const followsSubItem = /^\s+-\s+/.test(previous) || /^\s{5,}\S+/.test(previous);
-      if (followsSubItem) {
+      if (followsSubItem && !listTerminationPattern.test(trimmed)) {
         normalized.push(`     ${trimmed}`);
         continue;
       }

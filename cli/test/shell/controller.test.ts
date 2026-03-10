@@ -109,6 +109,67 @@ describe('shell controller', () => {
     expect(result.responseMessage?.message).toBe('Revised PRD');
   });
 
+  it('waits for a new moderator response in clarification follow-up flow', async () => {
+    const oldModerator: Message = {
+      agentId: 'moderator',
+      message: 'Old clarification question',
+      round: 0,
+      createdAt: '2026-03-10T10:00:00Z'
+    };
+    const newModerator: Message = {
+      agentId: 'moderator',
+      message: 'New clarification question',
+      round: 1,
+      createdAt: '2026-03-10T10:01:00Z'
+    };
+
+    sessionManager.getCurrentSessionId.mockResolvedValue('session-123');
+    apiClient.submitMessage.mockResolvedValue(baseSession);
+    apiClient.getSession.mockResolvedValue(baseSession);
+    apiClient.getMessages
+      .mockResolvedValueOnce([oldModerator]) // before submit
+      .mockResolvedValueOnce([oldModerator]) // immediate after submit (still old)
+      .mockResolvedValueOnce([oldModerator, newModerator]); // polled follow-up
+
+    const result = await controller.submitFollowUp('Answer to clarification');
+
+    expect(apiClient.submitMessage).toHaveBeenCalledWith('session-123', 'Answer to clarification');
+    expect(result.responseMessage?.message).toBe('New clarification question');
+  });
+
+  it('returns new agent output when clarification follow-up transitions into debate phases', async () => {
+    const oldModerator: Message = {
+      agentId: 'moderator',
+      message: 'Old clarification question',
+      round: 0,
+      createdAt: '2026-03-10T10:00:00Z'
+    };
+    const debateAgentMessage: Message = {
+      agentId: 'gpt_agent',
+      message: 'Initial analysis from debate',
+      round: 0,
+      createdAt: '2026-03-10T10:01:00Z'
+    };
+
+    const clarificationSession: SessionResponse = { ...baseSession, phase: 'Clarification' };
+    const analysisSession: SessionResponse = { ...baseSession, phase: 'AnalysisRound' };
+
+    sessionManager.getCurrentSessionId.mockResolvedValue('session-123');
+    apiClient.submitMessage.mockResolvedValue(clarificationSession);
+    apiClient.getSession.mockResolvedValue(analysisSession);
+    apiClient.getMessages
+      .mockResolvedValueOnce([oldModerator]) // before submit
+      .mockResolvedValueOnce([oldModerator]) // immediate after submit
+      .mockResolvedValueOnce([oldModerator, debateAgentMessage]); // polled after phase transition
+
+    const result = await controller.submitFollowUp('Answer to clarification');
+
+    expect(apiClient.submitMessage).toHaveBeenCalledWith('session-123', 'Answer to clarification');
+    expect(result.session.phase).toBe('AnalysisRound');
+    expect(result.responseMessage?.agentId).toBe('gpt_agent');
+    expect(result.responseMessage?.message).toBe('Initial analysis from debate');
+  });
+
   it('sets parameter values with key-specific parsing', async () => {
     await controller.setParam('defaultFriction', '75');
     await controller.setParam('researchEnabled', 'false');

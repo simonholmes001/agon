@@ -99,9 +99,21 @@ export function buildActivePrompt(frame: PromptFrameContext): string {
 }
 
 export function buildPromptInputLine(frame: PromptFrameContext, value: string): string {
-  const clippedValue = value.slice(0, frame.maxInputChars);
-  const content = `${frame.promptPrefix}${clippedValue}`.padEnd(frame.width, ' ');
-  return `${frame.promptStart}${content}${frame.reset}\r${frame.promptStart}${frame.promptPrefix}${clippedValue}`;
+  const visibleValue = getVisiblePromptValue(value, frame.maxInputChars);
+  const content = `${frame.promptPrefix}${visibleValue}`.padEnd(frame.width, ' ');
+  return `${frame.promptStart}${content}${frame.reset}\r${frame.promptStart}${frame.promptPrefix}${visibleValue}`;
+}
+
+export function getVisiblePromptValue(value: string, maxInputChars: number): string {
+  if (value.length <= maxInputChars) {
+    return value;
+  }
+
+  if (maxInputChars <= 1) {
+    return '…';
+  }
+
+  return `…${value.slice(-(maxInputChars - 1))}`;
 }
 
 export function buildShimmerText(text: string, tick: number): string {

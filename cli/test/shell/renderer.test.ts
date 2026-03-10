@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   buildShimmerText,
   buildActivePrompt,
+  buildPromptInputLine,
+  getVisiblePromptValue,
   renderMessagePanel,
   renderPromptBanner,
   renderShellHeader,
@@ -78,5 +80,20 @@ describe('shell renderer', () => {
     }
     expect(stripAnsi(frame0)).toBe(base);
     expect(stripAnsi(frame1)).toBe(base);
+  });
+
+  it('keeps newest prompt text visible when input exceeds frame width', () => {
+    const visible = getVisiblePromptValue('abcdefghijklmnopqrstuvwxyz', 8);
+    expect(visible).toBe('…tuvwxyz');
+  });
+
+  it('renders overflow input line with ellipsis and trailing text', () => {
+    const frame = renderPromptBanner(() => {});
+    const longValue = 'x'.repeat(frame.maxInputChars + 12) + 'END';
+    const rendered = buildPromptInputLine(frame, longValue);
+    const plain = rendered.replace(/\u001b\[[0-9;]*m/g, '');
+
+    expect(plain).toContain('…');
+    expect(plain).toContain('END');
   });
 });
