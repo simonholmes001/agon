@@ -77,7 +77,7 @@ export default class Shell extends Command {
         const rawInput = await this.promptForInput(promptFrame);
 
         const trimmed = rawInput.trim();
-        if (trimmed === '/exit' || trimmed === '/quit') {
+        if (isExitInput(trimmed)) {
           this.log(chalk.dim('Exiting shell.'));
           return;
         }
@@ -289,12 +289,17 @@ export default class Shell extends Command {
   }
 
   private restoreTerminalState(): void {
+    input.removeAllListeners('keypress');
+
     if (this.inRawInputMode && input.isTTY && typeof input.setRawMode === 'function') {
       input.setRawMode(false);
       this.inRawInputMode = false;
+    } else if (input.isTTY && typeof input.setRawMode === 'function') {
+      input.setRawMode(false);
     }
 
-    output.write('\u001b[0m\r\n');
+    input.pause();
+    output.write('\u001b[0m\u001b[?25h\r\n');
   }
 
   private formatPhaseForDisplay(phase: string): string {
@@ -456,4 +461,9 @@ function getSpinnerText(parsed: ReturnType<typeof parseShellInput>): string | nu
     case 'follow-up':
       return 'Submitting follow-up...';
   }
+}
+
+export function isExitInput(inputText: string): boolean {
+  const trimmed = inputText.trim().toLowerCase();
+  return trimmed === '/exit' || trimmed === '/quit' || trimmed === '/eot';
 }
