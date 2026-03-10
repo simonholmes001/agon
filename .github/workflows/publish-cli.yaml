@@ -43,8 +43,7 @@ jobs:
       - name: Resolve package metadata
         id: pkg
         run: |
-          echo "name=$(node -p \"require('./package.json').name\")" >> "$GITHUB_OUTPUT"
-          echo "version=$(node -p \"require('./package.json').version\")" >> "$GITHUB_OUTPUT"
+          node -e "const p=require('./package.json'); console.log('name=' + p.name); console.log('version=' + p.version);" >> "$GITHUB_OUTPUT"
 
       - name: Check whether stable version already exists on npm
         id: npm_version
@@ -68,6 +67,7 @@ jobs:
 
       - name: Publish merge snapshot (main dist-tag)
         if: steps.npm_version.outputs.exists == 'true' && github.event_name == 'push'
+        shell: bash
         run: |
           BASE_VERSION="${{ steps.pkg.outputs.version }}"
           if [[ "$BASE_VERSION" == *-* ]]; then
