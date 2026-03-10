@@ -2,7 +2,7 @@
 #
 # update-readme-badges.sh
 #
-# Reads coverage-summary.json and vitest output to update
+# Reads a coverage-summary.json and test count to update
 # the Tests and Coverage badges in README.md.
 #
 # Usage: .github/scripts/update-readme-badges.sh <test-count> <coverage-json-path> <readme-path>
