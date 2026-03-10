@@ -43,7 +43,10 @@ export function getLatestResponseMessage(phase: string, messages: Message[]): Me
     return ordered.find(m => m.agentId === 'post_delivery_assistant');
   }
 
-  return ordered.find(m => m.agentId !== 'moderator');
+  return ordered.find(m => {
+    const agent = m.agentId.toLowerCase();
+    return agent !== 'moderator' && agent !== 'user';
+  });
 }
 
 export function getLatestResponseMessageAfter(

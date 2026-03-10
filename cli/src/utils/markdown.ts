@@ -36,8 +36,8 @@ export function normalizeMarkdownStructure(markdown: string): string {
 
   const lines = markdown.split('\n');
   const normalized: string[] = [];
-  const numberedPattern = /^(\d+)\.\s+(.+)$/;
-  const bulletPattern = /^[-*]\s+(.+)$/;
+  const numberedPattern = /^(\d+)[.)]\s+(.+)$/;
+  const bulletPattern = /^[-*•●▪◦∙·]\s+(.+)$/;
   const continuationPattern = /^(and|or|also|plus|including|where|pick|choose|reply|current|desired|what(?:'s| is)?|budget|timeline|tech|non-negotiables?)\b/i;
   const listTerminationPattern = /^(once|after that|after you answer|then i(?:'|)ll|thanks)\b/i;
   let insideNumberedList = false;
@@ -133,9 +133,9 @@ export function renderMarkdown(markdown: string): string {
   
   try {
     const normalized = normalizeMarkdownStructure(markdown);
-    // Escape ordered-list prefixes so marked-terminal doesn't auto-renumber
-    // and collapse spacing in moderator-style question blocks.
-    const safeForRenderer = normalized.replace(/^(\d+)\.\s+/gm, '$1\\. ');
+    // Escape ordered-list prefixes (including indented items) so marked-terminal
+    // doesn't auto-renumber and collapse spacing in moderator-style question blocks.
+    const safeForRenderer = normalized.replace(/^(\s*)(\d+)\.\s+/gm, '$1$2\\. ');
     const rendered = marked(safeForRenderer) as string;
     return rendered.trim();
   } catch {

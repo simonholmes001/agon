@@ -211,6 +211,27 @@ describe('Markdown Renderer', () => {
       expect(normalized).not.toContain('\n1. Where do the images live');
       expect(normalized).not.toContain('\n1. Constraints you do have');
     });
+
+    it('should keep numbering progression when option bullets use unicode bullet characters', () => {
+      const text = [
+        '1. Primary persona',
+        '• Examples: A, B, C',
+        '',
+        '1. Success metric definition',
+        '• e.g., 1,000 users/month',
+        '',
+        '1. Constraints you\'ve left vague',
+        '• Budget',
+        '• Timeline'
+      ].join('\n');
+
+      const normalized = normalizeMarkdownStructure(text);
+      expect(normalized).toContain('1. Primary persona');
+      expect(normalized).toContain('2. Success metric definition');
+      expect(normalized).toContain('3. Constraints you\'ve left vague');
+      expect(normalized).not.toContain('\n1. Success metric definition');
+      expect(normalized).not.toContain('\n1. Constraints you\'ve left vague');
+    });
   });
 
   describe('renderMarkdown numbering', () => {
@@ -233,6 +254,21 @@ describe('Markdown Renderer', () => {
       expect(rendered).toContain('3. Constraints');
       expect(rendered).not.toContain('1. Constraints');
       expect(rendered).toMatch(/1\. Primary persona[\s\S]*\n\n2\. AI scope/);
+    });
+
+    it('should preserve numbering for indented ordered items that restart as 1 in source', () => {
+      const text = [
+        '   1. Timeline: pick one',
+        '   2. Primary audience',
+        '',
+        '   1. Downloads + accounts (scope)'
+      ].join('\n');
+
+      const rendered = stripAnsi(renderMarkdown(normalizeMarkdownStructure(text)));
+      expect(rendered).toContain('1. Timeline: pick one');
+      expect(rendered).toContain('2. Primary audience');
+      expect(rendered).toContain('3. Downloads + accounts (scope)');
+      expect(rendered).not.toContain('1. Downloads + accounts (scope)');
     });
   });
 
