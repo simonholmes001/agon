@@ -7,10 +7,21 @@
 [![.NET](https://img.shields.io/badge/.NET-9-512BD4?style=flat-square&logo=dotnet&logoColor=fff)](https://dotnet.microsoft.com)
 [![Vitest](https://img.shields.io/badge/Tested_with-Vitest-6E9F18?style=flat-square&logo=vitest&logoColor=fff)](https://vitest.dev)
 [![xUnit](https://img.shields.io/badge/Tested_with-xUnit-512BD4?style=flat-square&logo=dotnet&logoColor=fff)](https://xunit.net)
-[![Tests](https://img.shields.io/badge/Tests-395_passing-brightgreen?style=flat-square)]()
-[![Coverage](https://img.shields.io/badge/Coverage-83%25_lines-green?style=flat-square)]()
+[![Tests](https://img.shields.io/badge/Tests-719_passing-brightgreen?style=flat-square)]()
+[![Coverage](https://img.shields.io/badge/Coverage-40%25_lines-red?style=flat-square)]()
 [![TDD](https://img.shields.io/badge/Methodology-TDD-red?style=flat-square)]()
 [![Licence](https://img.shields.io/badge/Licence-Private-lightgrey?style=flat-square)]()
+
+### Badge Guide
+
+- **Next.js / React / TypeScript / Tailwind CSS**: front-end stack currently present in `frontend/` (scaffold phase).
+- **.NET**: backend runtime and project target for all `backend/` services and tests.
+- **Tested with Vitest**: test framework used by the CLI (`cli/test`).
+- **Tested with xUnit**: test framework used by backend test projects (`backend/tests`).
+- **Tests**: total passing tests across CLI + backend from the `main` branch badge workflow.
+- **Coverage**: combined line coverage across CLI + backend (frontend is intentionally excluded in current CI gates).
+- **Methodology TDD**: engineering policy (tests first, then implementation).
+- **Licence**: repository license classification (private/proprietary project).
 
 > A council of specialist AI agents debates your idea so you don't ship your blind spots.
 
@@ -25,6 +36,8 @@ Unlike a single-prompt AI chat, Agon maintains a **living Truth Map**: a structu
 Agon is an **agentic idea analysis workspace** — a "living strategy room" where a user brings an idea and a council of specialist AI agents debates, challenges, and develops it into a decision-grade output pack.
 
 Unlike a linear "input → debate → output" pipeline, Agon maintains a continuously updated **Global Workspace** ("Truth Map") that all agents read from and write to. If a constraint changes mid-session, the system updates the state and agents immediately re-evaluate their prior claims.
+
+This repository uses a **single canonical documentation source**: this root `README.md`.
 
 ---
 
@@ -144,12 +157,11 @@ dotnet add src/Agon.Infrastructure/Agon.Infrastructure.csproj package \
 
 ### Tech Stack
 
-- **Next.js 15** with App Router
-- **TypeScript**
-- **Tailwind CSS**
-- **shadcn/ui** components
-- **Framer Motion** for animations
-- **SignalR client** for real-time updates
+- **Next.js 16** with App Router
+- **React 19**
+- **TypeScript 5**
+- **Tailwind CSS v4**
+- Current scope: scaffold/WIP (`app/layout.tsx`, `app/page.tsx`)
 
 ### Getting Started
 
@@ -161,40 +173,26 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000) to see the app.
 
-### Project Structure (to be built)
+### Current Project Structure
 
 ```
 frontend/
 ├── app/
-│   ├── layout.tsx          # Root layout with SignalR provider
-│   ├── page.tsx            # Landing page
-│   ├── session/
-│   │   ├── new/            # Session creation flow
-│   │   └── [id]/           # Active session view (Thread + Map)
+│   ├── layout.tsx
+│   ├── page.tsx
 │   └── globals.css
 │
-├── components/
-│   ├── ui/                 # shadcn/ui primitives
-│   ├── thread/             # Thread view components
-│   ├── truth-map/          # Truth Map drawer/panel
-│   └── session/            # Session controls (friction slider, etc.)
-│
-├── lib/
-│   ├── api/                # REST API client
-│   ├── signalr/            # SignalR connection manager
-│   ├── logger.ts           # Structured logging
-│   └── utils.ts
-│
-└── types/                  # TypeScript definitions
+├── public/
+├── next.config.ts
+└── package.json
 ```
 
-### Key Features
+### Frontend Roadmap (Planned)
 
-- **Thread View**: Premium group-chat aesthetic with agent cards
-- **Truth Map Drawer**: Bottom sheet (mobile) / right panel (desktop)
-- **Friction Slider**: 0-100 control affecting tone and convergence thresholds
-- **Real-time Updates**: SignalR streams tokens, patches, confidence changes
-- **HITL Controls**: "Tap an Agent" for challenges, deep dives, constraint changes
+- Thread View and Truth Map UI
+- Real-time SignalR updates
+- Session creation and follow-up UX
+- Artifact browsing and export actions
 
 ---
 
@@ -226,9 +224,6 @@ cd frontend
 # Development server with hot reload
 npm run dev
 
-# Type checking
-npm run type-check
-
 # Linting
 npm run lint
 
@@ -242,7 +237,7 @@ npm run build
 - **Domain**: Pure unit tests (no mocks, blazing fast)
 - **Application**: Unit tests with mocked repositories
 - **Infrastructure**: Integration tests with in-memory DB and mocked external services
-- **Frontend**: UI tests are currently optional/WIP and are not required CI/merge gates
+- **Frontend**: UI tests are currently not part of required CI/merge gates for this phase
 
 ---
 
@@ -365,18 +360,66 @@ This addendum documents the currently implemented runtime capabilities and how R
     - `/follow-up <message>`
     - `/exit` (alias: `/quit`, `/eot`)
 
+### CLI Installation (npm package)
+
+- Canonical documentation source: this root `README.md` (no separate tracked CLI README).
+- Runtime requirements for CLI users:
+  - Node.js 20+
+  - Reachable Agon backend API URL
+
+- Global install from npm:
+
+```bash
+npm install -g @agon_agents/cli
+```
+
+- Configure backend API URL:
+
+```bash
+agon config set apiUrl https://api.your-domain.com
+```
+
+- Launch interactive shell:
+
+```bash
+agon
+```
+
+- Non-interactive start:
+
+```bash
+agon start "I need a PRD for my project"
+```
+
+### CLI Publish Pipeline
+
+- Workflow: `.github/workflows/publish-cli.yaml`
+- Triggers:
+  - Push/merge to `main` (CLI-related paths)
+  - Manual run (`workflow_dispatch`)
+  - GitHub Release published
+- Requirements:
+  - Repository secret `NPM_TOKEN`
+  - Package passes `npm run release:check` (CLI tests + `npm pack --dry-run`)
+- Publish behavior:
+  - If `package.json` version is not yet on npm: publish stable to `latest`
+  - If stable already exists and event is `main` push: publish snapshot build to `main` dist-tag
+
 ### Test + Coverage Badges (Auto-Updated on `main`)
 
 - README badges are automatically refreshed on every push/merge to `main` by:
   - Workflow: `.github/workflows/update-badges.yaml`
   - Script: `.github/scripts/update-readme-badges.sh`
 - The workflow:
-  1. Runs CLI tests with coverage (`vitest --coverage` in `cli/`)
+  1. Runs CLI unit tests
   2. Runs backend tests (`dotnet test`)
-  3. Computes total passing test count
-  4. Updates the `Tests` badge and `Coverage` badge in `README.md`
-  5. Commits and pushes badge changes back to `main` (if changed)
-- Coverage percentage shown in the README badge is the line coverage percentage parsed from `cli/coverage/coverage-summary.json`.
+  3. Computes total passing test count (CLI + backend)
+  4. Computes combined line coverage using:
+     - CLI V8 coverage summary (`cli/coverage/coverage-summary.json`)
+     - backend Cobertura attachments (`coverage.cobertura.xml`)
+  5. Updates the `Tests` badge and `Coverage` badge in `README.md`
+  6. Commits and pushes badge changes back to `main` (if changed)
+- Coverage percentage shown in the README badge is the combined line coverage across CLI + backend test runs.
 
 ### Local Hooks and Quality Gates
 
