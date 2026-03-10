@@ -77,6 +77,7 @@ describe('shell engine', () => {
     await engine.handleInput('/help');
     expect(print).toHaveBeenCalledWith('Commands:');
     expect(print).toHaveBeenCalledWith('  /set <key> <value>            Persist config key (apiUrl|defaultFriction|researchEnabled|logLevel)');
+    expect(print).toHaveBeenCalledWith('  /exit                         Exit shell (also: /quit)');
     expect(print).toHaveBeenCalledWith('  /set defaultFriction 75');
   });
 

@@ -130,6 +130,10 @@ export default class Shell extends Command {
           const title = outcome.response.agentId === 'moderator' ? 'Moderator' : 'Assistant';
           const color = title === 'Moderator' ? 'cyan' : 'green';
           renderMessagePanel(title, outcome.response.message, color, (line) => this.log(line));
+          this.log('Next steps:');
+          this.log('  • Continue in this shell: type your next message');
+          this.log('  • Explicit follow-up: /follow-up "<follow-up request>"');
+          this.log('  • Exit shell: /exit');
         } else {
           this.log(chalk.yellow('No response yet. Run /status or send your next input when ready.'));
         }
@@ -139,6 +143,10 @@ export default class Shell extends Command {
           const title = outcome.response.agentId === 'moderator' ? 'Moderator' : 'Assistant';
           const color = title === 'Moderator' ? 'cyan' : 'green';
           renderMessagePanel(title, outcome.response.message, color, (line) => this.log(line));
+          this.log('Next steps:');
+          this.log('  • Continue in this shell: type your next message');
+          this.log('  • Explicit follow-up: /follow-up "<follow-up request>"');
+          this.log('  • Exit shell: /exit');
         } else if (this.isMidDebatePhase(outcome.phase)) {
           await this.watchDebateProgress(outcome.sessionId);
         } else {
@@ -387,7 +395,20 @@ export default class Shell extends Command {
           this.log('');
           const verdict = await this.apiClient.getArtifact(sessionId, 'verdict');
           await this.sessionManager.saveArtifact(sessionId, 'verdict', verdict.content);
-          renderMessagePanel('Final Verdict', verdict.content, 'green', (line) => this.log(line));
+          this.log('━'.repeat(60));
+          this.log(chalk.bold('BEGIN FINAL OUTPUT'));
+          this.log('━'.repeat(60));
+          this.log(chalk.bold('Final Verdict'));
+          this.log('');
+          this.log(renderMarkdown(verdict.content));
+          this.log('');
+          this.log('━'.repeat(60));
+          this.log(chalk.bold('END FINAL OUTPUT'));
+          this.log('');
+          this.log('Next steps:');
+          this.log('  • Ask follow-up questions: agon follow-up "<follow-up request>"');
+          this.log('  • View again: agon show verdict --refresh');
+          this.log('  • Exit shell: /exit');
           return;
         }
 

@@ -124,6 +124,7 @@ export class ShellEngine {
         this.print('  /status [session-id]          Fetch session status/phase');
         this.print('  /show <artifact> [flags]      Show artifact (e.g. verdict, prd)');
         this.print('  /follow-up <message>          Send explicit follow-up message');
+        this.print('  /exit                         Exit shell (also: /quit)');
         this.print('Examples:');
         this.print('  /set defaultFriction 75');
         this.print('  /set researchEnabled false');
