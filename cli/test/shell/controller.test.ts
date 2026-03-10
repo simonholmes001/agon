@@ -158,4 +158,13 @@ describe('shell controller', () => {
     expect(active).toBeNull();
     expect(apiClient.getSession).not.toHaveBeenCalled();
   });
+
+  it('does not auto-resume persisted session for plain-input routing until shell session is selected', async () => {
+    sessionManager.getCurrentSessionId.mockResolvedValue('session-123');
+
+    const active = await controller.getActiveSession();
+
+    expect(active).toBeNull();
+    expect(apiClient.getSession).not.toHaveBeenCalled();
+  });
 });

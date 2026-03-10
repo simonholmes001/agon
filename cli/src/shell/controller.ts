@@ -205,7 +205,9 @@ export class ShellController {
       return null;
     }
 
-    const sessionId = await this.resolveSessionId();
+    // For plain-input routing, only use the session explicitly selected/started
+    // in this shell run. Do not auto-attach to stale persisted session state.
+    const sessionId = this.shellSessionId;
     if (!sessionId) {
       return null;
     }
