@@ -12,6 +12,7 @@ import { parseShellInput } from '../shell/parser.js';
 import { routePlainInput } from '../shell/router.js';
 import {
   buildActivePrompt,
+  buildShimmerText,
   buildPromptInputLine,
   type PromptFrameContext,
   renderMessagePanel,
@@ -28,6 +29,10 @@ export default class Shell extends Command {
     '<%= config.bin %> shell'
   ];
 
+  private spinnerActive = false;
+  private pendingPrintLines: string[] = [];
+  private inRawInputMode = false;
+
   public async run(): Promise<void> {
     const configManager = new ConfigManager();
     const sessionManager = new SessionManager();
@@ -43,7 +48,7 @@ export default class Shell extends Command {
     const engine = new ShellEngine({
       controller,
       routePlainInput,
-      print: (line: string) => this.log(line)
+      print: (line: string) => this.printLine(line)
     });
 
     const snapshot = await controller.getParamsSnapshot();
@@ -60,42 +65,59 @@ export default class Shell extends Command {
     renderStatusLine((line) => this.log(line));
     this.log('');
 
-    while (true) {
-      const promptFrame = renderPromptBanner((line) => this.log(line));
-      const rawInput = await this.promptForInput(promptFrame);
+    try {
+      while (true) {
+        const promptFrame = renderPromptBanner((line) => this.log(line));
+        const rawInput = await this.promptForInput(promptFrame);
 
-      const trimmed = rawInput.trim();
-      if (trimmed === '/exit' || trimmed === '/quit') {
-        this.log(chalk.dim('Exiting shell.'));
-        return;
-      }
-
-      const parsed = parseShellInput(trimmed);
-      const spinnerText = getSpinnerText(parsed);
-      const spinner = spinnerText
-        ? ora({ text: spinnerText, color: 'cyan' }).start()
-        : null;
-
-      try {
-        const outcome = await engine.handleInput(trimmed);
-        if (spinner) {
-          spinner.succeed('Done');
+        const trimmed = rawInput.trim();
+        if (trimmed === '/exit' || trimmed === '/quit') {
+          this.log(chalk.dim('Exiting shell.'));
+          return;
         }
-        this.renderOutcome(outcome);
-      } catch (error) {
-        if (spinner) {
-          spinner.fail('Failed');
-        }
-        const message = error instanceof Error ? error.message : String(error);
-        this.log(chalk.red(`Error: ${message}`));
-      }
 
-      this.log('');
+        const parsed = parseShellInput(trimmed);
+        const spinnerText = getSpinnerText(parsed);
+        const spinner = spinnerText
+          ? ora({ text: spinnerText, color: 'cyan' }).start()
+          : null;
+        const stopShimmer = spinner && spinnerText
+          ? this.startSpinnerShimmer(spinner, spinnerText)
+          : null;
+        this.spinnerActive = spinner !== null;
+
+        try {
+          const outcome = await engine.handleInput(trimmed);
+          stopShimmer?.();
+          if (spinner) {
+            spinner.succeed('Done');
+          }
+          this.spinnerActive = false;
+          this.flushPendingLines();
+          this.renderOutcome(outcome);
+        } catch (error) {
+          stopShimmer?.();
+          if (spinner) {
+            spinner.fail('Failed');
+          }
+          this.spinnerActive = false;
+          this.flushPendingLines();
+          const message = error instanceof Error ? error.message : String(error);
+          this.log(chalk.red(`Error: ${message}`));
+        }
+
+        this.log('');
+      }
+    } finally {
+      this.restoreTerminalState();
     }
   }
 
   private renderOutcome(outcome: ShellEngineOutcome): void {
     switch (outcome.kind) {
+      case 'notice':
+        this.log(outcome.message);
+        return;
       case 'started':
         this.log(chalk.green(`✓ Session started: ${outcome.sessionId}`));
         if (outcome.response?.message) {
@@ -130,6 +152,43 @@ export default class Shell extends Command {
     }
   }
 
+  private printLine(line: string): void {
+    if (this.spinnerActive) {
+      this.pendingPrintLines.push(line);
+      return;
+    }
+
+    this.log(line);
+  }
+
+  private flushPendingLines(): void {
+    if (this.pendingPrintLines.length === 0) {
+      return;
+    }
+
+    for (const line of this.pendingPrintLines) {
+      this.log(line);
+    }
+
+    this.pendingPrintLines = [];
+  }
+
+  private startSpinnerShimmer(spinner: { text: string }, baseText: string): () => void {
+    let tick = 0;
+    spinner.text = buildShimmerText(baseText, tick);
+
+    const interval = setInterval(() => {
+      tick += 1;
+      spinner.text = buildShimmerText(baseText, tick);
+    }, 90);
+
+    if (typeof interval.unref === 'function') {
+      interval.unref();
+    }
+
+    return () => clearInterval(interval);
+  }
+
   private async promptForInput(
     frame: PromptFrameContext
   ): Promise<string> {
@@ -140,6 +199,8 @@ export default class Shell extends Command {
 
     emitKeypressEvents(input);
     input.setRawMode(true);
+    input.resume();
+    this.inRawInputMode = true;
 
     output.write(`\u001b[${frame.cursorUpLines}A\r`);
     output.write(buildActivePrompt(frame));
@@ -155,17 +216,30 @@ export default class Shell extends Command {
       const finish = (result: string): void => {
         input.off('keypress', onKeypress);
         input.setRawMode(false);
+        this.inRawInputMode = false;
         output.write(`${frame.reset}\u001b[${frame.cursorDownLines}B\r`);
         resolve(result);
       };
 
-      const onKeypress = (str: string, key: Key): void => {
-        if (key.ctrl && key.name === 'c') {
+      const onKeypress = (str: string, key?: Key): void => {
+        const keyName = key?.name;
+        const isCtrl = Boolean(key?.ctrl);
+        const isMeta = Boolean(key?.meta);
+        const keySequence = key?.sequence;
+
+        if (isCtrl && keyName === 'c') {
           finish('/quit');
           return;
         }
 
-        if (key.name === 'return') {
+        const isEnter = keyName === 'return'
+          || keyName === 'enter'
+          || str === '\r'
+          || str === '\n'
+          || keySequence === '\r'
+          || keySequence === '\n';
+
+        if (isEnter) {
           if (value.trim().length === 0) {
             output.write('\u0007');
             return;
@@ -174,7 +248,7 @@ export default class Shell extends Command {
           return;
         }
 
-        if (key.name === 'backspace' || key.name === 'delete') {
+        if (keyName === 'backspace' || keyName === 'delete') {
           if (value.length > 0) {
             value = value.slice(0, -1);
             redraw();
@@ -182,11 +256,11 @@ export default class Shell extends Command {
           return;
         }
 
-        if (key.name === 'escape' || key.name === 'tab') {
+        if (keyName === 'escape' || keyName === 'tab') {
           return;
         }
 
-        if (str && !key.ctrl && !key.meta) {
+        if (str && !isCtrl && !isMeta && str !== '\r' && str !== '\n') {
           if (value.length < frame.maxInputChars) {
             value += str;
             redraw();
@@ -198,6 +272,15 @@ export default class Shell extends Command {
 
       input.on('keypress', onKeypress);
     });
+  }
+
+  private restoreTerminalState(): void {
+    if (this.inRawInputMode && input.isTTY && typeof input.setRawMode === 'function') {
+      input.setRawMode(false);
+      this.inRawInputMode = false;
+    }
+
+    output.write('\u001b[0m\r\n');
   }
 }
 

@@ -83,7 +83,8 @@ export function renderPromptBanner(print: (line: string) => void): PromptFrameCo
   return {
     width: frame.width,
     cursorUpLines: 3,
-    cursorDownLines: 2,
+    // Return to the line below the full 5-line frame after capturing input.
+    cursorDownLines: 3,
     maxInputChars: Math.max(1, frame.width - frame.promptPrefix.length - 1),
     promptPrefix: frame.promptPrefix,
     promptStart: frame.promptStart,
@@ -103,11 +104,45 @@ export function buildPromptInputLine(frame: PromptFrameContext, value: string): 
   return `${frame.promptStart}${content}${frame.reset}\r${frame.promptStart}${frame.promptPrefix}${clippedValue}`;
 }
 
+export function buildShimmerText(text: string, tick: number): string {
+  if (text.length === 0) {
+    return '';
+  }
+
+  const chars = [...text];
+  const center = ((tick % chars.length) + chars.length) % chars.length;
+
+  return chars.map((char, index) => {
+    if (char === ' ') {
+      return char;
+    }
+
+    const forward = Math.abs(index - center);
+    const distance = Math.min(forward, chars.length - forward);
+
+    if (distance === 0) {
+      return chalk.whiteBright(char);
+    }
+
+    if (distance === 1) {
+      return chalk.rgb(205, 229, 255)(char);
+    }
+
+    if (distance === 2) {
+      return chalk.rgb(176, 210, 248)(char);
+    }
+
+    return chalk.rgb(141, 185, 237)(char);
+  }).join('');
+}
+
 export function renderStatusLine(print: (line: string) => void): void {
   print(
     chalk.dim('Use ')
       + chalk.cyan('/new')
       + chalk.dim(' for a new idea, ')
+      + chalk.cyan('/params')
+      + chalk.dim(' to view params, ')
       + chalk.cyan('/set')
       + chalk.dim(' to change params, ')
       + chalk.cyan('/help')

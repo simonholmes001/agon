@@ -24,6 +24,18 @@ describe('shell parser', () => {
     });
   });
 
+  it('treats bare command-like words as plain input without slash', () => {
+    expect(parseShellInput('params')).toEqual({
+      type: 'plain',
+      text: 'params'
+    });
+
+    expect(parseShellInput('help')).toEqual({
+      type: 'plain',
+      text: 'help'
+    });
+  });
+
   it('parses /set with key and value', () => {
     expect(parseShellInput('/set defaultFriction 75')).toEqual({
       type: 'slash',

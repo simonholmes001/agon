@@ -68,8 +68,9 @@ describe('shell engine', () => {
   });
 
   it('executes /set via controller', async () => {
-    await engine.handleInput('/set defaultFriction 75');
+    const outcome = await engine.handleInput('/set defaultFriction 75');
     expect(controller.setParam).toHaveBeenCalledWith('defaultFriction', '75');
+    expect(outcome).toEqual({ kind: 'notice', message: 'Updated defaultFriction.' });
   });
 
   it('prints detailed command help for /help', async () => {
@@ -131,11 +132,12 @@ describe('shell engine', () => {
       reason: 'Debate is still in progress.'
     });
 
-    await engine.handleInput('Any update?');
+    const outcome = await engine.handleInput('Any update?');
 
     expect(controller.submitFollowUp).not.toHaveBeenCalled();
     expect(controller.startIdea).not.toHaveBeenCalled();
-    expect(print).toHaveBeenCalledWith('Debate is still in progress.');
+    expect(outcome).toEqual({ kind: 'notice', message: 'Debate is still in progress.' });
+    expect(print).not.toHaveBeenCalledWith('Debate is still in progress.');
   });
 
   it('supports explicit /follow-up command', async () => {

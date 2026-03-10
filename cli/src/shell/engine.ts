@@ -39,6 +39,7 @@ export interface ShellEngineDeps {
 
 export type ShellEngineOutcome =
   | { kind: 'noop' }
+  | { kind: 'notice'; message: string }
   | { kind: 'started'; sessionId: string; response?: { agentId?: string; message: string } }
   | { kind: 'follow-up'; response?: { agentId?: string; message: string } }
   | { kind: 'status'; status: string; phase: string; sessionId: string }
@@ -72,7 +73,6 @@ export class ShellEngine {
 
     if (route.action === 'start') {
       const started = await this.controller.startIdea(parsed.text);
-      this.print(`Session started: ${started.session.id}`);
       return {
         kind: 'started',
         sessionId: started.session.id,
@@ -98,8 +98,7 @@ export class ShellEngine {
       };
     }
 
-    this.print(route.reason);
-    return { kind: 'noop' };
+    return { kind: 'notice', message: route.reason };
   }
 
   private async handleSlash(
@@ -136,8 +135,7 @@ export class ShellEngine {
       }
       case 'set':
         await this.controller.setParam(parsed.key, parsed.value);
-        this.print(`Updated ${parsed.key}.`);
-        return { kind: 'noop' };
+        return { kind: 'notice', message: `Updated ${parsed.key}.` };
       case 'new':
         await this.controller.clearShellSessionSelection();
         this.print('Ready for a new idea.');

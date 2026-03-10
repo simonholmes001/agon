@@ -116,6 +116,10 @@ next-env.d.ts
 .DS_Store
 Thumbs.db
 
+# Keep CLI launcher tracked (prevents runtime drift in global symlink installs)
+!cli/bin/
+!cli/bin/run.js
+
 # Sensitive files
 *.pem
 *.key

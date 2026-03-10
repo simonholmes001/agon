@@ -321,3 +321,75 @@ Proprietary — All rights reserved.
 ## Contact
 
 For questions or contributions, contact the development team.
+
+---
+
+## Addendum (March 2026): Backend + CLI Functionality
+
+[![CI](https://github.com/simonholmes001/agon/actions/workflows/ci.yaml/badge.svg)](https://github.com/simonholmes001/agon/actions/workflows/ci.yaml)
+[![Update Badges](https://github.com/simonholmes001/agon/actions/workflows/update-badges.yaml/badge.svg)](https://github.com/simonholmes001/agon/actions/workflows/update-badges.yaml)
+
+This addendum documents the currently implemented runtime capabilities and how README test/coverage badges are maintained.
+
+### Backend (Agon.Api) — Implemented Capabilities
+
+- Session lifecycle endpoints are implemented in `backend/src/Agon.Api/Controllers/SessionsController.cs`:
+  - `POST /sessions`
+  - `GET /sessions/{id}`
+  - `POST /sessions/{id}/start`
+  - `POST /sessions/{id}/messages`
+  - `GET /sessions/{id}/messages`
+  - `GET /sessions/{id}/truthmap`
+  - `GET /sessions/{id}/snapshots`
+  - `GET /sessions/{id}/artifacts/{type}`
+  - `GET /sessions/{id}/artifacts`
+- Debate orchestration is wired through `Orchestrator` and `AgentRunner` in `backend/src/Agon.Application/Orchestration/`.
+- Real-time signaling is enabled through SignalR (`/hubs/debate`) in `backend/src/Agon.Api/Program.cs`.
+- Artifact synthesis currently includes verdict/plan plus derived risks/assumptions in controller output.
+
+### CLI — Implemented Capabilities
+
+- Command-driven usage:
+  - `agon start "<idea>"`
+  - `agon follow-up "<message>"` (alias of `answer`)
+  - `agon status`
+  - `agon show <artifact>`
+  - `agon sessions`
+  - `agon resume <session-id>`
+  - `agon config`
+- Default interactive shell:
+  - Running `agon` (no subcommand) launches a codex-style interactive shell.
+  - Supported slash commands:
+    - `/help`
+    - `/params`
+    - `/set <apiUrl|defaultFriction|researchEnabled|logLevel> <value>`
+    - `/new`
+    - `/session <session-id>`
+    - `/status [session-id]`
+    - `/show <artifact> [--refresh] [--raw]`
+    - `/follow-up <message>`
+
+### Test + Coverage Badges (Auto-Updated on `main`)
+
+- README badges are automatically refreshed on every push/merge to `main` by:
+  - Workflow: `.github/workflows/update-badges.yaml`
+  - Script: `.github/scripts/update-readme-badges.sh`
+- The workflow:
+  1. Runs frontend tests with coverage (`vitest --coverage`)
+  2. Runs backend tests (`dotnet test`)
+  3. Computes total passing test count
+  4. Updates the `Tests` badge and `Coverage` badge in `README.md`
+  5. Commits and pushes badge changes back to `main` (if changed)
+- Coverage percentage shown in the README badge is the line coverage percentage parsed from `frontend/coverage/coverage-summary.json`.
+
+### Local Hooks and Quality Gates
+
+- Local pre-commit test gate is available at `.githooks/pre-commit` and runs:
+  - frontend tests
+  - CLI tests
+  - backend tests
+- To enable local git hooks for this repo:
+
+```bash
+git config core.hooksPath .githooks
+```
