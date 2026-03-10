@@ -33,15 +33,28 @@ jobs:
         run: npm ci
         working-directory: cli
 
-      - name: Run CLI tests with coverage
+      - name: Run CLI unit tests
         id: cli-tests
         run: |
-          OUTPUT=$(npx vitest run --coverage --reporter=verbose 2>&1)
+          OUTPUT=$(npm run test 2>&1)
           echo "$OUTPUT"
           # Strip ANSI escape codes before parsing
           CLEAN=$(echo "$OUTPUT" | sed 's/\x1b\[[0-9;]*m//g')
           TEST_COUNT=$(echo "$CLEAN" | grep -E 'Tests\s+[0-9]+\s+passed' | grep -oE '[0-9]+' | head -1 || echo "0")
           echo "test_count=$TEST_COUNT" >> "$GITHUB_OUTPUT"
+        working-directory: cli
+
+      - name: Run CLI coverage (non-gating for badge generation)
+        run: |
+          npx vitest run \
+            --coverage \
+            --reporter=verbose \
+            --coverage.reporter=json-summary \
+            --coverage.reporter=text \
+            --coverage.thresholds.lines=0 \
+            --coverage.thresholds.functions=0 \
+            --coverage.thresholds.branches=0 \
+            --coverage.thresholds.statements=0
         working-directory: cli
 
       - name: Check for .NET solution
@@ -68,7 +81,11 @@ jobs:
         if: steps.check-backend.outputs.exists == 'true'
         id: backend-tests
         run: |
-          OUTPUT=$(dotnet test --no-build --configuration Release --verbosity normal --collect:"XPlat Code Coverage" 2>&1)
+          COVERAGE_DIR="/tmp/agon-backend-coverage"
+          rm -rf "$COVERAGE_DIR"
+          mkdir -p "$COVERAGE_DIR"
+
+          OUTPUT=$(dotnet test --no-build --configuration Release --verbosity normal --collect:"XPlat Code Coverage" --results-directory "$COVERAGE_DIR" 2>&1)
           echo "$OUTPUT"
           BACKEND_COUNT=$(echo "$OUTPUT" \
             | sed -nE 's/.*Passed:[[:space:]]+([0-9]+).*/\1/p' \
@@ -85,9 +102,30 @@ jobs:
           TOTAL_COUNT=$((CLI_COUNT + BACKEND_COUNT))
           echo "📊 CLI: $CLI_COUNT | Backend: $BACKEND_COUNT | Total: $TOTAL_COUNT"
 
+          CLI_COVERED=$(jq -r '.total.lines.covered // 0' cli/coverage/coverage-summary.json)
+          CLI_LINES=$(jq -r '.total.lines.total // 0' cli/coverage/coverage-summary.json)
+
+          BACKEND_COVERED=0
+          BACKEND_LINES=0
+          while IFS= read -r FILE; do
+            HEADER=$(grep -m1 '<coverage ' "$FILE" || true)
+            C=$(echo "$HEADER" | sed -nE 's/.*lines-covered="([0-9]+)".*/\1/p')
+            V=$(echo "$HEADER" | sed -nE 's/.*lines-valid="([0-9]+)".*/\1/p')
+            BACKEND_COVERED=$((BACKEND_COVERED + ${C:-0}))
+            BACKEND_LINES=$((BACKEND_LINES + ${V:-0}))
+          done < <(find /tmp/agon-backend-coverage -name 'coverage.cobertura.xml' 2>/dev/null || true)
+
+          TOTAL_COVERED=$((CLI_COVERED + BACKEND_COVERED))
+          TOTAL_LINES=$((CLI_LINES + BACKEND_LINES))
+          COMBINED_PCT=$(awk -v c="$TOTAL_COVERED" -v t="$TOTAL_LINES" 'BEGIN { if (t == 0) print 0; else printf "%.0f", (100*c/t) }')
+          echo "📊 Coverage CLI: $CLI_COVERED/$CLI_LINES | Backend: $BACKEND_COVERED/$BACKEND_LINES | Combined: ${COMBINED_PCT}%"
+
+          COMBINED_COVERAGE_JSON="/tmp/agon-combined-coverage-summary.json"
+          printf '{"total":{"lines":{"pct":%s}}}\n' "$COMBINED_PCT" > "$COMBINED_COVERAGE_JSON"
+
           bash .github/scripts/update-readme-badges.sh \
             "$TOTAL_COUNT" \
-            "cli/coverage/coverage-summary.json" \
+            "$COMBINED_COVERAGE_JSON" \
             "README.md"
 
       - name: Commit updated badges
