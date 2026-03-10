@@ -1,9 +1,26 @@
 {
-  "name": "@agon/cli",
+  "name": "@agon_agents/cli",
   "version": "0.1.0",
   "description": "CLI tool for Agon - AI-powered strategy debate platform",
   "author": "Simon Holmes",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/simonholmes001/agon.git",
+    "directory": "cli"
+  },
+  "homepage": "https://github.com/simonholmes001/agon#readme",
+  "bugs": {
+    "url": "https://github.com/simonholmes001/agon/issues"
+  },
+  "keywords": [
+    "agon",
+    "cli",
+    "ai",
+    "agent",
+    "strategy"
+  ],
+  "packageManager": "npm@10",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -11,9 +28,9 @@
     "agon": "./bin/run.js"
   },
   "files": [
-    "/bin",
-    "/dist",
-    "/oclif.manifest.json"
+    "bin",
+    "dist",
+    "README.md"
   ],
   "scripts": {
     "build": "tsc",
@@ -23,8 +40,10 @@
     "test:coverage": "vitest --coverage",
     "lint": "eslint . --ext .ts",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
-    "prepack": "npm run build && oclif manifest",
-    "postpack": "rm -f oclif.manifest.json",
+    "prepack": "npm run build && cp ../README.md ./README.md",
+    "pack:dry-run": "npm pack --dry-run",
+    "release:check": "npm run test && npm run pack:dry-run",
+    "postpack": "rm -f ./README.md",
     "prepare": "npm run build"
   },
   "dependencies": {
@@ -61,6 +80,10 @@
   },
   "engines": {
     "node": ">=18.0.0"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   },
   "oclif": {
     "bin": "agon",

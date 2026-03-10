@@ -360,6 +360,51 @@ This addendum documents the currently implemented runtime capabilities and how R
     - `/follow-up <message>`
     - `/exit` (alias: `/quit`, `/eot`)
 
+### CLI Installation (npm package)
+
+- Canonical documentation source: this root `README.md` (no separate tracked CLI README).
+- Runtime requirements for CLI users:
+  - Node.js 20+
+  - Reachable Agon backend API URL
+
+- Global install from npm:
+
+```bash
+npm install -g @agon_agents/cli
+```
+
+- Configure backend API URL:
+
+```bash
+agon config set apiUrl https://api.your-domain.com
+```
+
+- Launch interactive shell:
+
+```bash
+agon
+```
+
+- Non-interactive start:
+
+```bash
+agon start "I need a PRD for my project"
+```
+
+### CLI Publish Pipeline
+
+- Workflow: `.github/workflows/publish-cli.yaml`
+- Triggers:
+  - Push/merge to `main` (CLI-related paths)
+  - Manual run (`workflow_dispatch`)
+  - GitHub Release published
+- Requirements:
+  - Repository secret `NPM_TOKEN`
+  - Package passes `npm run release:check` (CLI tests + `npm pack --dry-run`)
+- Publish behavior:
+  - If `package.json` version is not yet on npm: publish stable to `latest`
+  - If stable already exists and event is `main` push: publish snapshot build to `main` dist-tag
+
 ### Test + Coverage Badges (Auto-Updated on `main`)
 
 - README badges are automatically refreshed on every push/merge to `main` by:
