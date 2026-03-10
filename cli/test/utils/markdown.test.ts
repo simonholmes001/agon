@@ -270,6 +270,21 @@ describe('Markdown Renderer', () => {
       expect(rendered).toContain('3. Downloads + accounts (scope)');
       expect(rendered).not.toContain('1. Downloads + accounts (scope)');
     });
+
+    it('should preserve ordered list progression when source uses parenthesized markers', () => {
+      const text = [
+        '1) Primary persona',
+        '2) AI scope',
+        '',
+        '1) Constraints'
+      ].join('\n');
+
+      const rendered = stripAnsi(renderMarkdown(text));
+      expect(rendered).toContain('1. Primary persona');
+      expect(rendered).toContain('2. AI scope');
+      expect(rendered).toContain('3. Constraints');
+      expect(rendered).not.toContain('1. Constraints');
+    });
   });
 
   describe('stripAnsi', () => {

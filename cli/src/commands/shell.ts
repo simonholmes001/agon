@@ -1,12 +1,13 @@
 import { Command } from '@oclif/core';
 import ora from 'ora';
 import chalk from 'chalk';
-import { emitKeypressEvents, type Key } from 'node:readline';
+import { type Key } from 'node:readline';
 import { stdin as input, stdout as output } from 'node:process';
 import { AgonAPIClient } from '../api/agon-client.js';
 import { ConfigManager } from '../state/config-manager.js';
 import { SessionManager } from '../state/session-manager.js';
 import { ShellController } from '../shell/controller.js';
+import { createKeypressInitializer } from '../shell/keypress.js';
 import { ShellEngine, type ShellEngineOutcome } from '../shell/engine.js';
 import { parseShellInput } from '../shell/parser.js';
 import { routePlainInput } from '../shell/router.js';
@@ -36,6 +37,7 @@ export default class Shell extends Command {
   private inRawInputMode = false;
   private apiClient?: AgonAPIClient;
   private sessionManager?: SessionManager;
+  private initializeKeypressEvents: () => void = () => {};
 
   public async run(): Promise<void> {
     const configManager = new ConfigManager();
@@ -44,6 +46,7 @@ export default class Shell extends Command {
     const apiClient = new AgonAPIClient(config.apiUrl);
     this.apiClient = apiClient;
     this.sessionManager = sessionManager;
+    this.initializeKeypressEvents = createKeypressInitializer(input);
 
     const controller = new ShellController({
       apiClient,
@@ -215,7 +218,7 @@ export default class Shell extends Command {
       return '/quit';
     }
 
-    emitKeypressEvents(input);
+    this.initializeKeypressEvents();
     input.setRawMode(true);
     input.resume();
     this.inRawInputMode = true;

@@ -135,7 +135,7 @@ export function renderMarkdown(markdown: string): string {
     const normalized = normalizeMarkdownStructure(markdown);
     // Escape ordered-list prefixes (including indented items) so marked-terminal
     // doesn't auto-renumber and collapse spacing in moderator-style question blocks.
-    const safeForRenderer = normalized.replace(/^(\s*)(\d+)\.\s+/gm, '$1$2\\. ');
+    const safeForRenderer = normalized.replace(/^(\s*)(\d+)([.)])\s+/gm, '$1$2\\$3 ');
     const rendered = marked(safeForRenderer) as string;
     return rendered.trim();
   } catch {
