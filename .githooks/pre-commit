@@ -1,5 +1,26 @@
 #!/bin/sh
 
+# Changeset reminder for CLI release workflow
+STAGED_FILES="$(git diff --cached --name-only)"
+CLI_STAGED="$(echo "$STAGED_FILES" | grep -E '^cli/' || true)"
+CHANGESET_STAGED="$(echo "$STAGED_FILES" | grep -E '^cli/\.changeset/[^/]+\.md$' | grep -v '^cli/\.changeset/README\.md$' || true)"
+
+if [ -n "$CLI_STAGED" ] && [ -z "$CHANGESET_STAGED" ]; then
+  echo ""
+  echo "⚠️  CLI changes detected, but no changeset file is staged."
+  echo "👉 If you plan to merge this PR, run:"
+  echo "   cd cli && npx changeset"
+  echo "   git add cli/.changeset/*.md"
+  echo ""
+  echo "ℹ️  To enforce this as blocking, run commits with:"
+  echo "   AGON_ENFORCE_CHANGESET=1 git commit ..."
+
+  if [ "${AGON_ENFORCE_CHANGESET:-0}" = "1" ]; then
+    echo "❌ Blocking commit because AGON_ENFORCE_CHANGESET=1 and no changeset file is staged."
+    exit 1
+  fi
+fi
+
 # CLI tests
 if [ -f "cli/package.json" ]; then
   echo ""

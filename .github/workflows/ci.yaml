@@ -7,6 +7,43 @@ on:
     branches: [main]
 
 jobs:
+  cli-changeset:
+    name: CLI Changeset Check
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Require changeset for CLI source changes
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          BASE_REF="${{ github.base_ref }}"
+          git fetch origin "${BASE_REF}" --depth=1
+
+          CHANGED_FILES="$(git diff --name-only "origin/${BASE_REF}"...HEAD)"
+          echo "Changed files:"
+          echo "${CHANGED_FILES}"
+
+          if ! echo "${CHANGED_FILES}" | grep -q '^cli/'; then
+            echo "No CLI changes detected."
+            exit 0
+          fi
+
+          CHANGESET_FILES="$(echo "${CHANGED_FILES}" | grep -E '^cli/\.changeset/[^/]+\.md$' | grep -v '^cli/\.changeset/README\.md$' || true)"
+          if [ -n "${CHANGESET_FILES}" ]; then
+            echo "Changeset file detected."
+            exit 0
+          fi
+
+          echo "::error::CLI changes detected without a changeset file."
+          echo "::error::Run 'cd cli && npx changeset' and commit the generated file in cli/.changeset/."
+          exit 1
+
   cli-tests:
     name: CLI Tests
     runs-on: ubuntu-latest

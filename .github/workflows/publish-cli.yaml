@@ -1,4 +1,4 @@
-name: Publish CLI to npm
+name: Release CLI (Changesets + npm)
 
 on:
   push:
@@ -7,16 +7,15 @@ on:
       - 'cli/**'
       - '.github/workflows/publish-cli.yaml'
   workflow_dispatch:
-  release:
-    types: [published]
 
 permissions:
-  contents: read
+  contents: write
+  pull-requests: write
   id-token: write
 
 jobs:
-  publish-cli:
-    name: Publish @agon_agents/cli
+  release-cli:
+    name: Version and publish @agon_agents/cli
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -25,58 +24,33 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22.14.0
           registry-url: https://registry.npmjs.org
           cache: npm
           cache-dependency-path: cli/package-lock.json
 
+      - name: Ensure npm CLI supports trusted publishing
+        run: |
+          npm i -g npm@^11.5.1
+          node -v
+          npm -v
+
       - name: Install dependencies
         run: npm ci
 
-      - name: Validate package (tests + npm pack dry-run)
-        run: npm run release:check
-
-      - name: Resolve package metadata
-        id: pkg
-        run: |
-          node -e "const p=require('./package.json'); console.log('name=' + p.name); console.log('version=' + p.version);" >> "$GITHUB_OUTPUT"
-
-      - name: Check whether stable version already exists on npm
-        id: npm_version
-        run: |
-          PKG_NAME="${{ steps.pkg.outputs.name }}"
-          PKG_VERSION="${{ steps.pkg.outputs.version }}"
-
-          if npm view "${PKG_NAME}@${PKG_VERSION}" version > /dev/null 2>&1; then
-            echo "exists=true" >> "$GITHUB_OUTPUT"
-            echo "Stable version already exists: ${PKG_NAME}@${PKG_VERSION}"
-          else
-            echo "exists=false" >> "$GITHUB_OUTPUT"
-            echo "Stable version not found yet: ${PKG_NAME}@${PKG_VERSION}"
-          fi
-
-      - name: Publish stable version (latest dist-tag)
-        if: steps.npm_version.outputs.exists == 'false'
-        run: npm publish
+      - name: Version / Release with Changesets
+        uses: changesets/action@v1
+        with:
+          cwd: cli
+          version: npx changeset version
+          publish: npm run release:publish
+          title: 'chore(release): version @agon_agents/cli'
+          commit: 'chore(release): version @agon_agents/cli'
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-
-      - name: Publish merge snapshot (main dist-tag)
-        if: steps.npm_version.outputs.exists == 'true' && github.event_name == 'push'
-        shell: bash
-        run: |
-          BASE_VERSION="${{ steps.pkg.outputs.version }}"
-          if [[ "$BASE_VERSION" == *-* ]]; then
-            SNAPSHOT_VERSION="${BASE_VERSION}.main.${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"
-          else
-            SNAPSHOT_VERSION="${BASE_VERSION}-main.${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"
-          fi
-
-          npm version "$SNAPSHOT_VERSION" --no-git-tag-version
-          npm publish --tag main
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

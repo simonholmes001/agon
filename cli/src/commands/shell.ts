@@ -23,6 +23,7 @@ import {
 } from '../shell/renderer.js';
 import { renderMarkdown } from '../utils/markdown.js';
 import { normalizeStatus } from '../utils/session-flow.js';
+import { checkForCliUpdate } from '../utils/update-check.js';
 
 export default class Shell extends Command {
   static override readonly description = 'Open interactive codex-style Agon shell';
@@ -72,6 +73,14 @@ export default class Shell extends Command {
       (line) => this.log(line)
     );
     renderStatusLine((line) => this.log(line));
+    const updateInfo = await checkForCliUpdate({
+      packageName: this.config.pjson.name ?? '@agon_agents/cli',
+      currentVersion: this.config.pjson.version ?? '0.0.0'
+    });
+    if (updateInfo) {
+      this.log(chalk.yellow(`Update available: v${updateInfo.currentVersion} → v${updateInfo.latestVersion}`));
+      this.log(chalk.cyan(`Install: ${updateInfo.installCommand}`));
+    }
     this.log('');
 
     try {

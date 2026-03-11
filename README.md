@@ -12,32 +12,195 @@
 [![TDD](https://img.shields.io/badge/Methodology-TDD-red?style=flat-square)]()
 [![Licence](https://img.shields.io/badge/Licence-Private-lightgrey?style=flat-square)]()
 
-### Badge Guide
-
-- **Next.js / React / TypeScript / Tailwind CSS**: front-end stack currently present in `frontend/` (scaffold phase).
-- **.NET**: backend runtime and project target for all `backend/` services and tests.
-- **Tested with Vitest**: test framework used by the CLI (`cli/test`).
-- **Tested with xUnit**: test framework used by backend test projects (`backend/tests`).
-- **Tests**: total passing tests across CLI + backend from the `main` branch badge workflow.
-- **Coverage**: combined line coverage across CLI + backend (frontend is intentionally excluded in current CI gates).
-- **Methodology TDD**: engineering policy (tests first, then implementation).
-- **Licence**: repository license classification (private/proprietary project).
-
-> A council of specialist AI agents debates your idea so you don't ship your blind spots.
-
-Agon is an agentic idea-analysis workspace. You bring a raw idea — a product concept, a technical proposal, a strategic pivot — and a council of AI agents drawn from different model providers tears it apart, stress-tests it, and reassembles it into a decision-grade output pack.
-
-Unlike a single-prompt AI chat, Agon maintains a **living Truth Map**: a structured, versioned graph of claims, assumptions, risks, and decisions that every agent reads from and writes to. If a constraint changes mid-session, the system propagates that change and agents re-evaluate automatically.
+> Multi-agent AI analysis that transforms raw ideas into production-ready documentation.
 
 ---
 
 ## Project Overview
 
-Agon is an **agentic idea analysis workspace** — a "living strategy room" where a user brings an idea and a council of specialist AI agents debates, challenges, and develops it into a decision-grade output pack.
+**Agon** transforms raw ideas into production-ready documentation through structured multi-agent analysis. You submit a product concept, technical proposal, strategic decision, or just a simple question, and a council of AI agents (powered by OpenAI GPT, Google Gemini, and Anthropic Claude) collaboratively analyze it across multiple rounds to produce:
 
-Unlike a linear "input → debate → output" pipeline, Agon maintains a continuously updated **Global Workspace** ("Truth Map") that all agents read from and write to. If a constraint changes mid-session, the system updates the state and agents immediately re-evaluate their prior claims.
+- **Verdict** — Executive summary with go/no-go recommendation
+- **30/60/90 Day Plan** — Phased implementation roadmap  
+- **Product Requirements Document (PRD)** — Full specifications with acceptance criteria
+- **Risk Registry** — Identified risks with severity, likelihood, and mitigation strategies
+- **Assumption Validation** — Critical assumptions requiring validation before execution
+- **Architecture Overview** — Technical design and system topology (Mermaid diagrams)
+- **Copilot Instructions** — Implementation guidance for development
 
-This repository uses a **single canonical documentation source**: this root `README.md`.
+### How It Works
+
+1. **Clarification Phase**: A Moderator agent asks clarifying questions to refine your idea into a structured "Debate Brief"
+2. **Analysis Round**: Three council agents (GPT, Gemini, Claude) independently analyze your idea in parallel, each adding claims, assumptions, and risks to a shared **Truth Map**
+3. **Critique Round**: Each agent critiques the other two agents' work, challenging assumptions and refining confidence scores
+4. **Synthesis**: A Synthesizer agent unifies all perspectives into coherent, decision-grade artifacts
+5. **Post-Delivery Follow-Up**: Continue the conversation — ask questions, challenge claims, or request revisions through an interactive shell
+
+The **Truth Map** is the authoritative session state — a structured graph of claims, assumptions, risks, and decisions with full provenance tracking. All artifacts are generated from this map, never from raw conversation transcripts. If constraints change mid-session, the system automatically recalculates impact and agents reevaluate affected claims.
+
+---
+
+## Installation
+
+Agon can be accessed through multiple interfaces. The CLI is currently available, with web and mobile applications in development.
+
+### CLI Application (Available Now)
+
+The Agon CLI is distributed as an npm package: `@agon_agents/cli`.
+
+#### Prerequisites
+
+- **Node.js 20+** ([download](https://nodejs.org/))
+- **npm** (included with Node.js)
+
+#### Installation Methods (Global, npx, Local)
+
+##### 1) Global Installation (Recommended for daily use)
+
+Install globally to run `agon` from any terminal directory:
+
+```bash
+npm install -g @agon_agents/cli
+```
+
+Verify installed version:
+
+```bash
+agon --version
+```
+
+Launch shell:
+
+```bash
+agon
+```
+
+Inside the shell, run:
+
+```bash
+/help
+```
+
+Update global install to latest stable:
+
+```bash
+npm install -g @agon_agents/cli@latest
+```
+
+Advantages:
+- `agon` works everywhere on your machine
+- Best startup speed for frequent use
+
+Disadvantages:
+- Requires global npm install permissions
+- Version is shared across all projects on your machine
+
+##### 2) npx (No permanent install)
+
+Run without a global install:
+
+```bash
+npx @agon_agents/cli
+```
+
+Check version:
+
+```bash
+npx @agon_agents/cli --version
+```
+
+You can force the newest release explicitly:
+
+```bash
+npx @agon_agents/cli@latest
+```
+
+Advantages:
+- No global install required
+- Easy one-off usage
+
+Disadvantages:
+- Usually slower startup than global install
+- Can depend on registry/network availability when not cached
+
+##### 3) Local Project Installation (version-pinned per repo)
+
+Install into your project:
+
+```bash
+npm install --save-dev @agon_agents/cli
+```
+
+Add script in `package.json`:
+
+```json
+{
+  "scripts": {
+    "agon": "agon"
+  }
+}
+```
+
+Run:
+
+```bash
+npm run agon
+```
+
+Check local installed version:
+
+```bash
+npm exec -- agon --version
+```
+
+Advantages:
+- Version is pinned in project lockfile (reproducible team setup)
+- No global dependency required
+
+Disadvantages:
+- Not directly available as `agon` outside that project
+- Usually invoked via `npm run` / `npm exec`
+
+#### Uninstalling
+
+Remove global installation:
+
+```bash
+npm uninstall -g @agon_agents/cli
+```
+
+Remove local project installation:
+
+```bash
+npm uninstall @agon_agents/cli
+```
+
+#### Quick Start (Current Shell-First UX)
+
+After launching `agon`, use these in-shell commands:
+
+```bash
+/help
+/new
+# then type your idea directly (plain text)
+/status
+/show verdict
+/follow-up "<your request>"
+/exit
+```
+
+Notes:
+- `agon --version` prints the installed CLI version and exits.
+- `agon --help` shows launcher help.
+- On startup, Agon checks npm and alerts when a newer stable version is available.
+
+### Web Application (In Development)
+
+Browser-based interface with visual Truth Map explorer and real-time agent streaming. Coming soon.
+
+### iOS Application (In Development)
+
+Native iOS app for on-the-go strategy analysis. Coming soon.
 
 ---
 
@@ -373,6 +536,14 @@ This addendum documents the currently implemented runtime capabilities and how R
 npm install -g @agon_agents/cli
 ```
 
+- Update to newest stable:
+
+```bash
+npm install -g @agon_agents/cli@latest
+```
+
+- Shell startup performs a lightweight npm check and prints an update notice when a newer `latest` version is available.
+
 - Configure backend API URL:
 
 ```bash
@@ -391,19 +562,52 @@ agon
 agon start "I need a PRD for my project"
 ```
 
-### CLI Publish Pipeline
+### CLI Release Workflow (Manual vs Automated)
 
-- Workflow: `.github/workflows/publish-cli.yaml`
-- Triggers:
-  - Push/merge to `main` (CLI-related paths)
-  - Manual run (`workflow_dispatch`)
-  - GitHub Release published
-- Requirements:
-  - Repository secret `NPM_TOKEN`
-  - Package passes `npm run release:check` (CLI tests + `npm pack --dry-run`)
-- Publish behavior:
-  - If `package.json` version is not yet on npm: publish stable to `latest`
-  - If stable already exists and event is `main` push: publish snapshot build to `main` dist-tag
+**Workflows involved**
+- CI checks: `.github/workflows/ci.yaml`
+- Release + publish: `.github/workflows/publish-cli.yaml`
+
+**Manual steps (developer)**
+1. In any PR that changes `cli/`, create a changeset:
+   - `cd cli`
+   - `npx changeset`
+   - Choose `patch`, `minor`, or `major`
+2. Merge the feature PR to `main`.
+3. Merge the auto-generated release PR:
+   - Title pattern: `chore(release): version @agon_agents/cli`
+
+**Automated steps (GitHub Actions)**
+1. PR CI fails if `cli/` changed but no `cli/.changeset/*.md` file exists.
+2. After merge to `main`, Changesets action:
+   - reads pending changesets
+   - creates/updates the release PR
+   - bumps `cli/package.json` and updates changelog in that PR
+3. When release PR is merged, Changesets action publishes to npm (`latest`) using trusted publishing (OIDC).
+
+**What is automated vs not automated**
+- Automated:
+  - validation that a changeset exists
+  - version number write/update in release PR
+  - changelog generation in release PR
+  - npm publish after release PR merge
+- Manual:
+  - selecting bump type (`patch`/`minor`/`major`)
+  - merging the release PR
+
+**Requirements**
+- npm Trusted Publisher configured for this repository/workflow
+- `publish-cli.yaml` has `id-token: write` (already set)
+- package passes `npm run release:publish` (tests + pack dry-run + publish)
+
+### npm Release and Version Model
+
+- npm package versions are SemVer (for example `1.4.2`).
+- npm does not auto-increment your package version.
+- Developers select bump level in a changeset (`patch`, `minor`, `major`); release automation writes the final `cli/package.json` version.
+- A published `<package>@<version>` is immutable on npm; you cannot republish the same version with different contents.
+- Dist-tags control install channels:
+  - `latest` is the default stable tag used by `npm install -g @agon_agents/cli`
 
 ### Test + Coverage Badges (Auto-Updated on `main`)
 
@@ -426,6 +630,12 @@ agon start "I need a PRD for my project"
 - Local pre-commit test gate is available at `.githooks/pre-commit` and runs:
   - CLI tests
   - backend tests
+- If staged changes include `cli/` without a staged `cli/.changeset/*.md` file, the hook prints a release reminder:
+  - `cd cli && npx changeset`
+  - `git add cli/.changeset/*.md`
+- Optional strict mode for local commits:
+  - `AGON_ENFORCE_CHANGESET=1 git commit ...`
+  - In strict mode, commit is blocked when CLI changes are staged without a changeset file.
 - To enable local git hooks for this repo:
 
 ```bash
