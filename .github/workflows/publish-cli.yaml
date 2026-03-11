@@ -16,6 +16,7 @@ permissions:
 jobs:
   release-cli:
     name: Version and publish @agon_agents/cli
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -56,7 +57,7 @@ jobs:
         with:
           cwd: cli
           version: npx --yes @changesets/cli version
-          publish: npm run release:publish
+          publish: bash ../.github/scripts/publish-cli-if-needed.sh
           title: 'chore(release): version @agon_agents/cli'
           commit: 'chore(release): version @agon_agents/cli'
         env:
