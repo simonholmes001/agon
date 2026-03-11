@@ -55,8 +55,8 @@ jobs:
         uses: changesets/action@v1
         with:
           cwd: cli
-          version: npx --yes @changesets/cli version --cwd cli
-          publish: npm --prefix cli run release:publish
+          version: npx --yes @changesets/cli version
+          publish: npm run release:publish
           title: 'chore(release): version @agon_agents/cli'
           commit: 'chore(release): version @agon_agents/cli'
         env:
