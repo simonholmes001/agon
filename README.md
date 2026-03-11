@@ -1,4 +1,4 @@
-# Agon — Living Strategy Room
+# Agon
 
 [![Next.js](https://img.shields.io/badge/Next.js-16-000000?style=flat-square&logo=next.js)](https://nextjs.org)
 [![React](https://img.shields.io/badge/React-19-61DAFB?style=flat-square&logo=react&logoColor=000)](https://react.dev)
@@ -222,6 +222,16 @@ Agon/
 │   └── Agon.sln
 │
 ├── cli/                  # TypeScript oclif CLI + interactive shell
+│   ├── src/
+│   │   ├── commands/                 # oclif commands (start, show, status, etc.)
+│   │   ├── shell/                    # Interactive shell engine
+│   │   ├── api/                      # Backend API client
+│   │   ├── state/                    # Local session/config management
+│   │   ├── ui/                       # Terminal UI components
+│   │   └── utils/                    # Logger, formatters, error handling
+│   ├── test/                         # Vitest unit tests
+│   └── package.json
+│
 ├── frontend/             # Next.js App Router frontend (scaffold/WIP)
 │
 └── .github/
@@ -232,7 +242,9 @@ Agon/
 
 ---
 
-## Getting Started
+## For Developers
+
+This section is for developers working on the Agon codebase.
 
 ### Prerequisites
 
@@ -240,6 +252,44 @@ Agon/
 - **Node.js 20+** ([download](https://nodejs.org/))
 - **PostgreSQL 16+** (for production; tests use in-memory DB)
 - **Redis 7+** (for production; tests use mocked client)
+
+---
+
+## CLI (TypeScript)
+
+### Architecture
+
+The CLI is built with **oclif** (Open CLI Framework) and provides both command-driven and interactive shell modes.
+
+**Key components:**
+
+- **Commands** (`src/commands/`) - oclif command classes for `start`, `show`, `status`, `sessions`, `resume`, `config`, `answer`
+- **Interactive Shell** (`src/shell/`) - Full-featured REPL with slash commands, history, and streaming output
+- **API Client** (`src/api/`) - REST client wrapper for backend communication with retry logic and error handling
+- **State Management** (`src/state/`) - Local session cache and config management (`~/.agon/`)
+- **UI Components** (`src/ui/`) - Terminal renderers for Markdown, progress indicators, and formatted output
+- **Utilities** (`src/utils/`) - Logger, error formatter, session flow helpers
+
+### Running Tests
+
+```bash
+cd cli
+npm test
+```
+
+### Test Coverage
+
+CLI test projects use **Vitest**. Coverage is tracked in `cli/coverage/coverage-summary.json` and included in the combined badge at the top of this README.
+
+### Key Technologies
+
+- **oclif 3.0** - CLI framework with plugin architecture
+- **inquirer** - Interactive prompts for clarification Q&A
+- **ora** - Terminal spinners for async operations
+- **chalk** - Terminal colors and styling
+- **marked-terminal** - Markdown rendering in terminal
+- **axios** - HTTP client for API communication
+- **Vitest** - Unit testing framework
 
 ---
 
@@ -359,48 +409,77 @@ frontend/
 
 ---
 
-## Development Workflow
+## Testing & Quality
 
-### 1. Backend Development
+### Test Coverage
 
-```bash
-cd backend
+[![CI](https://github.com/simonholmes001/agon/actions/workflows/ci.yaml/badge.svg)](https://github.com/simonholmes001/agon/actions/workflows/ci.yaml)
+[![Update Badges](https://github.com/simonholmes001/agon/actions/workflows/update-badges.yaml/badge.svg)](https://github.com/simonholmes001/agon/actions/workflows/update-badges.yaml)
 
-# Run all tests
-dotnet test
+Coverage and test counts are maintained by CI badges at the top of this README. Badges are automatically refreshed on every push/merge to `main` by `.github/workflows/update-badges.yaml`.
 
-# Run specific test class
-dotnet test --filter "FullyQualifiedName~PatchValidatorTests"
-
-# Build solution
-dotnet build
-
-# Watch mode (auto-rebuild on changes)
-dotnet watch --project src/Agon.Application
-```
-
-### 2. Frontend Development
-
-```bash
-cd frontend
-
-# Development server with hot reload
-npm run dev
-
-# Linting
-npm run lint
-
-# Build for production
-npm run build
-```
-
-### 3. Testing Strategy
+### Testing Strategy
 
 - **Backend**: TDD strict — tests written first, implementation follows
 - **Domain**: Pure unit tests (no mocks, blazing fast)
 - **Application**: Unit tests with mocked repositories
 - **Infrastructure**: Integration tests with in-memory DB and mocked external services
 - **Frontend**: UI tests are currently not part of required CI/merge gates for this phase
+
+---
+
+## CLI Release Process
+
+Local pre-commit test gate is available at `.githooks/pre-commit` and runs:
+- CLI tests
+- Backend tests
+- Changeset validation (if CLI code changed)
+
+To enable local git hooks:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+Optional strict mode for local commits:
+```bash
+AGON_ENFORCE_CHANGESET=1 git commit ...
+```
+
+---
+
+## CLI Release Process
+
+### Workflows
+
+- CI checks: `.github/workflows/ci.yaml`
+- Release + publish: `.github/workflows/publish-cli.yaml`
+
+### Manual Steps (Developer)
+
+1. In any PR that changes `cli/`, create a changeset:
+   ```bash
+   cd cli
+   npx changeset
+   # Choose patch, minor, or major
+   ```
+2. Merge the feature PR to `main`
+3. Merge the auto-generated release PR (title: `chore(release): version @agon_agents/cli`)
+
+### Automated Steps (GitHub Actions)
+
+1. PR CI fails if `cli/` changed without a `cli/.changeset/*.md` file
+2. After merge to `main`, Changesets action:
+   - Reads pending changesets
+   - Creates/updates the release PR
+   - Bumps `cli/package.json` and updates changelog
+3. When release PR is merged, Changesets action publishes to npm (`latest`) using trusted publishing (OIDC)
+
+### Requirements
+
+- npm Trusted Publisher configured for this repository/workflow
+- `publish-cli.yaml` has `id-token: write` permission
+- Package passes `npm run release:publish` (tests + pack dry-run + publish)
 
 ---
 
@@ -474,170 +553,3 @@ Proprietary — All rights reserved.
 ## Contact
 
 For questions or contributions, contact the development team.
-
----
-
-## Addendum (March 2026): Backend + CLI Functionality
-
-[![CI](https://github.com/simonholmes001/agon/actions/workflows/ci.yaml/badge.svg)](https://github.com/simonholmes001/agon/actions/workflows/ci.yaml)
-[![Update Badges](https://github.com/simonholmes001/agon/actions/workflows/update-badges.yaml/badge.svg)](https://github.com/simonholmes001/agon/actions/workflows/update-badges.yaml)
-
-This addendum documents the currently implemented runtime capabilities and how README test/coverage badges are maintained.
-
-### Backend (Agon.Api) — Implemented Capabilities
-
-- Session lifecycle endpoints are implemented in `backend/src/Agon.Api/Controllers/SessionsController.cs`:
-  - `POST /sessions`
-  - `GET /sessions/{id}`
-  - `POST /sessions/{id}/start`
-  - `POST /sessions/{id}/messages`
-  - `GET /sessions/{id}/messages`
-  - `GET /sessions/{id}/truthmap`
-  - `GET /sessions/{id}/snapshots`
-  - `GET /sessions/{id}/artifacts/{type}`
-  - `GET /sessions/{id}/artifacts`
-- Debate orchestration is wired through `Orchestrator` and `AgentRunner` in `backend/src/Agon.Application/Orchestration/`.
-- Real-time signaling is enabled through SignalR (`/hubs/debate`) in `backend/src/Agon.Api/Program.cs`.
-- Artifact synthesis currently includes verdict/plan plus derived risks/assumptions in controller output.
-
-### CLI — Implemented Capabilities
-
-- Command-driven usage:
-  - `agon start "<idea>"`
-  - `agon follow-up "<message>"` (alias of `answer`)
-  - `agon status`
-  - `agon show <artifact>`
-  - `agon sessions`
-  - `agon resume <session-id>`
-  - `agon config`
-- Default interactive shell:
-  - Running `agon` (no subcommand) launches a codex-style interactive shell.
-  - Supported slash commands:
-    - `/help`
-    - `/params`
-    - `/set <apiUrl|defaultFriction|researchEnabled|logLevel> <value>`
-    - `/new`
-    - `/session <session-id>`
-    - `/status [session-id]`
-    - `/show <artifact> [--refresh] [--raw]`
-    - `/follow-up <message>`
-    - `/exit` (alias: `/quit`, `/eot`)
-
-### CLI Installation (npm package)
-
-- Canonical documentation source: this root `README.md` (no separate tracked CLI README).
-- Runtime requirements for CLI users:
-  - Node.js 20+
-  - Reachable Agon backend API URL
-
-- Global install from npm:
-
-```bash
-npm install -g @agon_agents/cli
-```
-
-- Update to newest stable:
-
-```bash
-npm install -g @agon_agents/cli@latest
-```
-
-- Shell startup performs a lightweight npm check and prints an update notice when a newer `latest` version is available.
-
-- Configure backend API URL:
-
-```bash
-agon config set apiUrl https://api.your-domain.com
-```
-
-- Launch interactive shell:
-
-```bash
-agon
-```
-
-- Non-interactive start:
-
-```bash
-agon start "I need a PRD for my project"
-```
-
-### CLI Release Workflow (Manual vs Automated)
-
-**Workflows involved**
-- CI checks: `.github/workflows/ci.yaml`
-- Release + publish: `.github/workflows/publish-cli.yaml`
-
-**Manual steps (developer)**
-1. In any PR that changes `cli/`, create a changeset:
-   - `cd cli`
-   - `npx changeset`
-   - Choose `patch`, `minor`, or `major`
-2. Merge the feature PR to `main`.
-3. Merge the auto-generated release PR:
-   - Title pattern: `chore(release): version @agon_agents/cli`
-
-**Automated steps (GitHub Actions)**
-1. PR CI fails if `cli/` changed but no `cli/.changeset/*.md` file exists.
-2. After merge to `main`, Changesets action:
-   - reads pending changesets
-   - creates/updates the release PR
-   - bumps `cli/package.json` and updates changelog in that PR
-3. When release PR is merged, Changesets action publishes to npm (`latest`) using trusted publishing (OIDC).
-
-**What is automated vs not automated**
-- Automated:
-  - validation that a changeset exists
-  - version number write/update in release PR
-  - changelog generation in release PR
-  - npm publish after release PR merge
-- Manual:
-  - selecting bump type (`patch`/`minor`/`major`)
-  - merging the release PR
-
-**Requirements**
-- npm Trusted Publisher configured for this repository/workflow
-- `publish-cli.yaml` has `id-token: write` (already set)
-- package passes `npm run release:publish` (tests + pack dry-run + publish)
-
-### npm Release and Version Model
-
-- npm package versions are SemVer (for example `1.4.2`).
-- npm does not auto-increment your package version.
-- Developers select bump level in a changeset (`patch`, `minor`, `major`); release automation writes the final `cli/package.json` version.
-- A published `<package>@<version>` is immutable on npm; you cannot republish the same version with different contents.
-- Dist-tags control install channels:
-  - `latest` is the default stable tag used by `npm install -g @agon_agents/cli`
-
-### Test + Coverage Badges (Auto-Updated on `main`)
-
-- README badges are automatically refreshed on every push/merge to `main` by:
-  - Workflow: `.github/workflows/update-badges.yaml`
-  - Script: `.github/scripts/update-readme-badges.sh`
-- The workflow:
-  1. Runs CLI unit tests
-  2. Runs backend tests (`dotnet test`)
-  3. Computes total passing test count (CLI + backend)
-  4. Computes combined line coverage using:
-     - CLI V8 coverage summary (`cli/coverage/coverage-summary.json`)
-     - backend Cobertura attachments (`coverage.cobertura.xml`)
-  5. Updates the `Tests` badge and `Coverage` badge in `README.md`
-  6. Commits and pushes badge changes back to `main` (if changed)
-- Coverage percentage shown in the README badge is the combined line coverage across CLI + backend test runs.
-
-### Local Hooks and Quality Gates
-
-- Local pre-commit test gate is available at `.githooks/pre-commit` and runs:
-  - CLI tests
-  - backend tests
-- If staged changes include `cli/` without a staged `cli/.changeset/*.md` file, the hook prints a release reminder:
-  - `cd cli && npx changeset`
-  - `git add cli/.changeset/*.md`
-- Optional strict mode for local commits:
-  - `AGON_ENFORCE_CHANGESET=1 git commit ...`
-  - In strict mode, commit is blocked when CLI changes are staged without a changeset file.
-- To enable local git hooks for this repo:
-
-```bash
-git config core.hooksPath .githooks
-```
