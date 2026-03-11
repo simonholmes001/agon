@@ -1,0 +1,59 @@
+name: Infrastructure Deploy (Dev)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'infrastructure/**'
+      - '.github/workflows/infrastructure-deploy-dev.yaml'
+      - '.github/workflows/infrastructure-validate.yaml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: infra-dev-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy-dev:
+    name: Deploy Dev Infrastructure
+    runs-on: ubuntu-latest
+    environment: dev
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Login to Azure (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Validate required deployment secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${{ secrets.AZURE_POSTGRES_ADMIN_PASSWORD }}" ]; then
+            echo "::error::Missing AZURE_POSTGRES_ADMIN_PASSWORD secret."
+            exit 1
+          fi
+
+      - name: Deploy dev infrastructure (subscription scope)
+        uses: azure/cli@v2
+        with:
+          inlineScript: |
+            az account show --query "{name:name, subscriptionId:id}" -o table
+            az deployment sub create \
+              --name "agon-dev-deploy-${{ github.run_id }}" \
+              --location francecentral \
+              --template-file infrastructure/bicep/main.bicep \
+              --parameters @infrastructure/bicep/parameters/dev.parameters.json \
+              --parameters postgresAdminPassword='${{ secrets.AZURE_POSTGRES_ADMIN_PASSWORD }}' \
+              --parameters openAiApiKey='${{ secrets.OPENAI_KEY }}' \
+              --parameters anthropicApiKey='${{ secrets.CLAUDE_KEY }}' \
+              --parameters googleApiKey='${{ secrets.GEMINI_KEY }}' \
+              --parameters deepSeekApiKey='${{ secrets.DEEPSEEK_KEY }}'
