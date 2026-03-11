@@ -46,71 +46,92 @@ Agon can be accessed through multiple interfaces. The CLI is currently available
 
 ### CLI Application (Available Now)
 
-The Agon CLI is distributed as an npm package and can be installed globally or used via `npx`.
+The Agon CLI is distributed as an npm package: `@agon_agents/cli`.
 
 #### Prerequisites
 
 - **Node.js 20+** ([download](https://nodejs.org/))
 - **npm** (included with Node.js)
 
-#### Global Installation (Recommended)
+#### Installation Methods (Global, npx, Local)
 
-Install globally to use the `agon` command from anywhere:
+##### 1) Global Installation (Recommended for daily use)
+
+Install globally to run `agon` from any terminal directory:
 
 ```bash
 npm install -g @agon_agents/cli
 ```
 
-Update to the newest stable release:
-
-```bash
-npm install -g @agon_agents/cli@latest
-```
-
-Verify installation:
+Verify installed version:
 
 ```bash
 agon --version
 ```
 
-When you run `agon`, the shell now checks npm for `@agon_agents/cli@latest`.  
-If a newer stable version exists, Agon prints an in-shell update notice with the install command.
-
-Launch the interactive shell:
+Launch shell:
 
 ```bash
 agon
 ```
 
-Or start a new session directly:
+Inside the shell, run:
 
 ```bash
-agon start "Build a SaaS platform for healthcare"
+/help
 ```
 
-#### Using npx (No Installation Required)
-
-Run Agon without installing:
+Update global install to latest stable:
 
 ```bash
-npx @agon_agents/cli start "Your idea here"
+npm install -g @agon_agents/cli@latest
 ```
 
-Launch interactive shell:
+Advantages:
+- `agon` works everywhere on your machine
+- Best startup speed for frequent use
+
+Disadvantages:
+- Requires global npm install permissions
+- Version is shared across all projects on your machine
+
+##### 2) npx (No permanent install)
+
+Run without a global install:
 
 ```bash
 npx @agon_agents/cli
 ```
 
-#### Local Installation (Project-Specific)
+Check version:
 
-Install as a development dependency in your project:
+```bash
+npx @agon_agents/cli --version
+```
+
+You can force the newest release explicitly:
+
+```bash
+npx @agon_agents/cli@latest
+```
+
+Advantages:
+- No global install required
+- Easy one-off usage
+
+Disadvantages:
+- Usually slower startup than global install
+- Can depend on registry/network availability when not cached
+
+##### 3) Local Project Installation (version-pinned per repo)
+
+Install into your project:
 
 ```bash
 npm install --save-dev @agon_agents/cli
 ```
 
-Then use via npm scripts in `package.json`:
+Add script in `package.json`:
 
 ```json
 {
@@ -120,51 +141,58 @@ Then use via npm scripts in `package.json`:
 }
 ```
 
-Run with:
+Run:
 
 ```bash
 npm run agon
 ```
 
+Check local installed version:
+
+```bash
+npm exec -- agon --version
+```
+
+Advantages:
+- Version is pinned in project lockfile (reproducible team setup)
+- No global dependency required
+
+Disadvantages:
+- Not directly available as `agon` outside that project
+- Usually invoked via `npm run` / `npm exec`
+
 #### Uninstalling
 
-To remove the global installation:
+Remove global installation:
 
 ```bash
 npm uninstall -g @agon_agents/cli
 ```
 
-To remove from a project:
+Remove local project installation:
 
 ```bash
 npm uninstall @agon_agents/cli
 ```
 
-#### Quick Start
+#### Quick Start (Current Shell-First UX)
 
-After installation, start your first session:
-
-```bash
-# Launch interactive shell
-agon
-
-# Or start directly with an idea
-agon start "Migrate our monolith to microservices"
-
-# Check session status
-agon status
-
-# View generated artifacts
-agon show verdict
-agon show plan
-agon show prd
-```
-
-For full command documentation, run:
+After launching `agon`, use these in-shell commands:
 
 ```bash
-agon --help
+/help
+/new
+# then type your idea directly (plain text)
+/status
+/show verdict
+/follow-up "<your request>"
+/exit
 ```
+
+Notes:
+- `agon --version` prints the installed CLI version and exits.
+- `agon --help` shows launcher help.
+- On startup, Agon checks npm and alerts when a newer stable version is available.
 
 ### Web Application (In Development)
 
