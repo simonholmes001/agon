@@ -302,7 +302,7 @@ resource postgresDb 'Microsoft.DBforPostgreSQL/flexibleServers/databases@2022-12
   }
 }
 
-resource redis 'Microsoft.Cache/Redis@2024-03-01' = {
+resource redis 'Microsoft.Cache/Redis@2023-08-01' = {
   name: redisName
   location: location
   tags: tags
@@ -374,7 +374,8 @@ resource appService 'Microsoft.Web/sites@2023-12-01' = {
 }
 
 resource keyVaultSecretsReaderAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(keyVault.id, appService.identity.principalId, keyVaultSecretsUserRoleDefinitionId)
+  // Role assignment name must be deployment-time deterministic; use stable resource IDs/names only.
+  name: guid(keyVault.id, appService.name, keyVaultSecretsUserRoleDefinitionId)
   scope: keyVault
   properties: {
     roleDefinitionId: keyVaultSecretsUserRoleDefinitionId
@@ -395,7 +396,7 @@ resource redisConnectionSecret 'Microsoft.KeyVault/vaults/secrets@2023-02-01' = 
   parent: keyVault
   name: 'connectionstrings-redis'
   properties: {
-    value: '${redis.name}.redis.cache.windows.net:6380,password=${listKeys(redis.id, '2024-03-01').primaryKey},ssl=True,abortConnect=False'
+    value: '${redis.name}.redis.cache.windows.net:6380,password=${redis.listKeys().primaryKey},ssl=True,abortConnect=False'
   }
 }
 
