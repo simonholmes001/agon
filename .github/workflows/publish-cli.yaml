@@ -29,10 +29,16 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22.14.0
           registry-url: https://registry.npmjs.org
           cache: npm
           cache-dependency-path: cli/package-lock.json
+
+      - name: Ensure npm CLI supports trusted publishing
+        run: |
+          npm i -g npm@^11.5.1
+          node -v
+          npm -v
 
       - name: Install dependencies
         run: npm ci
@@ -62,8 +68,6 @@ jobs:
       - name: Publish stable version (latest dist-tag)
         if: steps.npm_version.outputs.exists == 'false'
         run: npm publish
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Publish merge snapshot (main dist-tag)
         if: steps.npm_version.outputs.exists == 'true' && github.event_name == 'push'
@@ -78,5 +82,3 @@ jobs:
 
           npm version "$SNAPSHOT_VERSION" --no-git-tag-version
           npm publish --tag main
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

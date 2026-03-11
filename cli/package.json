@@ -6,7 +6,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/simonholmes001/agon.git",
+    "url": "git+https://github.com/simonholmes001/agon.git",
     "directory": "cli"
   },
   "homepage": "https://github.com/simonholmes001/agon#readme",
@@ -20,12 +20,12 @@
     "agent",
     "strategy"
   ],
-  "packageManager": "npm@10",
+  "packageManager": "npm@11.5.1",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
-    "agon": "./bin/run.js"
+    "agon": "bin/run.js"
   },
   "files": [
     "bin",
@@ -82,8 +82,7 @@
     "node": ">=18.0.0"
   },
   "publishConfig": {
-    "access": "public",
-    "provenance": true
+    "access": "public"
   },
   "oclif": {
     "bin": "agon",

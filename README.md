@@ -12,32 +12,164 @@
 [![TDD](https://img.shields.io/badge/Methodology-TDD-red?style=flat-square)]()
 [![Licence](https://img.shields.io/badge/Licence-Private-lightgrey?style=flat-square)]()
 
-### Badge Guide
-
-- **Next.js / React / TypeScript / Tailwind CSS**: front-end stack currently present in `frontend/` (scaffold phase).
-- **.NET**: backend runtime and project target for all `backend/` services and tests.
-- **Tested with Vitest**: test framework used by the CLI (`cli/test`).
-- **Tested with xUnit**: test framework used by backend test projects (`backend/tests`).
-- **Tests**: total passing tests across CLI + backend from the `main` branch badge workflow.
-- **Coverage**: combined line coverage across CLI + backend (frontend is intentionally excluded in current CI gates).
-- **Methodology TDD**: engineering policy (tests first, then implementation).
-- **Licence**: repository license classification (private/proprietary project).
-
 > A council of specialist AI agents debates your idea so you don't ship your blind spots.
-
-Agon is an agentic idea-analysis workspace. You bring a raw idea — a product concept, a technical proposal, a strategic pivot — and a council of AI agents drawn from different model providers tears it apart, stress-tests it, and reassembles it into a decision-grade output pack.
-
-Unlike a single-prompt AI chat, Agon maintains a **living Truth Map**: a structured, versioned graph of claims, assumptions, risks, and decisions that every agent reads from and writes to. If a constraint changes mid-session, the system propagates that change and agents re-evaluate automatically.
 
 ---
 
 ## Project Overview
 
-Agon is an **agentic idea analysis workspace** — a "living strategy room" where a user brings an idea and a council of specialist AI agents debates, challenges, and develops it into a decision-grade output pack.
+**Agon** transforms raw ideas into production-ready documentation through structured multi-agent analysis. You submit a product concept, technical proposal, or strategic decision, and a council of AI agents (powered by OpenAI GPT, Google Gemini, and Anthropic Claude) collaboratively analyze it across multiple rounds to produce:
 
-Unlike a linear "input → debate → output" pipeline, Agon maintains a continuously updated **Global Workspace** ("Truth Map") that all agents read from and write to. If a constraint changes mid-session, the system updates the state and agents immediately re-evaluate their prior claims.
+- **Verdict** — Executive summary with go/no-go recommendation
+- **30/60/90 Day Plan** — Phased implementation roadmap  
+- **Product Requirements Document (PRD)** — Full specifications with acceptance criteria
+- **Risk Registry** — Identified risks with severity, likelihood, and mitigation strategies
+- **Assumption Validation** — Critical assumptions requiring validation before execution
+- **Architecture Overview** — Technical design and system topology (Mermaid diagrams)
+- **Copilot Instructions** — Implementation guidance for development
+
+### How It Works
+
+1. **Clarification Phase**: A Moderator agent asks clarifying questions to refine your idea into a structured "Debate Brief"
+2. **Analysis Round**: Three council agents (GPT, Gemini, Claude) independently analyze your idea in parallel, each adding claims, assumptions, and risks to a shared **Truth Map**
+3. **Critique Round**: Each agent critiques the other two agents' work, challenging assumptions and refining confidence scores
+4. **Synthesis**: A Synthesizer agent unifies all perspectives into coherent, decision-grade artifacts
+5. **Post-Delivery Follow-Up**: Continue the conversation — ask questions, challenge claims, or request revisions through an interactive shell
+
+The **Truth Map** is the authoritative session state — a structured graph of claims, assumptions, risks, and decisions with full provenance tracking. All artifacts are generated from this map, never from raw conversation transcripts. If constraints change mid-session, the system automatically recalculates impact and agents reevaluate affected claims.
+
+### Primary Interface
+
+**CLI-first architecture** (Phase 1): An interactive terminal shell (`agon`) provides immediate access to multi-agent analysis with real-time streaming output. Web UI planned for Phase 2.
 
 This repository uses a **single canonical documentation source**: this root `README.md`.
+
+---
+
+## Installation
+
+Agon can be accessed through multiple interfaces. The CLI is currently available, with web and mobile applications in development.
+
+### CLI Application (Available Now)
+
+The Agon CLI is distributed as an npm package and can be installed globally or used via `npx`.
+
+#### Prerequisites
+
+- **Node.js 20+** ([download](https://nodejs.org/))
+- **npm** (included with Node.js)
+
+#### Global Installation (Recommended)
+
+Install globally to use the `agon` command from anywhere:
+
+```bash
+npm install -g @agon_agents/cli
+```
+
+Verify installation:
+
+```bash
+agon --version
+```
+
+Launch the interactive shell:
+
+```bash
+agon
+```
+
+Or start a new session directly:
+
+```bash
+agon start "Build a SaaS platform for healthcare"
+```
+
+#### Using npx (No Installation Required)
+
+Run Agon without installing:
+
+```bash
+npx @agon_agents/cli start "Your idea here"
+```
+
+Launch interactive shell:
+
+```bash
+npx @agon_agents/cli
+```
+
+#### Local Installation (Project-Specific)
+
+Install as a development dependency in your project:
+
+```bash
+npm install --save-dev @agon_agents/cli
+```
+
+Then use via npm scripts in `package.json`:
+
+```json
+{
+  "scripts": {
+    "agon": "agon"
+  }
+}
+```
+
+Run with:
+
+```bash
+npm run agon
+```
+
+#### Uninstalling
+
+To remove the global installation:
+
+```bash
+npm uninstall -g @agon_agents/cli
+```
+
+To remove from a project:
+
+```bash
+npm uninstall @agon_agents/cli
+```
+
+#### Quick Start
+
+After installation, start your first session:
+
+```bash
+# Launch interactive shell
+agon
+
+# Or start directly with an idea
+agon start "Migrate our monolith to microservices"
+
+# Check session status
+agon status
+
+# View generated artifacts
+agon show verdict
+agon show plan
+agon show prd
+```
+
+For full command documentation, run:
+
+```bash
+agon --help
+```
+
+### Web Application (In Development)
+
+Browser-based interface with visual Truth Map explorer and real-time agent streaming. Coming soon.
+
+### iOS Application (In Development)
+
+Native iOS app for on-the-go strategy analysis. Coming soon.
 
 ---
 
@@ -399,7 +531,7 @@ agon start "I need a PRD for my project"
   - Manual run (`workflow_dispatch`)
   - GitHub Release published
 - Requirements:
-  - Repository secret `NPM_TOKEN`
+  - npm Trusted Publisher configured for this repository/workflow
   - Package passes `npm run release:check` (CLI tests + `npm pack --dry-run`)
 - Publish behavior:
   - If `package.json` version is not yet on npm: publish stable to `latest`
