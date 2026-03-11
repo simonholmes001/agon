@@ -534,29 +534,52 @@ agon
 agon start "I need a PRD for my project"
 ```
 
-### CLI Publish Pipeline
+### CLI Release Workflow (Manual vs Automated)
 
-- Workflow: `.github/workflows/publish-cli.yaml`
-- Triggers:
-  - Push/merge to `main` (CLI-related paths)
-  - Manual run (`workflow_dispatch`)
-  - GitHub Release published
-- Requirements:
-  - npm Trusted Publisher configured for this repository/workflow
-  - Package passes `npm run release:check` (CLI tests + `npm pack --dry-run`)
-- Publish behavior:
-  - If `package.json` version is not yet on npm: publish stable to `latest`
-  - If stable already exists and event is `main` push: publish snapshot build to `main` dist-tag
+**Workflows involved**
+- CI checks: `.github/workflows/ci.yaml`
+- Release + publish: `.github/workflows/publish-cli.yaml`
+
+**Manual steps (developer)**
+1. In any PR that changes `cli/`, create a changeset:
+   - `cd cli`
+   - `npx changeset`
+   - Choose `patch`, `minor`, or `major`
+2. Merge the feature PR to `main`.
+3. Merge the auto-generated release PR:
+   - Title pattern: `chore(release): version @agon_agents/cli`
+
+**Automated steps (GitHub Actions)**
+1. PR CI fails if `cli/` changed but no `cli/.changeset/*.md` file exists.
+2. After merge to `main`, Changesets action:
+   - reads pending changesets
+   - creates/updates the release PR
+   - bumps `cli/package.json` and updates changelog in that PR
+3. When release PR is merged, Changesets action publishes to npm (`latest`) using trusted publishing (OIDC).
+
+**What is automated vs not automated**
+- Automated:
+  - validation that a changeset exists
+  - version number write/update in release PR
+  - changelog generation in release PR
+  - npm publish after release PR merge
+- Manual:
+  - selecting bump type (`patch`/`minor`/`major`)
+  - merging the release PR
+
+**Requirements**
+- npm Trusted Publisher configured for this repository/workflow
+- `publish-cli.yaml` has `id-token: write` (already set)
+- package passes `npm run release:publish` (tests + pack dry-run + publish)
 
 ### npm Release and Version Model
 
 - npm package versions are SemVer (for example `1.4.2`).
 - npm does not auto-increment your package version.
-- Developers control versions by updating `cli/package.json` (typically via `npm version patch|minor|major`).
+- Developers select bump level in a changeset (`patch`, `minor`, `major`); release automation writes the final `cli/package.json` version.
 - A published `<package>@<version>` is immutable on npm; you cannot republish the same version with different contents.
 - Dist-tags control install channels:
   - `latest` is the default stable tag used by `npm install -g @agon_agents/cli`
-  - `main` is used in this repo for post-merge snapshot builds
 
 ### Test + Coverage Badges (Auto-Updated on `main`)
 
@@ -579,6 +602,12 @@ agon start "I need a PRD for my project"
 - Local pre-commit test gate is available at `.githooks/pre-commit` and runs:
   - CLI tests
   - backend tests
+- If staged changes include `cli/` without a staged `cli/.changeset/*.md` file, the hook prints a release reminder:
+  - `cd cli && npx changeset`
+  - `git add cli/.changeset/*.md`
+- Optional strict mode for local commits:
+  - `AGON_ENFORCE_CHANGESET=1 git commit ...`
+  - In strict mode, commit is blocked when CLI changes are staged without a changeset file.
 - To enable local git hooks for this repo:
 
 ```bash
