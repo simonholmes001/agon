@@ -12,13 +12,13 @@
 [![TDD](https://img.shields.io/badge/Methodology-TDD-red?style=flat-square)]()
 [![Licence](https://img.shields.io/badge/Licence-Private-lightgrey?style=flat-square)]()
 
-> A council of specialist AI agents debates your idea so you don't ship your blind spots.
+> Multi-agent AI analysis that transforms raw ideas into production-ready documentation.
 
 ---
 
 ## Project Overview
 
-**Agon** transforms raw ideas into production-ready documentation through structured multi-agent analysis. You submit a product concept, technical proposal, or strategic decision, and a council of AI agents (powered by OpenAI GPT, Google Gemini, and Anthropic Claude) collaboratively analyze it across multiple rounds to produce:
+**Agon** transforms raw ideas into production-ready documentation through structured multi-agent analysis. You submit a product concept, technical proposal, strategic decision, or just a simple question, and a council of AI agents (powered by OpenAI GPT, Google Gemini, and Anthropic Claude) collaboratively analyze it across multiple rounds to produce:
 
 - **Verdict** — Executive summary with go/no-go recommendation
 - **30/60/90 Day Plan** — Phased implementation roadmap  
@@ -37,12 +37,6 @@
 5. **Post-Delivery Follow-Up**: Continue the conversation — ask questions, challenge claims, or request revisions through an interactive shell
 
 The **Truth Map** is the authoritative session state — a structured graph of claims, assumptions, risks, and decisions with full provenance tracking. All artifacts are generated from this map, never from raw conversation transcripts. If constraints change mid-session, the system automatically recalculates impact and agents reevaluate affected claims.
-
-### Primary Interface
-
-**CLI-first architecture** (Phase 1): An interactive terminal shell (`agon`) provides immediate access to multi-agent analysis with real-time streaming output. Web UI planned for Phase 2.
-
-This repository uses a **single canonical documentation source**: this root `README.md`.
 
 ---
 
@@ -67,11 +61,20 @@ Install globally to use the `agon` command from anywhere:
 npm install -g @agon_agents/cli
 ```
 
+Update to the newest stable release:
+
+```bash
+npm install -g @agon_agents/cli@latest
+```
+
 Verify installation:
 
 ```bash
 agon --version
 ```
+
+When you run `agon`, the shell now checks npm for `@agon_agents/cli@latest`.  
+If a newer stable version exists, Agon prints an in-shell update notice with the install command.
 
 Launch the interactive shell:
 
@@ -505,6 +508,14 @@ This addendum documents the currently implemented runtime capabilities and how R
 npm install -g @agon_agents/cli
 ```
 
+- Update to newest stable:
+
+```bash
+npm install -g @agon_agents/cli@latest
+```
+
+- Shell startup performs a lightweight npm check and prints an update notice when a newer `latest` version is available.
+
 - Configure backend API URL:
 
 ```bash
@@ -536,6 +547,16 @@ agon start "I need a PRD for my project"
 - Publish behavior:
   - If `package.json` version is not yet on npm: publish stable to `latest`
   - If stable already exists and event is `main` push: publish snapshot build to `main` dist-tag
+
+### npm Release and Version Model
+
+- npm package versions are SemVer (for example `1.4.2`).
+- npm does not auto-increment your package version.
+- Developers control versions by updating `cli/package.json` (typically via `npm version patch|minor|major`).
+- A published `<package>@<version>` is immutable on npm; you cannot republish the same version with different contents.
+- Dist-tags control install channels:
+  - `latest` is the default stable tag used by `npm install -g @agon_agents/cli`
+  - `main` is used in this repo for post-merge snapshot builds
 
 ### Test + Coverage Badges (Auto-Updated on `main`)
 
