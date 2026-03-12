@@ -13,6 +13,9 @@ permissions:
   contents: read
   id-token: write
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
 concurrency:
   group: infra-dev-deploy
   cancel-in-progress: false
@@ -35,15 +38,23 @@ jobs:
 
       - name: Validate required deployment secrets
         shell: bash
+        env:
+          AZURE_POSTGRES_ADMIN_PASSWORD: ${{ secrets.AZURE_POSTGRES_ADMIN_PASSWORD }}
         run: |
           set -euo pipefail
-          if [ -z "${{ secrets.AZURE_POSTGRES_ADMIN_PASSWORD }}" ]; then
+          if [ -z "${AZURE_POSTGRES_ADMIN_PASSWORD:-}" ]; then
             echo "::error::Missing AZURE_POSTGRES_ADMIN_PASSWORD secret."
             exit 1
           fi
 
       - name: Deploy dev infrastructure (subscription scope)
         uses: azure/cli@v2
+        env:
+          AZURE_POSTGRES_ADMIN_PASSWORD: ${{ secrets.AZURE_POSTGRES_ADMIN_PASSWORD }}
+          OPENAI_KEY: ${{ secrets.OPENAI_KEY }}
+          CLAUDE_KEY: ${{ secrets.CLAUDE_KEY }}
+          GEMINI_KEY: ${{ secrets.GEMINI_KEY }}
+          DEEPSEEK_KEY: ${{ secrets.DEEPSEEK_KEY }}
         with:
           inlineScript: |
             az account show --query "{name:name, subscriptionId:id}" -o table
@@ -52,8 +63,8 @@ jobs:
               --location francecentral \
               --template-file infrastructure/bicep/main.bicep \
               --parameters @infrastructure/bicep/parameters/dev.parameters.json \
-              --parameters postgresAdminPassword='${{ secrets.AZURE_POSTGRES_ADMIN_PASSWORD }}' \
-              --parameters openAiApiKey='${{ secrets.OPENAI_KEY }}' \
-              --parameters anthropicApiKey='${{ secrets.CLAUDE_KEY }}' \
-              --parameters googleApiKey='${{ secrets.GEMINI_KEY }}' \
-              --parameters deepSeekApiKey='${{ secrets.DEEPSEEK_KEY }}'
+              --parameters postgresAdminPassword="$AZURE_POSTGRES_ADMIN_PASSWORD" \
+              --parameters openAiApiKey="${OPENAI_KEY:-}" \
+              --parameters anthropicApiKey="${CLAUDE_KEY:-}" \
+              --parameters googleApiKey="${GEMINI_KEY:-}" \
+              --parameters deepSeekApiKey="${DEEPSEEK_KEY:-}"

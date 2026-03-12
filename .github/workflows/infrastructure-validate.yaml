@@ -12,6 +12,9 @@ permissions:
   contents: read
   id-token: write
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
 jobs:
   bicep-build:
     name: Bicep Build Validation
@@ -46,15 +49,19 @@ jobs:
 
       - name: Validate required secrets
         shell: bash
+        env:
+          AZURE_POSTGRES_ADMIN_PASSWORD: ${{ secrets.AZURE_POSTGRES_ADMIN_PASSWORD }}
         run: |
           set -euo pipefail
-          if [ -z "${{ secrets.AZURE_POSTGRES_ADMIN_PASSWORD }}" ]; then
+          if [ -z "${AZURE_POSTGRES_ADMIN_PASSWORD:-}" ]; then
             echo "::error::Missing AZURE_POSTGRES_ADMIN_PASSWORD secret."
             exit 1
           fi
 
       - name: Run what-if for dev deployment
         uses: azure/cli@v2
+        env:
+          AZURE_POSTGRES_ADMIN_PASSWORD: ${{ secrets.AZURE_POSTGRES_ADMIN_PASSWORD }}
         with:
           inlineScript: |
             az account show --query "{name:name, subscriptionId:id}" -o table
@@ -63,4 +70,4 @@ jobs:
               --location francecentral \
               --template-file infrastructure/bicep/main.bicep \
               --parameters @infrastructure/bicep/parameters/dev.parameters.json \
-              --parameters postgresAdminPassword='${{ secrets.AZURE_POSTGRES_ADMIN_PASSWORD }}'
+              --parameters postgresAdminPassword="$AZURE_POSTGRES_ADMIN_PASSWORD"
