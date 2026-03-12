@@ -1,0 +1,27 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "location": {
+      "value": "francecentral"
+    },
+    "environment": {
+      "value": "dev"
+    },
+    "workloadName": {
+      "value": "agon"
+    },
+    "namePrefix": {
+      "value": "agon-dev-frc"
+    },
+    "alertEmail": {
+      "value": "simonholmesabc@gmail.com"
+    },
+    "postgresAdminLogin": {
+      "value": "agonadmin"
+    },
+    "tenantId": {
+      "value": "17ca2540-dd3e-4204-b2f7-a3e3ad209719"
+    }
+  }
+}

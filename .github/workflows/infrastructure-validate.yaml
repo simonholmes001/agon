@@ -1,0 +1,73 @@
+name: Infrastructure Validate (PR)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'infrastructure/**'
+      - '.github/workflows/infrastructure-validate.yaml'
+      - '.github/workflows/infrastructure-deploy-dev.yaml'
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
+jobs:
+  bicep-build:
+    name: Bicep Build Validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Build main Bicep template
+        uses: azure/cli@v2
+        with:
+          inlineScript: |
+            az bicep install
+            az bicep build --file infrastructure/bicep/main.bicep
+            az bicep build --file infrastructure/bicep/modules/backend-platform-dev.bicep
+
+  what-if-dev:
+    name: Dev What-If (subscription scope)
+    runs-on: ubuntu-latest
+    needs: bicep-build
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Login to Azure (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Validate required secrets
+        shell: bash
+        env:
+          AZURE_POSTGRES_ADMIN_PASSWORD: ${{ secrets.AZURE_POSTGRES_ADMIN_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -z "${AZURE_POSTGRES_ADMIN_PASSWORD:-}" ]; then
+            echo "::error::Missing AZURE_POSTGRES_ADMIN_PASSWORD secret."
+            exit 1
+          fi
+
+      - name: Run what-if for dev deployment
+        uses: azure/cli@v2
+        env:
+          AZURE_POSTGRES_ADMIN_PASSWORD: ${{ secrets.AZURE_POSTGRES_ADMIN_PASSWORD }}
+        with:
+          inlineScript: |
+            az account show --query "{name:name, subscriptionId:id}" -o table
+            az deployment sub what-if \
+              --name "agon-dev-whatif-${{ github.run_id }}" \
+              --location francecentral \
+              --template-file infrastructure/bicep/main.bicep \
+              --parameters @infrastructure/bicep/parameters/dev.parameters.json \
+              --parameters postgresAdminPassword="$AZURE_POSTGRES_ADMIN_PASSWORD"

@@ -19,6 +19,14 @@ applyTo: '**'
 
 **Task backlog:** See `backlog.instructions.md` — it is auto-injected into every session. Update it as tasks are completed or added.
 
+### Azure Infrastructure Naming References
+
+When defining Azure resource names and abbreviations, use these official references:
+
+- https://learn.microsoft.com/en-us/azure/cloud-adoption-framework/ready/azure-best-practices/resource-naming?toc=%2Fazure%2Fazure-resource-manager%2Fmanagement%2Ftoc.json#example-azure-resource-names
+- https://learn.microsoft.com/en-us/azure/cloud-adoption-framework/ready/azure-best-practices/resource-abbreviations
+- https://learn.microsoft.com/en-us/azure/azure-resource-manager/management/resource-name-rules
+
 ---
 
 ## Engineering Principles (Non-Negotiable)
