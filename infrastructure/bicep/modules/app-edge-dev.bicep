@@ -129,19 +129,19 @@ resource appService 'Microsoft.Web/sites@2023-12-01' = {
         }
         {
           name: 'OPENAI_KEY'
-          value: '@Microsoft.KeyVault(SecretUri=${openAiSecretUri})'
+          value: empty(openAiSecretUri) ? '' : '@Microsoft.KeyVault(SecretUri=${openAiSecretUri})'
         }
         {
           name: 'CLAUDE_KEY'
-          value: '@Microsoft.KeyVault(SecretUri=${anthropicSecretUri})'
+          value: empty(anthropicSecretUri) ? '' : '@Microsoft.KeyVault(SecretUri=${anthropicSecretUri})'
         }
         {
           name: 'GEMINI_KEY'
-          value: '@Microsoft.KeyVault(SecretUri=${googleSecretUri})'
+          value: empty(googleSecretUri) ? '' : '@Microsoft.KeyVault(SecretUri=${googleSecretUri})'
         }
         {
           name: 'DEEPSEEK_KEY'
-          value: '@Microsoft.KeyVault(SecretUri=${deepSeekSecretUri})'
+          value: empty(deepSeekSecretUri) ? '' : '@Microsoft.KeyVault(SecretUri=${deepSeekSecretUri})'
         }
       ]
     }

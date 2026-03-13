@@ -34,11 +34,11 @@ Naming follows Azure CAF guidance:
 
 ## Environment Values (Current)
 
-- Subscription ID: `c08d1de9-6131-427d-b974-e0b52c22eae1`
-- Tenant ID: `17ca2540-dd3e-4204-b2f7-a3e3ad209719`
-- Region: `francecentral`
-- Prefix: `agon-dev-frc`
-- Alert email: `simonholmesabc@gmail.com`
+- Subscription ID: `<your-subscription-id>`
+- Tenant ID: `<your-tenant-id>`
+- Region: `francecentral` (or your approved region)
+- Prefix: `agon-dev-frc` (or your approved prefix)
+- Alert email: `<your-alert-email>`
 
 ## One-Time Azure Identity Setup (OIDC)
 

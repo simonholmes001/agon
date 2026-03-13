@@ -58,6 +58,10 @@ var tags = {
 var keyVaultName = 'kv-${replace(namePrefix, '-', '')}-${take(uniqueString(resourceGroup().id), 6)}'
 var postgresServerName = 'psql-${namePrefix}-${take(uniqueString(resourceGroup().id), 6)}'
 var redisName = 'redis-${namePrefix}-${take(uniqueString(resourceGroup().id), 6)}'
+var hasOpenAiKey = !empty(openAiApiKey)
+var hasAnthropicKey = !empty(anthropicApiKey)
+var hasGoogleKey = !empty(googleApiKey)
+var hasDeepSeekKey = !empty(deepSeekApiKey)
 
 resource keyVault 'Microsoft.KeyVault/vaults@2023-02-01' = {
   name: keyVaultName
@@ -232,7 +236,7 @@ resource redisConnectionSecret 'Microsoft.KeyVault/vaults/secrets@2023-02-01' = 
   }
 }
 
-resource openAiSecret 'Microsoft.KeyVault/vaults/secrets@2023-02-01' = {
+resource openAiSecret 'Microsoft.KeyVault/vaults/secrets@2023-02-01' = if (hasOpenAiKey) {
   parent: keyVault
   name: 'openai-key'
   properties: {
@@ -240,7 +244,7 @@ resource openAiSecret 'Microsoft.KeyVault/vaults/secrets@2023-02-01' = {
   }
 }
 
-resource anthropicSecret 'Microsoft.KeyVault/vaults/secrets@2023-02-01' = {
+resource anthropicSecret 'Microsoft.KeyVault/vaults/secrets@2023-02-01' = if (hasAnthropicKey) {
   parent: keyVault
   name: 'claude-key'
   properties: {
@@ -248,7 +252,7 @@ resource anthropicSecret 'Microsoft.KeyVault/vaults/secrets@2023-02-01' = {
   }
 }
 
-resource googleSecret 'Microsoft.KeyVault/vaults/secrets@2023-02-01' = {
+resource googleSecret 'Microsoft.KeyVault/vaults/secrets@2023-02-01' = if (hasGoogleKey) {
   parent: keyVault
   name: 'gemini-key'
   properties: {
@@ -256,7 +260,7 @@ resource googleSecret 'Microsoft.KeyVault/vaults/secrets@2023-02-01' = {
   }
 }
 
-resource deepSeekSecret 'Microsoft.KeyVault/vaults/secrets@2023-02-01' = {
+resource deepSeekSecret 'Microsoft.KeyVault/vaults/secrets@2023-02-01' = if (hasDeepSeekKey) {
   parent: keyVault
   name: 'deepseek-key'
   properties: {
@@ -268,9 +272,9 @@ output keyVaultName string = keyVault.name
 output keyVaultId string = keyVault.id
 output postgresqlServerName string = postgres.name
 output redisCacheName string = redis.name
-output postgresConnectionSecretUri string = postgresConnectionSecret.properties.secretUriWithVersion
-output redisConnectionSecretUri string = redisConnectionSecret.properties.secretUriWithVersion
-output openAiSecretUri string = openAiSecret.properties.secretUriWithVersion
-output anthropicSecretUri string = anthropicSecret.properties.secretUriWithVersion
-output googleSecretUri string = googleSecret.properties.secretUriWithVersion
-output deepSeekSecretUri string = deepSeekSecret.properties.secretUriWithVersion
+output postgresConnectionSecretUri string = postgresConnectionSecret.properties.secretUri
+output redisConnectionSecretUri string = redisConnectionSecret.properties.secretUri
+output openAiSecretUri string = hasOpenAiKey ? openAiSecret!.properties.secretUri : ''
+output anthropicSecretUri string = hasAnthropicKey ? anthropicSecret!.properties.secretUri : ''
+output googleSecretUri string = hasGoogleKey ? googleSecret!.properties.secretUri : ''
+output deepSeekSecretUri string = hasDeepSeekKey ? deepSeekSecret!.properties.secretUri : ''

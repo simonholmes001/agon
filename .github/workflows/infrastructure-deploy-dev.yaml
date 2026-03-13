@@ -52,6 +52,10 @@ jobs:
           inlineScript: |
             az bicep install
             az bicep build --file infrastructure/bicep/main.bicep
+            az bicep build --file infrastructure/bicep/modules/network-dev.bicep
+            az bicep build --file infrastructure/bicep/modules/data-dev.bicep
+            az bicep build --file infrastructure/bicep/modules/app-edge-dev.bicep
+            az bicep build --file infrastructure/bicep/modules/keyvault-access-dev.bicep
 
       - name: Deploy dev infrastructure (subscription scope)
         uses: azure/cli@v2
