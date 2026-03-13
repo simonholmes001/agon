@@ -1,23 +1,32 @@
 # Dev Infrastructure Setup (Azure + Bicep + GitHub OIDC)
 
-This document describes the infrastructure delivery model for the `dev` environment.
+This document is the source of truth for the `dev` backend infrastructure deployment.
 
 ## Target Architecture (Dev)
 
-- Backend API: Azure App Service (Linux)
-- Durable state: Azure Database for PostgreSQL - Flexible Server (private network)
-- Cache/session state: Azure Cache for Redis (private endpoint)
-- Secrets: Azure Key Vault (private endpoint)
-- Telemetry: Application Insights + Log Analytics
-- Network: VNet with separate subnets for App Service integration, private endpoints, and PostgreSQL delegation
+- Public edge: Azure Front Door Standard/Premium + WAF
+- App tier: Azure App Service (Linux) in a dedicated app resource group
+- Data tier: Azure Database for PostgreSQL Flexible Server + Azure Cache for Redis + Key Vault
+- Network tier: dedicated VNet/subnets/private DNS zones
+- Telemetry: Log Analytics + Application Insights + metric alert action group
 - IaC: Bicep only
-- CI/CD: GitHub Actions with OpenID Connect (no Azure client secret)
+- CI/CD auth: GitHub OIDC (no client secret)
 
-## Naming Convention
+## Resource Group Strategy
 
-Prefix used in parameters: `agon-dev-frc`
+Deployment is **subscription-scope** and creates three resource groups:
 
-Resource naming follows Azure CAF abbreviations and resource naming guidance:
+- `rg-agon-dev-frc-net`: VNet, subnets, private DNS zones
+- `rg-agon-dev-frc-app`: App Service, Front Door/WAF, monitoring + alerts
+- `rg-agon-dev-frc-data`: PostgreSQL, Redis, Key Vault (+ private endpoints)
+
+This split follows Azure operational best practice: isolate lifecycle and access by domain (network/app/data), not by single mega-RG.
+
+## Naming Standard
+
+Prefix used by this project: `agon-dev-frc`
+
+Naming follows Azure CAF guidance:
 
 - https://learn.microsoft.com/en-us/azure/cloud-adoption-framework/ready/azure-best-practices/resource-naming?toc=%2Fazure%2Fazure-resource-manager%2Fmanagement%2Ftoc.json#example-azure-resource-names
 - https://learn.microsoft.com/en-us/azure/cloud-adoption-framework/ready/azure-best-practices/resource-abbreviations
@@ -29,84 +38,78 @@ Resource naming follows Azure CAF abbreviations and resource naming guidance:
 - Tenant ID: `17ca2540-dd3e-4204-b2f7-a3e3ad209719`
 - Region: `francecentral`
 - Prefix: `agon-dev-frc`
-- Alert Email: `simonholmesabc@gmail.com`
+- Alert email: `simonholmesabc@gmail.com`
 
 ## One-Time Azure Identity Setup (OIDC)
 
-This section is required before GitHub Actions can deploy to Azure.
-
-### 1) Create the App Registration
+### 1) Create App Registration
 
 1. Azure Portal -> `Microsoft Entra ID` -> `App registrations` -> `New registration`
-2. Name recommendation: `agon-gha-dev-deployer`
-3. Supported account type: Single tenant
+2. Name: `agon-gha-dev-deployer`
+3. Accounts: single tenant
 4. Register
 
-Capture these values from the Overview page:
+Capture:
 
-- `Application (client) ID` -> use as `AZURE_CLIENT_ID`
-- `Directory (tenant) ID` -> use as `AZURE_TENANT_ID`
+- `Application (client) ID` -> GitHub secret `AZURE_CLIENT_ID`
+- `Directory (tenant) ID` -> GitHub secret `AZURE_TENANT_ID`
 
-### 2) Confirm Service Principal Exists
+### 2) Verify Enterprise Application (Service Principal)
 
 1. Azure Portal -> `Microsoft Entra ID` -> `Enterprise applications`
-2. Search app name (`agon-gha-dev-deployer`) or application ID
-3. Open it and confirm:
-   - Application ID matches your app registration
-   - Object ID is present (used for RBAC troubleshooting)
+2. Open `agon-gha-dev-deployer`
+3. Confirm:
+   - App ID matches the registration
+   - Object ID is present (used in RBAC troubleshooting)
 
-### 3) Add Federated Credentials (GitHub OIDC)
+### 3) Add Federated Credentials (exact names)
 
-On the same App Registration:
+On App Registration -> `Certificates & secrets` -> `Federated credentials`:
 
-1. `Certificates & secrets` -> `Federated credentials` -> `Add credential`
-2. Scenario: `GitHub Actions deploying Azure resources`
-3. Add two credentials:
+1. Name: `github-pr-validate`
+   - Scenario: GitHub Actions deploying Azure resources
+   - Organization: `simonholmes001`
+   - Repository: `agon`
+   - Entity type: `Pull request`
+   - Subject: `repo:simonholmes001/agon:pull_request`
 
-- Name: `github-main-deploy`
-  - Organization: `simonholmes001`
-  - Repository: `agon`
-  - Entity type: `Branch`
-  - Branch: `main`
-  - Subject becomes: `repo:simonholmes001/agon:ref:refs/heads/main`
+2. Name: `github-main-deploy`
+   - Scenario: GitHub Actions deploying Azure resources
+   - Organization: `simonholmes001`
+   - Repository: `agon`
+   - Entity type: `Branch`
+   - Branch: `main`
+   - Subject: `repo:simonholmes001/agon:ref:refs/heads/main`
 
-- Name: `github-pr-validate`
-  - Organization: `simonholmes001`
-  - Repository: `agon`
-  - Entity type: `Pull request`
-  - Subject becomes: `repo:simonholmes001/agon:pull_request`
-
-Audience must be:
+Audience for both:
 
 - `api://AzureADTokenExchange`
 
 ### 4) Assign RBAC on Subscription
 
-The workflows use subscription-scope deployments (`az deployment sub ...`), so role assignment must be on the subscription scope.
+Because templates run with `az deployment sub ...`, assign role at subscription scope.
 
-1. Azure Portal -> `Subscriptions` -> your subscription -> `Access control (IAM)` -> `Add role assignment`
-2. Assign to the service principal (`agon-gha-dev-deployer`)
-3. For current template, choose one of:
+Assign the service principal (`agon-gha-dev-deployer`) one of:
 
 - `Owner` (simplest for dev), or
 - `Contributor` + `User Access Administrator`
 
-`Contributor` alone may fail because this template creates a Key Vault RBAC role assignment.
+`Contributor` alone is insufficient because deployment creates Key Vault RBAC role assignments.
 
 ### 5) Wait for Propagation
 
-After creating federated credentials and RBAC assignments, wait 5-10 minutes before re-running workflows.
+Allow 5-10 minutes after federated credential/RBAC changes before rerunning workflows.
 
 ## GitHub Secrets Required
 
-Set these repository secrets before running deploy workflows:
+Required:
 
-- `AZURE_CLIENT_ID`: `7dd5200a-57b0-4d9a-9e30-302b339355f1`
-- `AZURE_TENANT_ID`: `17ca2540-dd3e-4204-b2f7-a3e3ad209719`
-- `AZURE_SUBSCRIPTION_ID`: `c08d1de9-6131-427d-b974-e0b52c22eae1`
-- `AZURE_POSTGRES_ADMIN_PASSWORD`: strong bootstrap password for PostgreSQL admin
+- `AZURE_CLIENT_ID`
+- `AZURE_TENANT_ID`
+- `AZURE_SUBSCRIPTION_ID`
+- `AZURE_POSTGRES_ADMIN_PASSWORD`
 
-Optional secrets for LLM provider keys (stored in Key Vault at deploy time):
+Optional (written into Key Vault during deploy):
 
 - `OPENAI_KEY`
 - `CLAUDE_KEY`
@@ -117,64 +120,49 @@ Optional secrets for LLM provider keys (stored in Key Vault at deploy time):
 
 - Client ID: `Entra ID -> App registrations -> <app> -> Overview -> Application (client) ID`
 - Tenant ID: `Entra ID -> App registrations -> <app> -> Overview -> Directory (tenant) ID`
-- Service Principal Object ID: `Entra ID -> Enterprise applications -> <app> -> Overview -> Object ID`
+- SP object ID: `Entra ID -> Enterprise applications -> <app> -> Overview -> Object ID`
 
 ## Workflows
 
-- PR validation (plan/validate only): `.github/workflows/infrastructure-validate.yaml`
-  - Builds Bicep templates
-  - Runs subscription-scope `what-if` against `dev`
-- Main deployment: `.github/workflows/infrastructure-deploy-dev.yaml`
-  - Triggered on `main` changes under `infrastructure/**` (and manual dispatch)
-  - Runs subscription-scope deployment for `dev`
+- `.github/workflows/infrastructure-validate.yaml`
+  - Trigger: PR to `main` (infra paths)
+  - Runs Bicep build + subscription `what-if`
+
+- `.github/workflows/infrastructure-deploy-dev.yaml`
+  - Trigger: push/merge to `main` (infra paths), or manual dispatch
+  - Runs subscription deployment to create/update `dev` infrastructure
 
 ## Execution Flow
 
-1. Open PR with infra changes -> `infrastructure-validate.yaml` runs:
-   - Bicep build
-   - Azure `what-if`
-2. Merge to `main` -> `infrastructure-deploy-dev.yaml` runs:
-   - Subscription-scope deployment
-   - Creates/updates `dev` resource group and resources
+1. Open PR with infra changes -> validation workflow runs (`build` + `what-if`)
+2. Merge PR to `main` -> deploy workflow runs (`az deployment sub create`)
+3. Verify resources in Azure:
+   - `rg-agon-dev-frc-net`
+   - `rg-agon-dev-frc-app`
+   - `rg-agon-dev-frc-data`
 
-## Deployment Scope
+## Common Errors
 
-Templates deploy from subscription scope and create/update:
+### `AADSTS700213` (no matching federated identity)
 
-- Resource group: `rg-agon-dev-frc-app`
-- All `dev` platform resources inside that resource group
+Subject mismatch in federated credential.
 
-## Common Errors and Fixes
+Use exact subjects:
 
-### Error: `AADSTS700213: No matching federated identity record`
+- `repo:simonholmes001/agon:pull_request`
+- `repo:simonholmes001/agon:ref:refs/heads/main`
 
-Cause: Missing or mismatched federated credential subject.
+### `No subscriptions found for <client-id>`
 
-Fix:
+Service principal has no valid RBAC on subscription (or wrong IDs in secrets).
 
-- Ensure `github-pr-validate` exists with subject `repo:simonholmes001/agon:pull_request`
-- Ensure `github-main-deploy` exists with subject `repo:simonholmes001/agon:ref:refs/heads/main`
+### `roleAssignments/write` denied
 
-### Error: `No subscriptions found for <client-id>`
+Add `User Access Administrator` (or `Owner`) in addition to `Contributor`.
 
-Cause: Service principal has no RBAC on the subscription, or wrong tenant/subscription/client secret values.
+## Security Posture (Dev Baseline)
 
-Fix:
-
-1. Verify `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`
-2. Assign required role(s) at subscription scope to `agon-gha-dev-deployer`
-3. Wait for propagation and rerun
-
-### Cannot find `Contributor`/`Owner` in IAM picker
-
-Cause: current signed-in user lacks permissions to assign those roles.
-
-Fix:
-
-- Ask a subscription `Owner` or `User Access Administrator` to assign roles to the service principal.
-
-## Notes
-
-- App Service stays publicly reachable over HTTPS for CLI access.
-- PostgreSQL, Redis, and Key Vault are deployed for private network access.
-- App Service uses system-assigned managed identity and Key Vault references for runtime secrets.
+- Front Door + WAF for internet entrypoint
+- App Service restricted to Front Door origin traffic
+- Key Vault/Redis/PostgreSQL on private networking paths
+- Runtime secrets via Key Vault references + managed identity

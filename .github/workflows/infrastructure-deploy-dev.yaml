@@ -24,7 +24,6 @@ jobs:
   deploy-dev:
     name: Deploy Dev Infrastructure
     runs-on: ubuntu-latest
-    environment: dev
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
@@ -46,6 +45,13 @@ jobs:
             echo "::error::Missing AZURE_POSTGRES_ADMIN_PASSWORD secret."
             exit 1
           fi
+
+      - name: Build Bicep templates
+        uses: azure/cli@v2
+        with:
+          inlineScript: |
+            az bicep install
+            az bicep build --file infrastructure/bicep/main.bicep
 
       - name: Deploy dev infrastructure (subscription scope)
         uses: azure/cli@v2
