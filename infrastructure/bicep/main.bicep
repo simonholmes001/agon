@@ -65,7 +65,7 @@ var commonTags = {
 var netResourceGroupName = 'rg-${namePrefix}-net'
 var appResourceGroupName = 'rg-${namePrefix}-app'
 var dataResourceGroupName = 'rg-${namePrefix}-data'
-var appServiceName = 'app-${namePrefix}-${take(uniqueString(rgApp.id), 6)}'
+var appServiceName = 'app-${namePrefix}-${take(uniqueString(subscription().id, rgApp.id, namePrefix, environment), 12)}'
 
 resource rgNet 'Microsoft.Resources/resourceGroups@2023-07-01' = {
   name: netResourceGroupName

@@ -42,14 +42,17 @@ var tags = {
   managedBy: 'bicep'
 }
 
+var uniqueSuffix = take(uniqueString(subscription().id, resourceGroup().id, namePrefix, environment), 12)
+var endpointPrefix = replace(namePrefix, '-', '')
+
 var appServicePlanName = 'asp-${namePrefix}'
-var appServiceName = 'app-${namePrefix}-${take(uniqueString(resourceGroup().id), 6)}'
+var appServiceName = 'app-${namePrefix}-${uniqueSuffix}'
 var appInsightsName = 'appi-${namePrefix}'
 var logAnalyticsName = 'log-${namePrefix}'
 var actionGroupName = 'ag-${namePrefix}-ops'
 
 var frontDoorProfileName = 'afd-${namePrefix}'
-var frontDoorEndpointName = 'afd-${take(uniqueString(resourceGroup().id), 8)}'
+var frontDoorEndpointName = 'afd-${endpointPrefix}-${uniqueSuffix}'
 var frontDoorOriginGroupName = 'og-default'
 var frontDoorOriginName = 'app-origin'
 var frontDoorRouteName = 'route-default'
