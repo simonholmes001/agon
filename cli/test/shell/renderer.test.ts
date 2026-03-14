@@ -59,9 +59,9 @@ describe('shell renderer', () => {
     expect(text).toContain('/set');
     expect(text).toContain('/params');
     expect(frame.maxInputChars).toBeGreaterThan(0);
-    expect(frame.cursorUpLines).toBe(4);
-    expect(frame.cursorDownFromFirstLine).toBe(4);
-    expect(frame.inputLineCount).toBe(3);
+    expect(frame.cursorUpLines).toBe(6);
+    expect(frame.cursorDownFromFirstLine).toBe(6);
+    expect(frame.inputLineCount).toBe(5);
     expect(frame.promptLineOffset).toBe(1);
   });
 
@@ -112,6 +112,18 @@ describe('shell renderer', () => {
 
     expect(rendered).toContain('\n');
     expect(getPromptCursorPosition(frame, longValue, longValue.length).lineIndex).toBe(2);
+  });
+
+  it('wraps on word boundaries when space is available', () => {
+    const frame = renderPromptBanner(() => {});
+    const firstLine = 'a'.repeat(frame.maxInputCharsPerLine - 2);
+    const value = `${firstLine} alpha beta`;
+    const rendered = buildPromptInputLine(frame, value);
+    const plain = rendered.replace(/\u001b\[[0-9;]*m/g, '');
+    const rows = plain.split('\n');
+
+    expect(rows[1]).not.toContain('alph');
+    expect(rows[2]).toContain('alpha beta');
   });
 
   it('renders cursor at a specific in-line position', () => {
