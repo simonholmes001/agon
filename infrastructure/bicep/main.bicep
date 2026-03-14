@@ -44,30 +44,78 @@ param googleApiKey string = ''
 @secure()
 param deepSeekApiKey string = ''
 
-var resourceGroupName = 'rg-${namePrefix}-app'
+@description('Address space for the workload VNet.')
+param vnetAddressSpace string = '10.42.0.0/16'
 
-resource rg 'Microsoft.Resources/resourceGroups@2023-07-01' = {
-  name: resourceGroupName
-  location: location
-  tags: {
-    environment: environment
-    workload: workloadName
-    managedBy: 'bicep'
-  }
+@description('App Service integration subnet prefix.')
+param appSubnetPrefix string = '10.42.1.0/24'
+
+@description('Private endpoint subnet prefix.')
+param privateEndpointSubnetPrefix string = '10.42.2.0/24'
+
+@description('PostgreSQL delegated subnet prefix.')
+param postgresSubnetPrefix string = '10.42.3.0/24'
+
+var commonTags = {
+  environment: environment
+  workload: workloadName
+  managedBy: 'bicep'
 }
 
-module backendPlatform './modules/backend-platform-dev.bicep' = {
-  name: 'backend-platform-dev'
-  scope: rg
+var netResourceGroupName = 'rg-${namePrefix}-net'
+var appResourceGroupName = 'rg-${namePrefix}-app'
+var dataResourceGroupName = 'rg-${namePrefix}-data'
+var appServiceName = 'app-${namePrefix}-${take(uniqueString(subscription().id, rgApp.id, namePrefix, environment), 12)}'
+
+resource rgNet 'Microsoft.Resources/resourceGroups@2023-07-01' = {
+  name: netResourceGroupName
+  location: location
+  tags: commonTags
+}
+
+resource rgApp 'Microsoft.Resources/resourceGroups@2023-07-01' = {
+  name: appResourceGroupName
+  location: location
+  tags: commonTags
+}
+
+resource rgData 'Microsoft.Resources/resourceGroups@2023-07-01' = {
+  name: dataResourceGroupName
+  location: location
+  tags: commonTags
+}
+
+module network './modules/network-dev.bicep' = {
+  name: 'network-dev'
+  scope: rgNet
   params: {
     location: location
     environment: environment
     workloadName: workloadName
     namePrefix: namePrefix
-    alertEmail: alertEmail
+    vnetAddressSpace: vnetAddressSpace
+    appSubnetPrefix: appSubnetPrefix
+    privateEndpointSubnetPrefix: privateEndpointSubnetPrefix
+    postgresSubnetPrefix: postgresSubnetPrefix
+  }
+}
+
+module data './modules/data-dev.bicep' = {
+  name: 'data-dev'
+  scope: rgData
+  params: {
+    location: location
+    environment: environment
+    workloadName: workloadName
+    namePrefix: namePrefix
+    tenantId: tenantId
     postgresAdminLogin: postgresAdminLogin
     postgresAdminPassword: postgresAdminPassword
-    tenantId: tenantId
+    postgresSubnetId: network.outputs.postgresSubnetId
+    privateEndpointSubnetId: network.outputs.privateEndpointSubnetId
+    postgresPrivateDnsZoneId: network.outputs.postgresPrivateDnsZoneId
+    keyVaultPrivateDnsZoneId: network.outputs.keyVaultPrivateDnsZoneId
+    redisPrivateDnsZoneId: network.outputs.redisPrivateDnsZoneId
     openAiApiKey: openAiApiKey
     anthropicApiKey: anthropicApiKey
     googleApiKey: googleApiKey
@@ -75,9 +123,41 @@ module backendPlatform './modules/backend-platform-dev.bicep' = {
   }
 }
 
-output targetResourceGroup string = rg.name
-output appServiceName string = backendPlatform.outputs.appServiceName
-output appServiceDefaultHostName string = backendPlatform.outputs.appServiceDefaultHostName
-output keyVaultName string = backendPlatform.outputs.keyVaultName
-output postgresqlServerName string = backendPlatform.outputs.postgresqlServerName
-output redisCacheName string = backendPlatform.outputs.redisCacheName
+module appEdge './modules/app-edge-dev.bicep' = {
+  name: 'app-edge-dev'
+  scope: rgApp
+  params: {
+    location: location
+    environment: environment
+    workloadName: workloadName
+    namePrefix: namePrefix
+    alertEmail: alertEmail
+    appSubnetId: network.outputs.appSubnetId
+    postgresConnectionSecretUri: data.outputs.postgresConnectionSecretUri
+    redisConnectionSecretUri: data.outputs.redisConnectionSecretUri
+    openAiSecretUri: data.outputs.openAiSecretUri
+    anthropicSecretUri: data.outputs.anthropicSecretUri
+    googleSecretUri: data.outputs.googleSecretUri
+    deepSeekSecretUri: data.outputs.deepSeekSecretUri
+  }
+}
+
+module keyVaultAccess './modules/keyvault-access-dev.bicep' = {
+  name: 'keyvault-access-dev'
+  scope: rgData
+  params: {
+    keyVaultName: data.outputs.keyVaultName
+    principalId: appEdge.outputs.appPrincipalId
+    principalDisplayNameSeed: appServiceName
+  }
+}
+
+output networkResourceGroup string = rgNet.name
+output appResourceGroup string = rgApp.name
+output dataResourceGroup string = rgData.name
+output appServiceName string = appEdge.outputs.appServiceName
+output appServiceDefaultHostName string = appEdge.outputs.appServiceDefaultHostName
+output frontDoorEndpointHostName string = appEdge.outputs.frontDoorEndpointHostName
+output keyVaultName string = data.outputs.keyVaultName
+output postgresqlServerName string = data.outputs.postgresqlServerName
+output redisCacheName string = data.outputs.redisCacheName
