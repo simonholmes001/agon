@@ -3,7 +3,8 @@ import {
   buildShimmerText,
   buildActivePrompt,
   buildPromptInputLine,
-  getPromptCursorLineIndex,
+  buildPromptInputLineWithCursor,
+  getPromptCursorPosition,
   getVisiblePromptValue,
   renderMessagePanel,
   renderPromptBanner,
@@ -105,6 +106,17 @@ describe('shell renderer', () => {
     const rendered = buildPromptInputLine(frame, longValue);
 
     expect(rendered).toContain('\n');
-    expect(getPromptCursorLineIndex(frame, longValue)).toBe(1);
+    expect(getPromptCursorPosition(frame, longValue, longValue.length).lineIndex).toBe(1);
+  });
+
+  it('renders cursor at a specific in-line position', () => {
+    const frame = renderPromptBanner(() => {});
+    const value = 'hello world';
+    const rendered = buildPromptInputLineWithCursor(frame, value, 5);
+    const plain = rendered.replace(/\u001b\[[0-9;]*[A-Za-z]/g, '');
+    const cursorSegment = plain.split('\r').pop() ?? '';
+
+    expect(cursorSegment).toContain('  > hello');
+    expect(cursorSegment).not.toContain('  > hello world');
   });
 });

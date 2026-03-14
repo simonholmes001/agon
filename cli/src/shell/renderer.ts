@@ -105,7 +105,17 @@ export function buildActivePrompt(frame: PromptFrameContext): string {
 }
 
 export function buildPromptInputLine(frame: PromptFrameContext, value: string): string {
-  const chunks = getWrappedPromptChunks(frame, value);
+  return buildPromptInputLineWithCursor(frame, value, value.length);
+}
+
+export function buildPromptInputLineWithCursor(
+  frame: PromptFrameContext,
+  value: string,
+  cursorIndex: number
+): string {
+  const visibleValue = getVisiblePromptValue(value, frame.maxInputChars);
+  const visibleCursorIndex = getVisibleCursorIndex(value, visibleValue, cursorIndex);
+  const chunks = getWrappedPromptChunks(frame, visibleValue);
   const lines: string[] = [];
 
   for (let index = 0; index < frame.inputLineCount; index += 1) {
@@ -115,17 +125,40 @@ export function buildPromptInputLine(frame: PromptFrameContext, value: string): 
     lines.push(`${frame.promptStart}${content}${frame.reset}`);
   }
 
-  const cursorLineIndex = Math.max(0, chunks.length - 1);
+  const cursorLineIndex = Math.min(frame.inputLineCount - 1, Math.floor(visibleCursorIndex / frame.maxInputCharsPerLine));
+  const cursorColumn = Math.min(
+    (chunks[cursorLineIndex] ?? '').length,
+    visibleCursorIndex % frame.maxInputCharsPerLine
+  );
   const cursorPrefix = cursorLineIndex === 0 ? frame.promptPrefix : frame.promptContinuationPrefix;
-  const cursorText = chunks[cursorLineIndex] ?? '';
+  const cursorText = (chunks[cursorLineIndex] ?? '').slice(0, cursorColumn);
   const linesBelowCursor = frame.inputLineCount - cursorLineIndex - 1;
   const moveUp = linesBelowCursor > 0 ? `\u001b[${linesBelowCursor}A` : '';
 
   return `${lines.join('\n')}${moveUp}\r${frame.promptStart}${cursorPrefix}${cursorText}${frame.reset}`;
 }
 
-export function getPromptCursorLineIndex(frame: PromptFrameContext, value: string): number {
-  return Math.max(0, getWrappedPromptChunks(frame, value).length - 1);
+export interface PromptCursorPosition {
+  lineIndex: number;
+  column: number;
+}
+
+export function getPromptCursorPosition(
+  frame: PromptFrameContext,
+  value: string,
+  cursorIndex: number
+): PromptCursorPosition {
+  const visibleValue = getVisiblePromptValue(value, frame.maxInputChars);
+  const visibleCursorIndex = getVisibleCursorIndex(value, visibleValue, cursorIndex);
+  const lineIndex = Math.min(frame.inputLineCount - 1, Math.floor(visibleCursorIndex / frame.maxInputCharsPerLine));
+  const lineOffset = visibleCursorIndex % frame.maxInputCharsPerLine;
+  const chunks = getWrappedPromptChunks(frame, visibleValue);
+  const column = Math.min((chunks[lineIndex] ?? '').length, lineOffset);
+
+  return {
+    lineIndex,
+    column
+  };
 }
 
 export function getVisiblePromptValue(value: string, maxInputChars: number): string {
@@ -228,8 +261,7 @@ function createPromptFrame(): PromptFrame {
   };
 }
 
-function getWrappedPromptChunks(frame: PromptFrameContext, value: string): string[] {
-  const visibleValue = getVisiblePromptValue(value, frame.maxInputChars);
+function getWrappedPromptChunks(frame: PromptFrameContext, visibleValue: string): string[] {
   const chunks: string[] = [];
 
   for (let start = 0; start < visibleValue.length; start += frame.maxInputCharsPerLine) {
@@ -241,4 +273,20 @@ function getWrappedPromptChunks(frame: PromptFrameContext, value: string): strin
   }
 
   return chunks.slice(0, frame.inputLineCount);
+}
+
+function getVisibleCursorIndex(value: string, visibleValue: string, cursorIndex: number): number {
+  const clampedCursorIndex = Math.max(0, Math.min(cursorIndex, value.length));
+
+  if (value.length <= visibleValue.length) {
+    return clampedCursorIndex;
+  }
+
+  // Value is truncated with an ellipsis prefix.
+  const hiddenCount = Math.max(0, value.length - (visibleValue.length - 1));
+  if (clampedCursorIndex <= hiddenCount) {
+    return 1;
+  }
+
+  return Math.min(visibleValue.length, 1 + (clampedCursorIndex - hiddenCount));
 }
