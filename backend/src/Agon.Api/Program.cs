@@ -300,6 +300,22 @@ var app = builder.Build();
 // Global exception handling (must be first in pipeline)
 app.UseMiddleware<GlobalExceptionMiddleware>();
 
+// Apply EF Core migrations at startup so fresh environments have required schema.
+using (var scope = app.Services.CreateScope())
+{
+    var startupLogger = scope.ServiceProvider
+        .GetRequiredService<ILoggerFactory>()
+        .CreateLogger("Startup");
+
+    var dbContext = scope.ServiceProvider.GetService<AgonDbContext>();
+    if (dbContext is not null && dbContext.Database.IsRelational())
+    {
+        startupLogger.LogInformation("Applying PostgreSQL migrations...");
+        dbContext.Database.Migrate();
+        startupLogger.LogInformation("PostgreSQL migrations applied.");
+    }
+}
+
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
