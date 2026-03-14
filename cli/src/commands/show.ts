@@ -69,7 +69,11 @@ export default class Show extends Command {
       const configManager = new ConfigManager();
       const sessionManager = new SessionManager();
       const config = await configManager.load();
-      const apiClient = new AgonAPIClient(config.apiUrl);
+      const apiClient = new AgonAPIClient(
+        config.apiUrl,
+        this.config.pjson.name ?? '@agon_agents/cli',
+        this.config.pjson.version ?? '0.0.0'
+      );
 
       // Determine which session to use
       let sessionId = flags.session;

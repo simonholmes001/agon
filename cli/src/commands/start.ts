@@ -78,7 +78,11 @@ export default class Start extends Command {
       const researchEnabled = flags.research ?? config.researchEnabled;
 
       // Initialize API client
-      const apiClient = new AgonAPIClient(config.apiUrl);
+      const apiClient = new AgonAPIClient(
+        config.apiUrl,
+        this.config.pjson.name ?? '@agon_agents/cli',
+        this.config.pjson.version ?? '0.0.0'
+      );
 
       // Create session
       const createSpinner = ora({
