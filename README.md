@@ -503,10 +503,7 @@ To enable local git hooks:
 git config core.hooksPath .githooks
 ```
 
-Optional strict mode for local commits:
-```bash
-AGON_ENFORCE_CHANGESET=1 git commit ...
-```
+Changeset validation is enforced by default in local pre-commit hook when `cli/` changes are staged.
 
 ---
 
@@ -521,8 +518,7 @@ AGON_ENFORCE_CHANGESET=1 git commit ...
 
 1. In any PR that changes `cli/`, create a changeset:
    ```bash
-   cd cli
-   npx changeset
+   npx --yes @changesets/cli add --cwd cli
    # Choose patch, minor, or major
    ```
 2. Merge the feature PR to `main`
