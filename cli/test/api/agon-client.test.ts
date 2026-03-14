@@ -161,7 +161,7 @@ describe('AgonAPIClient', () => {
       expect(mapped).toBeInstanceOf(AgonError);
       const agonError = mapped as AgonError;
       expect(agonError.code).toBe(ErrorCode.CLI_UPGRADE_REQUIRED);
-      expect(agonError.suggestions).toContain('Run `agon self-update`');
+      expect(agonError.suggestions).toContain('Run `agon --self-update`');
     });
   });
 
