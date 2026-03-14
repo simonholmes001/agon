@@ -4,7 +4,7 @@ This document is the source of truth for the `dev` backend infrastructure deploy
 
 ## Target Architecture (Dev)
 
-- Public edge: Azure Application Gateway (WAF_v2)
+- Public edge: Azure Application Gateway (WAF_v2, Detection mode in dev)
 - App tier: Azure App Service (Linux) in a dedicated app resource group
 - Data tier: Azure Database for PostgreSQL Flexible Server + Azure Cache for Redis + Key Vault
 - Network tier: dedicated VNet/subnets/private DNS zones (including App Service private link DNS)
@@ -188,6 +188,13 @@ Service principal has no valid RBAC on subscription (or wrong IDs in secrets).
 ### `roleAssignments/write` denied
 
 Add `User Access Administrator` (or `Owner`) in addition to `Contributor`.
+
+### API calls succeed initially, then return `403` on follow-up text
+
+Likely WAF false-positive blocking request bodies in Prevention mode.
+
+For dev, keep Application Gateway WAF in `Detection` mode (`appGatewayWafMode = Detection`) so legitimate prompt text is not blocked.
+Use Prevention only after tuning exclusions/custom rules for your real traffic patterns.
 
 ## Security Posture (Dev Baseline)
 
