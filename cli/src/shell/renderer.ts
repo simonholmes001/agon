@@ -64,9 +64,12 @@ export function renderMessagePanel(
 export interface PromptFrameContext {
   width: number;
   cursorUpLines: number;
-  cursorDownLines: number;
+  cursorDownFromFirstLine: number;
+  inputLineCount: number;
+  maxInputCharsPerLine: number;
   maxInputChars: number;
   promptPrefix: string;
+  promptContinuationPrefix: string;
   promptStart: string;
   backgroundStart: string;
   reset: string;
@@ -82,11 +85,15 @@ export function renderPromptBanner(print: (line: string) => void): PromptFrameCo
 
   return {
     width: frame.width,
-    cursorUpLines: 3,
-    // Return to the line below the full 5-line frame after capturing input.
-    cursorDownLines: 3,
-    maxInputChars: Math.max(1, frame.width - frame.promptPrefix.length - 1),
+    // Move from line after frame (6) to first editable input line (2).
+    cursorUpLines: 4,
+    // Return from first editable input line (2) to line below frame (6).
+    cursorDownFromFirstLine: 4,
+    inputLineCount: frame.inputLineCount,
+    maxInputCharsPerLine: Math.max(1, frame.width - frame.promptPrefix.length),
+    maxInputChars: Math.max(1, frame.width - frame.promptPrefix.length) * frame.inputLineCount,
     promptPrefix: frame.promptPrefix,
+    promptContinuationPrefix: ' '.repeat(frame.promptPrefix.length),
     promptStart: frame.promptStart,
     backgroundStart: frame.backgroundStart,
     reset: frame.reset
@@ -94,14 +101,31 @@ export function renderPromptBanner(print: (line: string) => void): PromptFrameCo
 }
 
 export function buildActivePrompt(frame: PromptFrameContext): string {
-  const clearLine = `${frame.backgroundStart}${' '.repeat(frame.width)}${frame.reset}`;
-  return `${clearLine}\r${frame.promptStart}${frame.promptPrefix}`;
+  return buildPromptInputLine(frame, '');
 }
 
 export function buildPromptInputLine(frame: PromptFrameContext, value: string): string {
-  const visibleValue = getVisiblePromptValue(value, frame.maxInputChars);
-  const content = `${frame.promptPrefix}${visibleValue}`.padEnd(frame.width, ' ');
-  return `${frame.promptStart}${content}${frame.reset}\r${frame.promptStart}${frame.promptPrefix}${visibleValue}`;
+  const chunks = getWrappedPromptChunks(frame, value);
+  const lines: string[] = [];
+
+  for (let index = 0; index < frame.inputLineCount; index += 1) {
+    const chunk = chunks[index] ?? '';
+    const prefix = index === 0 ? frame.promptPrefix : frame.promptContinuationPrefix;
+    const content = `${prefix}${chunk}`.padEnd(frame.width, ' ');
+    lines.push(`${frame.promptStart}${content}${frame.reset}`);
+  }
+
+  const cursorLineIndex = Math.max(0, chunks.length - 1);
+  const cursorPrefix = cursorLineIndex === 0 ? frame.promptPrefix : frame.promptContinuationPrefix;
+  const cursorText = chunks[cursorLineIndex] ?? '';
+  const linesBelowCursor = frame.inputLineCount - cursorLineIndex - 1;
+  const moveUp = linesBelowCursor > 0 ? `\u001b[${linesBelowCursor}A` : '';
+
+  return `${lines.join('\n')}${moveUp}\r${frame.promptStart}${cursorPrefix}${cursorText}${frame.reset}`;
+}
+
+export function getPromptCursorLineIndex(frame: PromptFrameContext, value: string): number {
+  return Math.max(0, getWrappedPromptChunks(frame, value).length - 1);
 }
 
 export function getVisiblePromptValue(value: string, maxInputChars: number): string {
@@ -164,6 +188,7 @@ export function renderStatusLine(print: (line: string) => void): void {
 
 interface PromptFrame {
   width: number;
+  inputLineCount: number;
   borderLine: string;
   paddingLine: string;
   hintLine: string;
@@ -176,6 +201,7 @@ interface PromptFrame {
 function createPromptFrame(): PromptFrame {
   const terminalWidth = process.stdout.columns ?? 100;
   const width = Math.max(56, Math.min(terminalWidth - 2, 140));
+  const inputLineCount = 3;
   const borderLine = chalk.whiteBright('─'.repeat(width));
   const backgroundStart = '\u001b[48;2;63;111;201m';
   const promptStart = `${backgroundStart}\u001b[97m`;
@@ -191,6 +217,7 @@ function createPromptFrame(): PromptFrame {
 
   return {
     width,
+    inputLineCount,
     borderLine,
     paddingLine,
     hintLine,
@@ -199,4 +226,19 @@ function createPromptFrame(): PromptFrame {
     backgroundStart,
     reset
   };
+}
+
+function getWrappedPromptChunks(frame: PromptFrameContext, value: string): string[] {
+  const visibleValue = getVisiblePromptValue(value, frame.maxInputChars);
+  const chunks: string[] = [];
+
+  for (let start = 0; start < visibleValue.length; start += frame.maxInputCharsPerLine) {
+    chunks.push(visibleValue.slice(start, start + frame.maxInputCharsPerLine));
+  }
+
+  if (chunks.length === 0) {
+    chunks.push('');
+  }
+
+  return chunks.slice(0, frame.inputLineCount);
 }

@@ -15,6 +15,7 @@ import {
   buildActivePrompt,
   buildShimmerText,
   buildPromptInputLine,
+  getPromptCursorLineIndex,
   type PromptFrameContext,
   renderMessagePanel,
   renderPromptBanner,
@@ -237,17 +238,27 @@ export default class Shell extends Command {
 
     return await new Promise<string>((resolve) => {
       let value = '';
+      let cursorLineIndex = 0;
 
       const redraw = (): void => {
+        if (cursorLineIndex > 0) {
+          output.write(`\u001b[${cursorLineIndex}A`);
+        }
         output.write('\r');
         output.write(buildPromptInputLine(frame, value));
+        cursorLineIndex = getPromptCursorLineIndex(frame, value);
       };
 
       const finish = (result: string): void => {
         input.off('keypress', onKeypress);
         input.setRawMode(false);
         this.inRawInputMode = false;
-        output.write(`${frame.reset}\u001b[${frame.cursorDownLines}B\r`);
+        const cursorDownLines = Math.max(0, frame.cursorDownFromFirstLine - cursorLineIndex);
+        if (cursorDownLines > 0) {
+          output.write(`${frame.reset}\u001b[${cursorDownLines}B\r`);
+        } else {
+          output.write(`${frame.reset}\r`);
+        }
         resolve(result);
       };
 

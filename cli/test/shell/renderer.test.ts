@@ -3,6 +3,7 @@ import {
   buildShimmerText,
   buildActivePrompt,
   buildPromptInputLine,
+  getPromptCursorLineIndex,
   getVisiblePromptValue,
   renderMessagePanel,
   renderPromptBanner,
@@ -57,8 +58,9 @@ describe('shell renderer', () => {
     expect(text).toContain('/set');
     expect(text).toContain('/params');
     expect(frame.maxInputChars).toBeGreaterThan(0);
-    expect(frame.cursorUpLines).toBe(3);
-    expect(frame.cursorDownLines).toBe(3);
+    expect(frame.cursorUpLines).toBe(4);
+    expect(frame.cursorDownFromFirstLine).toBe(4);
+    expect(frame.inputLineCount).toBe(3);
   });
 
   it('builds an active prompt line with an input cursor prefix', () => {
@@ -95,5 +97,14 @@ describe('shell renderer', () => {
 
     expect(plain).toContain('…');
     expect(plain).toContain('END');
+  });
+
+  it('wraps prompt input across multiple lines inside the frame', () => {
+    const frame = renderPromptBanner(() => {});
+    const longValue = 'a'.repeat(frame.maxInputCharsPerLine + 10);
+    const rendered = buildPromptInputLine(frame, longValue);
+
+    expect(rendered).toContain('\n');
+    expect(getPromptCursorLineIndex(frame, longValue)).toBe(1);
   });
 });
