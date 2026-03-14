@@ -62,13 +62,18 @@ describe('shell renderer', () => {
     expect(frame.cursorUpLines).toBe(4);
     expect(frame.cursorDownFromFirstLine).toBe(4);
     expect(frame.inputLineCount).toBe(3);
+    expect(frame.promptLineOffset).toBe(1);
   });
 
   it('builds an active prompt line with an input cursor prefix', () => {
     const frame = renderPromptBanner(() => {});
     const prompt = buildActivePrompt(frame);
+    const plain = prompt.replace(/\u001b\[[0-9;]*m/g, '');
+    const rows = plain.split('\n');
+
     expect(prompt).toContain('\u001b[48;2;63;111;201m');
-    expect(prompt).toContain('> ');
+    expect(rows[0]).not.toContain('> ');
+    expect(rows[1]).toContain('  > ');
   });
 
   it('builds shimmer text variants while preserving visible message', () => {
@@ -106,7 +111,7 @@ describe('shell renderer', () => {
     const rendered = buildPromptInputLine(frame, longValue);
 
     expect(rendered).toContain('\n');
-    expect(getPromptCursorPosition(frame, longValue, longValue.length).lineIndex).toBe(1);
+    expect(getPromptCursorPosition(frame, longValue, longValue.length).lineIndex).toBe(2);
   });
 
   it('renders cursor at a specific in-line position', () => {

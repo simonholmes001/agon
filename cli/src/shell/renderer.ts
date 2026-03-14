@@ -66,6 +66,7 @@ export interface PromptFrameContext {
   cursorUpLines: number;
   cursorDownFromFirstLine: number;
   inputLineCount: number;
+  promptLineOffset: number;
   maxInputCharsPerLine: number;
   maxInputChars: number;
   promptPrefix: string;
@@ -90,8 +91,9 @@ export function renderPromptBanner(print: (line: string) => void): PromptFrameCo
     // Return from first editable input line (2) to line below frame (6).
     cursorDownFromFirstLine: 4,
     inputLineCount: frame.inputLineCount,
+    promptLineOffset: frame.promptLineOffset,
     maxInputCharsPerLine: Math.max(1, frame.width - frame.promptPrefix.length),
-    maxInputChars: Math.max(1, frame.width - frame.promptPrefix.length) * frame.inputLineCount,
+    maxInputChars: Math.max(1, frame.width - frame.promptPrefix.length) * getEditableLineCount(frame),
     promptPrefix: frame.promptPrefix,
     promptContinuationPrefix: ' '.repeat(frame.promptPrefix.length),
     promptStart: frame.promptStart,
@@ -113,25 +115,33 @@ export function buildPromptInputLineWithCursor(
   value: string,
   cursorIndex: number
 ): string {
+  const editableLineCount = getEditableLineCount(frame);
   const visibleValue = getVisiblePromptValue(value, frame.maxInputChars);
   const visibleCursorIndex = getVisibleCursorIndex(value, visibleValue, cursorIndex);
   const chunks = getWrappedPromptChunks(frame, visibleValue);
-  const lines: string[] = [];
+  const lines = Array.from(
+    { length: frame.inputLineCount },
+    () => `${frame.promptStart}${' '.repeat(frame.width)}${frame.reset}`
+  );
 
-  for (let index = 0; index < frame.inputLineCount; index += 1) {
+  for (let index = 0; index < editableLineCount; index += 1) {
     const chunk = chunks[index] ?? '';
     const prefix = index === 0 ? frame.promptPrefix : frame.promptContinuationPrefix;
     const content = `${prefix}${chunk}`.padEnd(frame.width, ' ');
-    lines.push(`${frame.promptStart}${content}${frame.reset}`);
+    const visualLineIndex = frame.promptLineOffset + index;
+    if (visualLineIndex < frame.inputLineCount) {
+      lines[visualLineIndex] = `${frame.promptStart}${content}${frame.reset}`;
+    }
   }
 
-  const cursorLineIndex = Math.min(frame.inputLineCount - 1, Math.floor(visibleCursorIndex / frame.maxInputCharsPerLine));
+  const cursorEditableLineIndex = Math.min(editableLineCount - 1, Math.floor(visibleCursorIndex / frame.maxInputCharsPerLine));
   const cursorColumn = Math.min(
-    (chunks[cursorLineIndex] ?? '').length,
+    (chunks[cursorEditableLineIndex] ?? '').length,
     visibleCursorIndex % frame.maxInputCharsPerLine
   );
-  const cursorPrefix = cursorLineIndex === 0 ? frame.promptPrefix : frame.promptContinuationPrefix;
-  const cursorText = (chunks[cursorLineIndex] ?? '').slice(0, cursorColumn);
+  const cursorPrefix = cursorEditableLineIndex === 0 ? frame.promptPrefix : frame.promptContinuationPrefix;
+  const cursorText = (chunks[cursorEditableLineIndex] ?? '').slice(0, cursorColumn);
+  const cursorLineIndex = frame.promptLineOffset + cursorEditableLineIndex;
   const linesBelowCursor = frame.inputLineCount - cursorLineIndex - 1;
   const moveUp = linesBelowCursor > 0 ? `\u001b[${linesBelowCursor}A` : '';
 
@@ -148,15 +158,16 @@ export function getPromptCursorPosition(
   value: string,
   cursorIndex: number
 ): PromptCursorPosition {
+  const editableLineCount = getEditableLineCount(frame);
   const visibleValue = getVisiblePromptValue(value, frame.maxInputChars);
   const visibleCursorIndex = getVisibleCursorIndex(value, visibleValue, cursorIndex);
-  const lineIndex = Math.min(frame.inputLineCount - 1, Math.floor(visibleCursorIndex / frame.maxInputCharsPerLine));
+  const editableLineIndex = Math.min(editableLineCount - 1, Math.floor(visibleCursorIndex / frame.maxInputCharsPerLine));
   const lineOffset = visibleCursorIndex % frame.maxInputCharsPerLine;
   const chunks = getWrappedPromptChunks(frame, visibleValue);
-  const column = Math.min((chunks[lineIndex] ?? '').length, lineOffset);
+  const column = Math.min((chunks[editableLineIndex] ?? '').length, lineOffset);
 
   return {
-    lineIndex,
+    lineIndex: frame.promptLineOffset + editableLineIndex,
     column
   };
 }
@@ -222,6 +233,7 @@ export function renderStatusLine(print: (line: string) => void): void {
 interface PromptFrame {
   width: number;
   inputLineCount: number;
+  promptLineOffset: number;
   borderLine: string;
   paddingLine: string;
   hintLine: string;
@@ -235,6 +247,7 @@ function createPromptFrame(): PromptFrame {
   const terminalWidth = process.stdout.columns ?? 100;
   const width = Math.max(56, Math.min(terminalWidth - 2, 140));
   const inputLineCount = 3;
+  const promptLineOffset = 1;
   const borderLine = chalk.whiteBright('─'.repeat(width));
   const backgroundStart = '\u001b[48;2;63;111;201m';
   const promptStart = `${backgroundStart}\u001b[97m`;
@@ -251,6 +264,7 @@ function createPromptFrame(): PromptFrame {
   return {
     width,
     inputLineCount,
+    promptLineOffset,
     borderLine,
     paddingLine,
     hintLine,
@@ -262,6 +276,7 @@ function createPromptFrame(): PromptFrame {
 }
 
 function getWrappedPromptChunks(frame: PromptFrameContext, visibleValue: string): string[] {
+  const editableLineCount = getEditableLineCount(frame);
   const chunks: string[] = [];
 
   for (let start = 0; start < visibleValue.length; start += frame.maxInputCharsPerLine) {
@@ -272,7 +287,11 @@ function getWrappedPromptChunks(frame: PromptFrameContext, visibleValue: string)
     chunks.push('');
   }
 
-  return chunks.slice(0, frame.inputLineCount);
+  return chunks.slice(0, editableLineCount);
+}
+
+function getEditableLineCount(frame: Pick<PromptFrameContext, 'inputLineCount' | 'promptLineOffset'>): number {
+  return Math.max(1, frame.inputLineCount - frame.promptLineOffset);
 }
 
 function getVisibleCursorIndex(value: string, visibleValue: string, cursorIndex: number): number {
