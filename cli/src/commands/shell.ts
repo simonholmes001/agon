@@ -382,12 +382,7 @@ export default class Shell extends Command {
           if (clean.length === 0) {
             return;
           }
-          const availableChars = frame.maxInputChars - value.length;
-          if (availableChars <= 0) {
-            output.write('\u0007');
-            return;
-          }
-          const insertText = clean.slice(0, availableChars);
+          const insertText = clean;
           value = `${value.slice(0, cursorIndex)}${insertText}${value.slice(cursorIndex)}`;
           cursorIndex += insertText.length;
           redraw();

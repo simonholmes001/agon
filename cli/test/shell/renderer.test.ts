@@ -59,9 +59,9 @@ describe('shell renderer', () => {
     expect(text).toContain('/set');
     expect(text).toContain('/params');
     expect(frame.maxInputChars).toBeGreaterThan(0);
-    expect(frame.cursorUpLines).toBe(6);
-    expect(frame.cursorDownFromFirstLine).toBe(6);
-    expect(frame.inputLineCount).toBe(5);
+    expect(frame.cursorUpLines).toBe(frame.inputLineCount + 1);
+    expect(frame.cursorDownFromFirstLine).toBe(frame.inputLineCount + 1);
+    expect(frame.inputLineCount).toBe(4);
     expect(frame.promptLineOffset).toBe(1);
   });
 
@@ -97,11 +97,11 @@ describe('shell renderer', () => {
 
   it('renders overflow input line with ellipsis and trailing text', () => {
     const frame = renderPromptBanner(() => {});
-    const longValue = 'x'.repeat(frame.maxInputChars + 12) + 'END';
+    const longValue = 'x'.repeat(frame.maxInputCharsPerLine * 8) + ' END';
     const rendered = buildPromptInputLine(frame, longValue);
     const plain = rendered.replace(/\u001b\[[0-9;]*m/g, '');
 
-    expect(plain).toContain('…');
+    expect(plain).not.toContain('…');
     expect(plain).toContain('END');
   });
 
@@ -124,6 +124,15 @@ describe('shell renderer', () => {
 
     expect(rows[1]).not.toContain('alph');
     expect(rows[2]).toContain('alpha beta');
+  });
+
+  it('keeps cursor visible at bottom of prompt viewport for very long input', () => {
+    const frame = renderPromptBanner(() => {});
+    const longValue = 'word '.repeat(frame.maxInputCharsPerLine * 2);
+    const cursor = getPromptCursorPosition(frame, longValue, longValue.length);
+    const expectedLastLine = frame.promptLineOffset + (frame.inputLineCount - frame.promptLineOffset) - 1;
+
+    expect(cursor.lineIndex).toBe(expectedLastLine);
   });
 
   it('renders cursor at a specific in-line position', () => {
