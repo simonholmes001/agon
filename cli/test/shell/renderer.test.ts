@@ -3,6 +3,8 @@ import {
   buildShimmerText,
   buildActivePrompt,
   buildPromptInputLine,
+  buildPromptInputLineWithCursor,
+  getPromptCursorPosition,
   getVisiblePromptValue,
   renderMessagePanel,
   renderPromptBanner,
@@ -57,8 +59,9 @@ describe('shell renderer', () => {
     expect(text).toContain('/set');
     expect(text).toContain('/params');
     expect(frame.maxInputChars).toBeGreaterThan(0);
-    expect(frame.cursorUpLines).toBe(3);
-    expect(frame.cursorDownLines).toBe(3);
+    expect(frame.cursorUpLines).toBe(4);
+    expect(frame.cursorDownFromFirstLine).toBe(4);
+    expect(frame.inputLineCount).toBe(3);
   });
 
   it('builds an active prompt line with an input cursor prefix', () => {
@@ -95,5 +98,25 @@ describe('shell renderer', () => {
 
     expect(plain).toContain('…');
     expect(plain).toContain('END');
+  });
+
+  it('wraps prompt input across multiple lines inside the frame', () => {
+    const frame = renderPromptBanner(() => {});
+    const longValue = 'a'.repeat(frame.maxInputCharsPerLine + 10);
+    const rendered = buildPromptInputLine(frame, longValue);
+
+    expect(rendered).toContain('\n');
+    expect(getPromptCursorPosition(frame, longValue, longValue.length).lineIndex).toBe(1);
+  });
+
+  it('renders cursor at a specific in-line position', () => {
+    const frame = renderPromptBanner(() => {});
+    const value = 'hello world';
+    const rendered = buildPromptInputLineWithCursor(frame, value, 5);
+    const plain = rendered.replace(/\u001b\[[0-9;]*[A-Za-z]/g, '');
+    const cursorSegment = plain.split('\r').pop() ?? '';
+
+    expect(cursorSegment).toContain('  > hello');
+    expect(cursorSegment).not.toContain('  > hello world');
   });
 });

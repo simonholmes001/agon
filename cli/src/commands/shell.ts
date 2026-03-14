@@ -14,7 +14,8 @@ import { routePlainInput } from '../shell/router.js';
 import {
   buildActivePrompt,
   buildShimmerText,
-  buildPromptInputLine,
+  buildPromptInputLineWithCursor,
+  getPromptCursorPosition,
   type PromptFrameContext,
   renderMessagePanel,
   renderPromptBanner,
@@ -237,17 +238,28 @@ export default class Shell extends Command {
 
     return await new Promise<string>((resolve) => {
       let value = '';
+      let cursorLineIndex = 0;
+      let cursorIndex = 0;
 
       const redraw = (): void => {
+        if (cursorLineIndex > 0) {
+          output.write(`\u001b[${cursorLineIndex}A`);
+        }
         output.write('\r');
-        output.write(buildPromptInputLine(frame, value));
+        output.write(buildPromptInputLineWithCursor(frame, value, cursorIndex));
+        cursorLineIndex = getPromptCursorPosition(frame, value, cursorIndex).lineIndex;
       };
 
       const finish = (result: string): void => {
         input.off('keypress', onKeypress);
         input.setRawMode(false);
         this.inRawInputMode = false;
-        output.write(`${frame.reset}\u001b[${frame.cursorDownLines}B\r`);
+        const cursorDownLines = Math.max(0, frame.cursorDownFromFirstLine - cursorLineIndex);
+        if (cursorDownLines > 0) {
+          output.write(`${frame.reset}\u001b[${cursorDownLines}B\r`);
+        } else {
+          output.write(`${frame.reset}\r`);
+        }
         resolve(result);
       };
 
@@ -279,8 +291,12 @@ export default class Shell extends Command {
         }
 
         if (keyName === 'backspace' || keyName === 'delete') {
-          if (value.length > 0) {
-            value = value.slice(0, -1);
+          if (keyName === 'backspace' && cursorIndex > 0) {
+            value = `${value.slice(0, cursorIndex - 1)}${value.slice(cursorIndex)}`;
+            cursorIndex -= 1;
+            redraw();
+          } else if (keyName === 'delete' && cursorIndex < value.length) {
+            value = `${value.slice(0, cursorIndex)}${value.slice(cursorIndex + 1)}`;
             redraw();
           }
           return;
@@ -290,8 +306,85 @@ export default class Shell extends Command {
           return;
         }
 
+        if (isCtrl && keyName === 'a') {
+          cursorIndex = 0;
+          redraw();
+          return;
+        }
+
+        if (isCtrl && keyName === 'e') {
+          cursorIndex = value.length;
+          redraw();
+          return;
+        }
+
+        if (isCtrl && keyName === 'w') {
+          const target = findPreviousWordBoundary(value, cursorIndex);
+          if (target < cursorIndex) {
+            value = `${value.slice(0, target)}${value.slice(cursorIndex)}`;
+            cursorIndex = target;
+            redraw();
+          }
+          return;
+        }
+
+        if (keyName === 'left') {
+          if (isMeta) {
+            cursorIndex = findPreviousWordBoundary(value, cursorIndex);
+          } else if (cursorIndex > 0) {
+            cursorIndex -= 1;
+          }
+          redraw();
+          return;
+        }
+
+        if (keyName === 'right') {
+          if (isMeta) {
+            cursorIndex = findNextWordBoundary(value, cursorIndex);
+          } else if (cursorIndex < value.length) {
+            cursorIndex += 1;
+          }
+          redraw();
+          return;
+        }
+
+        if (keyName === 'up') {
+          cursorIndex = Math.max(0, cursorIndex - frame.maxInputCharsPerLine);
+          redraw();
+          return;
+        }
+
+        if (keyName === 'down') {
+          cursorIndex = Math.min(value.length, cursorIndex + frame.maxInputCharsPerLine);
+          redraw();
+          return;
+        }
+
+        if (isMeta && keyName === 'b') {
+          cursorIndex = findPreviousWordBoundary(value, cursorIndex);
+          redraw();
+          return;
+        }
+
+        if (isMeta && keyName === 'f') {
+          cursorIndex = findNextWordBoundary(value, cursorIndex);
+          redraw();
+          return;
+        }
+
         if (str && !isCtrl && !isMeta && str !== '\r' && str !== '\n') {
-          value += str;
+          const clean = str.replace(/[\r\n]/g, '');
+          if (clean.length === 0) {
+            return;
+          }
+          const availableChars = frame.maxInputChars - value.length;
+          if (availableChars <= 0) {
+            output.write('\u0007');
+            return;
+          }
+          const insertText = clean.slice(0, availableChars);
+          value = `${value.slice(0, cursorIndex)}${insertText}${value.slice(cursorIndex)}`;
+          cursorIndex += insertText.length;
           redraw();
         }
       };
@@ -446,6 +539,42 @@ export default class Shell extends Command {
       progressSpinner.stop();
     }
   }
+}
+
+function isWordCharacter(char: string): boolean {
+  return /[A-Za-z0-9_]/.test(char);
+}
+
+function findPreviousWordBoundary(value: string, cursorIndex: number): number {
+  let index = Math.max(0, Math.min(cursorIndex, value.length));
+  if (index === 0) {
+    return 0;
+  }
+
+  while (index > 0 && !isWordCharacter(value[index - 1] ?? '')) {
+    index -= 1;
+  }
+  while (index > 0 && isWordCharacter(value[index - 1] ?? '')) {
+    index -= 1;
+  }
+
+  return index;
+}
+
+function findNextWordBoundary(value: string, cursorIndex: number): number {
+  let index = Math.max(0, Math.min(cursorIndex, value.length));
+  if (index >= value.length) {
+    return value.length;
+  }
+
+  while (index < value.length && !isWordCharacter(value[index] ?? '')) {
+    index += 1;
+  }
+  while (index < value.length && isWordCharacter(value[index] ?? '')) {
+    index += 1;
+  }
+
+  return index;
 }
 
 function getSpinnerText(parsed: ReturnType<typeof parseShellInput>): string | null {

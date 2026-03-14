@@ -110,6 +110,12 @@ Required:
 - `AZURE_SUBSCRIPTION_ID`
 - `AZURE_POSTGRES_ADMIN_PASSWORD`
 
+Required for backend container deployment (Docker Hub):
+
+- `DOCKERHUB_USERNAME`
+- `DOCKERHUB_TOKEN`
+- `DOCKERHUB_IMAGE_NAME` (example: `yourdockerhubuser/agon-backend`)
+
 Optional (written into Key Vault during deploy):
 
 - `OPENAI_KEY`
@@ -132,6 +138,10 @@ Optional (written into Key Vault during deploy):
 - `.github/workflows/infrastructure-deploy-dev.yaml`
   - Trigger: push/merge to `main` (infra paths), or manual dispatch
   - Runs subscription deployment to create/update `dev` infrastructure
+
+- `.github/workflows/backend-deploy-dev.yaml`
+  - Trigger: push/merge to `main` (backend paths), or manual dispatch
+  - Runs backend tests, builds and pushes Docker image to Docker Hub, deploys container to App Service, verifies `/health` through Application Gateway
 
 ## Legacy Front Door Cleanup (if previously deployed)
 

@@ -1,0 +1,178 @@
+name: Backend Deploy (Dev)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'backend/**'
+      - '.github/workflows/backend-deploy-dev.yaml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+  APP_RESOURCE_GROUP: rg-agon-dev-frc-app
+  APP_NAME_PREFIX: app-agon-dev-frc-
+  AGW_PUBLIC_IP_NAME: pip-agon-dev-frc-agw
+
+concurrency:
+  group: backend-dev-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy-dev:
+    name: Build, Push, and Deploy Backend (Dev)
+    runs-on: ubuntu-latest
+    environment:
+      name: dev
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+
+      - name: Run backend tests
+        working-directory: backend
+        run: |
+          dotnet restore
+          dotnet build --no-restore --configuration Release
+          dotnet test --no-build --configuration Release --verbosity normal
+
+      - name: Validate required Docker Hub secrets
+        shell: bash
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+          DOCKERHUB_IMAGE_NAME: ${{ secrets.DOCKERHUB_IMAGE_NAME }}
+        run: |
+          set -euo pipefail
+          if [ -z "${DOCKERHUB_USERNAME:-}" ]; then
+            echo "::error::Missing DOCKERHUB_USERNAME secret."
+            exit 1
+          fi
+          if [ -z "${DOCKERHUB_TOKEN:-}" ]; then
+            echo "::error::Missing DOCKERHUB_TOKEN secret."
+            exit 1
+          fi
+          if [ -z "${DOCKERHUB_IMAGE_NAME:-}" ]; then
+            echo "::error::Missing DOCKERHUB_IMAGE_NAME secret (example: youruser/agon-backend)."
+            exit 1
+          fi
+
+      - name: Docker Hub login
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Set image tags
+        id: image
+        shell: bash
+        env:
+          DOCKERHUB_IMAGE_NAME: ${{ secrets.DOCKERHUB_IMAGE_NAME }}
+        run: |
+          set -euo pipefail
+          SHORT_SHA="$(echo "${GITHUB_SHA}" | cut -c1-12)"
+          echo "tag_sha=sha-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+          echo "image_sha=${DOCKERHUB_IMAGE_NAME}:sha-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+          echo "image_latest=${DOCKERHUB_IMAGE_NAME}:dev-latest" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: backend
+          file: backend/Dockerfile
+          push: true
+          tags: |
+            ${{ steps.image.outputs.image_sha }}
+            ${{ steps.image.outputs.image_latest }}
+
+      - name: Login to Azure (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Resolve App Service name
+        id: app
+        uses: azure/cli@v2
+        with:
+          inlineScript: |
+            APP_NAME=$(az webapp list \
+              --resource-group "${APP_RESOURCE_GROUP}" \
+              --query "[?starts_with(name, '${APP_NAME_PREFIX}')].name | [0]" \
+              --output tsv)
+
+            if [ -z "${APP_NAME}" ] || [ "${APP_NAME}" = "null" ]; then
+              echo "No App Service found in ${APP_RESOURCE_GROUP} matching prefix ${APP_NAME_PREFIX}"
+              exit 1
+            fi
+
+            echo "Resolved app service: ${APP_NAME}"
+            echo "app_name=${APP_NAME}" >> "$GITHUB_OUTPUT"
+
+      - name: Configure App Service container image
+        uses: azure/cli@v2
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        with:
+          inlineScript: |
+            az webapp config container set \
+              --resource-group "${APP_RESOURCE_GROUP}" \
+              --name "${{ steps.app.outputs.app_name }}" \
+              --container-image-name "${{ steps.image.outputs.image_sha }}" \
+              --container-registry-url "https://index.docker.io" \
+              --container-registry-user "${DOCKERHUB_USERNAME}" \
+              --container-registry-password "${DOCKERHUB_TOKEN}"
+
+            az webapp config appsettings set \
+              --resource-group "${APP_RESOURCE_GROUP}" \
+              --name "${{ steps.app.outputs.app_name }}" \
+              --settings WEBSITES_PORT=8080
+
+      - name: Restart App Service
+        uses: azure/cli@v2
+        with:
+          inlineScript: |
+            az webapp restart \
+              --resource-group "${APP_RESOURCE_GROUP}" \
+              --name "${{ steps.app.outputs.app_name }}"
+
+      - name: Verify health through Application Gateway
+        uses: azure/cli@v2
+        with:
+          inlineScript: |
+            AGW_IP=$(az network public-ip show \
+              --resource-group "${APP_RESOURCE_GROUP}" \
+              --name "${AGW_PUBLIC_IP_NAME}" \
+              --query ipAddress \
+              --output tsv)
+
+            if [ -z "${AGW_IP}" ] || [ "${AGW_IP}" = "null" ]; then
+              echo "Failed to resolve Application Gateway public IP."
+              exit 1
+            fi
+
+            echo "Checking health at http://${AGW_IP}/health"
+
+            for i in {1..30}; do
+              STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://${AGW_IP}/health" || true)
+              if [ "${STATUS}" = "200" ]; then
+                echo "Backend is healthy via Application Gateway."
+                exit 0
+              fi
+              echo "Attempt ${i}/30: status=${STATUS}, waiting..."
+              sleep 20
+            done
+
+            echo "Backend failed health check through Application Gateway."
+            exit 1

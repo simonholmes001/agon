@@ -41,7 +41,7 @@ jobs:
           fi
 
           echo "::error::CLI changes detected without a changeset file."
-          echo "::error::Run 'cd cli && npx changeset' and commit the generated file in cli/.changeset/."
+          echo "::error::Run 'npx --yes @changesets/cli add --cwd cli' and commit the generated file in cli/.changeset/."
           exit 1
 
   cli-tests:

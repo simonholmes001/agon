@@ -11,8 +11,16 @@
 [![Coverage](https://img.shields.io/badge/Coverage-40%25_lines-red?style=flat-square)]()
 [![TDD](https://img.shields.io/badge/Methodology-TDD-red?style=flat-square)]()
 [![Licence](https://img.shields.io/badge/Licence-Private-lightgrey?style=flat-square)]()
+[![Deploy Infra Dev](https://github.com/simonholmes001/agon/actions/workflows/infrastructure-deploy-dev.yaml/badge.svg?branch=main)](https://github.com/simonholmes001/agon/actions/workflows/infrastructure-deploy-dev.yaml)
+[![Deploy Backend Dev](https://github.com/simonholmes001/agon/actions/workflows/backend-deploy-dev.yaml/badge.svg?branch=main)](https://github.com/simonholmes001/agon/actions/workflows/backend-deploy-dev.yaml)
+[![Deploy Preprod](https://img.shields.io/badge/Deploy%20Preprod-planned-lightgrey?style=flat-square)]()
+[![Deploy Prod](https://img.shields.io/badge/Deploy%20Prod-planned-lightgrey?style=flat-square)]()
 
 > Multi-agent AI analysis that transforms raw ideas into production-ready documentation.
+>
+> **Why the name "Agon"?**  
+> *Agon* comes from the Greek **ἀγών** (*agōn*), meaning a contest, struggle, or formal debate.  
+> The name fits this product because ideas are stress-tested through structured multi-agent debate before producing final execution artifacts.
 
 ---
 
@@ -201,6 +209,60 @@ Browser-based interface with visual Truth Map explorer and real-time agent strea
 ### iOS Application (In Development)
 
 Native iOS app for on-the-go strategy analysis. Coming soon.
+
+### Local Deployment (Developer Runbook)
+
+For local end-to-end testing, run the data services first, then the backend API, then your chosen client interface.
+
+#### 1) Start required local data services (PostgreSQL + Redis)
+
+```bash
+cd backend
+docker compose up -d postgres redis
+```
+
+Optional (DB admin UI):
+
+```bash
+cd backend
+docker compose --profile tools up -d pgadmin
+```
+
+#### 2) Run backend API locally
+
+```bash
+cd backend
+dotnet run --project src/Agon.Api/Agon.Api.csproj
+```
+
+API default URL: `http://localhost:5000`
+
+#### 3) Run a local client
+
+CLI (primary interface today):
+
+```bash
+cd cli
+npm install
+npm exec -- agon
+```
+
+Web frontend (WIP):
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Frontend default URL: `http://localhost:3000`
+
+#### 4) Stop local data services
+
+```bash
+cd backend
+docker compose down
+```
 
 ---
 
@@ -441,10 +503,7 @@ To enable local git hooks:
 git config core.hooksPath .githooks
 ```
 
-Optional strict mode for local commits:
-```bash
-AGON_ENFORCE_CHANGESET=1 git commit ...
-```
+Changeset validation is enforced by default in local pre-commit hook when `cli/` changes are staged.
 
 ---
 
@@ -459,8 +518,7 @@ AGON_ENFORCE_CHANGESET=1 git commit ...
 
 1. In any PR that changes `cli/`, create a changeset:
    ```bash
-   cd cli
-   npx changeset
+   npx --yes @changesets/cli add --cwd cli
    # Choose patch, minor, or major
    ```
 2. Merge the feature PR to `main`

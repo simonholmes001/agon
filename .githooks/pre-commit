@@ -7,18 +7,12 @@ CHANGESET_STAGED="$(echo "$STAGED_FILES" | grep -E '^cli/\.changeset/[^/]+\.md$'
 
 if [ -n "$CLI_STAGED" ] && [ -z "$CHANGESET_STAGED" ]; then
   echo ""
-  echo "⚠️  CLI changes detected, but no changeset file is staged."
-  echo "👉 If you plan to merge this PR, run:"
-  echo "   cd cli && npx changeset"
+  echo "❌ CLI changes detected, but no changeset file is staged."
+  echo "👉 Before committing, run:"
+  echo "   npx --yes @changesets/cli add --cwd cli"
   echo "   git add cli/.changeset/*.md"
-  echo ""
-  echo "ℹ️  To enforce this as blocking, run commits with:"
-  echo "   AGON_ENFORCE_CHANGESET=1 git commit ..."
-
-  if [ "${AGON_ENFORCE_CHANGESET:-0}" = "1" ]; then
-    echo "❌ Blocking commit because AGON_ENFORCE_CHANGESET=1 and no changeset file is staged."
-    exit 1
-  fi
+  echo "❌ Blocking commit because no changeset file was detected for CLI changes."
+  exit 1
 fi
 
 # CLI tests
