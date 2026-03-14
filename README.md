@@ -17,6 +17,10 @@
 [![Deploy Prod](https://img.shields.io/badge/Deploy%20Prod-planned-lightgrey?style=flat-square)]()
 
 > Multi-agent AI analysis that transforms raw ideas into production-ready documentation.
+>
+> **Why the name "Agon"?**  
+> *Agon* comes from the Greek **ἀγών** (*agōn*), meaning a contest, struggle, or formal debate.  
+> The name fits this product because ideas are stress-tested through structured multi-agent debate before producing final execution artifacts.
 
 ---
 
@@ -205,6 +209,60 @@ Browser-based interface with visual Truth Map explorer and real-time agent strea
 ### iOS Application (In Development)
 
 Native iOS app for on-the-go strategy analysis. Coming soon.
+
+### Local Deployment (Developer Runbook)
+
+For local end-to-end testing, run the data services first, then the backend API, then your chosen client interface.
+
+#### 1) Start required local data services (PostgreSQL + Redis)
+
+```bash
+cd backend
+docker compose up -d postgres redis
+```
+
+Optional (DB admin UI):
+
+```bash
+cd backend
+docker compose --profile tools up -d pgadmin
+```
+
+#### 2) Run backend API locally
+
+```bash
+cd backend
+dotnet run --project src/Agon.Api/Agon.Api.csproj
+```
+
+API default URL: `http://localhost:5000`
+
+#### 3) Run a local client
+
+CLI (primary interface today):
+
+```bash
+cd cli
+npm install
+npm exec -- agon
+```
+
+Web frontend (WIP):
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Frontend default URL: `http://localhost:3000`
+
+#### 4) Stop local data services
+
+```bash
+cd backend
+docker compose down
+```
 
 ---
 
