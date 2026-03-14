@@ -243,7 +243,7 @@ export default class Shell extends Command {
 
     return await new Promise<string>((resolve) => {
       let value = '';
-      let cursorLineIndex = 0;
+      let cursorLineIndex = getPromptCursorPosition(frame, value, 0).lineIndex;
       let cursorIndex = 0;
 
       const redraw = (): void => {
