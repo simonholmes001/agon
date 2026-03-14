@@ -137,3 +137,5 @@ infrastructure/bicep/modules/network-dev.json
 infrastructure/bicep/modules/data-dev.json
 infrastructure/bicep/modules/app-edge-dev.json
 infrastructure/bicep/modules/keyvault-access-dev.json
+# Local PR draft (kept on developer machine, not versioned)
+PR.md
