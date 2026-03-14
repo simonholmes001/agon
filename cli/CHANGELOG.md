@@ -1,5 +1,12 @@
 # @agon_agents/cli
 
+## 0.1.3
+
+### Patch Changes
+
+- Default the CLI API endpoint to the hosted gateway for zero-config installs, while preserving local testing via the `AGON_API_URL` environment variable.
+- Center the shell prompt anchor (`>`) vertically within the input box to match the Codex-style prompt layout.
+
 ## 0.1.2
 
 ### Patch Changes
