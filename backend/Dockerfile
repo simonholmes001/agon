@@ -1,13 +1,12 @@
 FROM mcr.microsoft.com/dotnet/sdk:9.0 AS build
 WORKDIR /src
 
-COPY Agon.sln ./
 COPY src/Agon.Api/Agon.Api.csproj src/Agon.Api/
 COPY src/Agon.Application/Agon.Application.csproj src/Agon.Application/
 COPY src/Agon.Domain/Agon.Domain.csproj src/Agon.Domain/
 COPY src/Agon.Infrastructure/Agon.Infrastructure.csproj src/Agon.Infrastructure/
 
-RUN dotnet restore Agon.sln
+RUN dotnet restore src/Agon.Api/Agon.Api.csproj
 
 COPY src ./src
 
