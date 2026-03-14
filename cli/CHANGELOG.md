@@ -1,5 +1,12 @@
 # @agon_agents/cli
 
+## 0.1.5
+
+### Patch Changes
+
+- Refine the shell input box to use a Codex-style compact landing layout with wider prompt width, unlimited typing length, and scrollable multiline cursor visibility.
+- Improve shell prompt input wrapping by preferring word-boundary line breaks and increasing editable multiline input space.
+
 ## 0.1.4
 
 ### Patch Changes
