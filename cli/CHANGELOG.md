@@ -1,5 +1,11 @@
 # @agon_agents/cli
 
+## 0.1.6
+
+### Patch Changes
+
+- Add consistent self-update entrypoint support so `agon --self-update` works directly from the launcher and keep `agon self-update` compatible.
+
 ## 0.1.5
 
 ### Patch Changes
