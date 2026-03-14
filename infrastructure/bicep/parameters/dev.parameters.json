@@ -29,6 +29,9 @@
     "appGatewaySubnetPrefix": {
       "value": "10.42.4.0/24"
     },
+    "appGatewayWafMode": {
+      "value": "Detection"
+    },
     "alertEmail": {
       "value": "simonholmesabc@gmail.com"
     },

@@ -15,6 +15,13 @@ param namePrefix string
 @description('Alert email receiver for action groups.')
 param alertEmail string
 
+@description('Application Gateway WAF mode. Use Detection in dev to avoid blocking legitimate prompt text.')
+@allowed([
+  'Detection'
+  'Prevention'
+])
+param appGatewayWafMode string = 'Detection'
+
 @description('App Service VNet integration subnet resource ID.')
 param appSubnetId string
 
@@ -329,7 +336,7 @@ resource appGateway 'Microsoft.Network/applicationGateways@2023-09-01' = {
     ]
     webApplicationFirewallConfiguration: {
       enabled: true
-      firewallMode: 'Prevention'
+      firewallMode: appGatewayWafMode
       ruleSetType: 'OWASP'
       ruleSetVersion: '3.2'
     }

@@ -84,7 +84,7 @@ export default class Shell extends Command {
     });
     if (updateInfo) {
       this.log(chalk.yellow(`Update available: v${updateInfo.currentVersion} → v${updateInfo.latestVersion}`));
-      this.log(chalk.cyan('Install: agon self-update'));
+      this.log(chalk.cyan('Install: agon --self-update'));
       this.log(chalk.dim(`Fallback: ${updateInfo.installCommand}`));
     }
     this.log('');

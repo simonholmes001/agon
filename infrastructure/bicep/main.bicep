@@ -59,6 +59,13 @@ param postgresSubnetPrefix string = '10.42.3.0/24'
 @description('Application Gateway dedicated subnet prefix.')
 param appGatewaySubnetPrefix string = '10.42.4.0/24'
 
+@description('Application Gateway WAF mode for this environment.')
+@allowed([
+  'Detection'
+  'Prevention'
+])
+param appGatewayWafMode string = 'Detection'
+
 var commonTags = {
   environment: environment
   workload: workloadName
@@ -136,6 +143,7 @@ module appEdge './modules/app-edge-dev.bicep' = {
     workloadName: workloadName
     namePrefix: namePrefix
     alertEmail: alertEmail
+    appGatewayWafMode: appGatewayWafMode
     appSubnetId: network.outputs.appSubnetId
     appGatewaySubnetId: network.outputs.appGatewaySubnetId
     privateEndpointSubnetId: network.outputs.privateEndpointSubnetId

@@ -257,7 +257,7 @@ export class AgonAPIClient {
             ErrorCode.CLI_UPGRADE_REQUIRED,
             'CLI update required by backend policy.',
             [
-              'Run `agon self-update`',
+              'Run `agon --self-update`',
               `Or run \`npm install -g ${this.packageName}@latest\``
             ]
           );
