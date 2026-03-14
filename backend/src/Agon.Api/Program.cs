@@ -309,6 +309,7 @@ app.UseHttpsRedirection();
 app.UseAuthorization();
 
 // ── Map Endpoints ───────────────────────────────────────────────────────
+app.MapGet("/health", () => Results.Ok(new { status = "Healthy" }));
 app.MapControllers();
 app.MapHub<DebateHub>("/hubs/debate");
 
