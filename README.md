@@ -11,6 +11,9 @@
 [![Coverage](https://img.shields.io/badge/Coverage-40%25_lines-red?style=flat-square)]()
 [![TDD](https://img.shields.io/badge/Methodology-TDD-red?style=flat-square)]()
 [![Licence](https://img.shields.io/badge/Licence-Private-lightgrey?style=flat-square)]()
+[![Deploy Dev](https://github.com/simonholmes001/agon/actions/workflows/infrastructure-deploy-dev.yaml/badge.svg?branch=main)](https://github.com/simonholmes001/agon/actions/workflows/infrastructure-deploy-dev.yaml)
+[![Deploy Preprod](https://img.shields.io/badge/Deploy%20Preprod-planned-lightgrey?style=flat-square)]()
+[![Deploy Prod](https://img.shields.io/badge/Deploy%20Prod-planned-lightgrey?style=flat-square)]()
 
 > Multi-agent AI analysis that transforms raw ideas into production-ready documentation.
 

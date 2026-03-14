@@ -24,6 +24,8 @@ jobs:
   deploy-dev:
     name: Deploy Dev Infrastructure
     runs-on: ubuntu-latest
+    environment:
+      name: dev
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
