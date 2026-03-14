@@ -24,6 +24,9 @@ param privateEndpointSubnetPrefix string
 @description('PostgreSQL delegated subnet prefix.')
 param postgresSubnetPrefix string
 
+@description('Application Gateway dedicated subnet prefix.')
+param appGatewaySubnetPrefix string
+
 var tags = {
   environment: environment
   workload: workloadName
@@ -34,10 +37,12 @@ var vnetName = 'vnet-${namePrefix}'
 var appSubnetName = 'snet-${namePrefix}-app'
 var privateEndpointSubnetName = 'snet-${namePrefix}-pep'
 var postgresSubnetName = 'snet-${namePrefix}-psql'
+var appGatewaySubnetName = 'snet-${namePrefix}-agw'
 
 var keyVaultPrivateDnsZoneName = 'privatelink.vaultcore.azure.net'
 var redisPrivateDnsZoneName = 'privatelink.redis.cache.windows.net'
 var postgresPrivateDnsZoneName = 'privatelink.postgres.database.azure.com'
+var appServicePrivateDnsZoneName = 'privatelink.azurewebsites.net'
 
 resource vnet 'Microsoft.Network/virtualNetworks@2023-11-01' = {
   name: vnetName
@@ -85,6 +90,12 @@ resource vnet 'Microsoft.Network/virtualNetworks@2023-11-01' = {
           ]
         }
       }
+      {
+        name: appGatewaySubnetName
+        properties: {
+          addressPrefix: appGatewaySubnetPrefix
+        }
+      }
     ]
   }
 }
@@ -104,6 +115,11 @@ resource postgresSubnet 'Microsoft.Network/virtualNetworks/subnets@2023-11-01' e
   name: postgresSubnetName
 }
 
+resource appGatewaySubnet 'Microsoft.Network/virtualNetworks/subnets@2023-11-01' existing = {
+  parent: vnet
+  name: appGatewaySubnetName
+}
+
 resource keyVaultPrivateDnsZone 'Microsoft.Network/privateDnsZones@2020-06-01' = {
   name: keyVaultPrivateDnsZoneName
   location: 'global'
@@ -118,6 +134,12 @@ resource redisPrivateDnsZone 'Microsoft.Network/privateDnsZones@2020-06-01' = {
 
 resource postgresPrivateDnsZone 'Microsoft.Network/privateDnsZones@2020-06-01' = {
   name: postgresPrivateDnsZoneName
+  location: 'global'
+  tags: tags
+}
+
+resource appServicePrivateDnsZone 'Microsoft.Network/privateDnsZones@2020-06-01' = {
+  name: appServicePrivateDnsZoneName
   location: 'global'
   tags: tags
 }
@@ -158,10 +180,24 @@ resource postgresDnsVnetLink 'Microsoft.Network/privateDnsZones/virtualNetworkLi
   }
 }
 
+resource appServiceDnsVnetLink 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2020-06-01' = {
+  parent: appServicePrivateDnsZone
+  name: '${vnet.name}-link'
+  location: 'global'
+  properties: {
+    registrationEnabled: false
+    virtualNetwork: {
+      id: vnet.id
+    }
+  }
+}
+
 output vnetId string = vnet.id
 output appSubnetId string = appSubnet.id
 output privateEndpointSubnetId string = privateEndpointSubnet.id
 output postgresSubnetId string = postgresSubnet.id
+output appGatewaySubnetId string = appGatewaySubnet.id
 output keyVaultPrivateDnsZoneId string = keyVaultPrivateDnsZone.id
 output redisPrivateDnsZoneId string = redisPrivateDnsZone.id
 output postgresPrivateDnsZoneId string = postgresPrivateDnsZone.id
+output appServicePrivateDnsZoneId string = appServicePrivateDnsZone.id

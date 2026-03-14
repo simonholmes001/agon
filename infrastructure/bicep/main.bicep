@@ -56,6 +56,9 @@ param privateEndpointSubnetPrefix string = '10.42.2.0/24'
 @description('PostgreSQL delegated subnet prefix.')
 param postgresSubnetPrefix string = '10.42.3.0/24'
 
+@description('Application Gateway dedicated subnet prefix.')
+param appGatewaySubnetPrefix string = '10.42.4.0/24'
+
 var commonTags = {
   environment: environment
   workload: workloadName
@@ -97,6 +100,7 @@ module network './modules/network-dev.bicep' = {
     appSubnetPrefix: appSubnetPrefix
     privateEndpointSubnetPrefix: privateEndpointSubnetPrefix
     postgresSubnetPrefix: postgresSubnetPrefix
+    appGatewaySubnetPrefix: appGatewaySubnetPrefix
   }
 }
 
@@ -133,6 +137,9 @@ module appEdge './modules/app-edge-dev.bicep' = {
     namePrefix: namePrefix
     alertEmail: alertEmail
     appSubnetId: network.outputs.appSubnetId
+    appGatewaySubnetId: network.outputs.appGatewaySubnetId
+    privateEndpointSubnetId: network.outputs.privateEndpointSubnetId
+    appServicePrivateDnsZoneId: network.outputs.appServicePrivateDnsZoneId
     postgresConnectionSecretUri: data.outputs.postgresConnectionSecretUri
     redisConnectionSecretUri: data.outputs.redisConnectionSecretUri
     openAiSecretUri: data.outputs.openAiSecretUri
@@ -157,7 +164,7 @@ output appResourceGroup string = rgApp.name
 output dataResourceGroup string = rgData.name
 output appServiceName string = appEdge.outputs.appServiceName
 output appServiceDefaultHostName string = appEdge.outputs.appServiceDefaultHostName
-output frontDoorEndpointHostName string = appEdge.outputs.frontDoorEndpointHostName
+output appGatewayPublicIpAddress string = appEdge.outputs.appGatewayPublicIpAddress
 output keyVaultName string = data.outputs.keyVaultName
 output postgresqlServerName string = data.outputs.postgresqlServerName
 output redisCacheName string = data.outputs.redisCacheName

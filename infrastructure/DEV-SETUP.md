@@ -4,10 +4,10 @@ This document is the source of truth for the `dev` backend infrastructure deploy
 
 ## Target Architecture (Dev)
 
-- Public edge: Azure Front Door Standard/Premium + WAF
+- Public edge: Azure Application Gateway (WAF_v2)
 - App tier: Azure App Service (Linux) in a dedicated app resource group
 - Data tier: Azure Database for PostgreSQL Flexible Server + Azure Cache for Redis + Key Vault
-- Network tier: dedicated VNet/subnets/private DNS zones
+- Network tier: dedicated VNet/subnets/private DNS zones (including App Service private link DNS)
 - Telemetry: Log Analytics + Application Insights + metric alert action group
 - IaC: Bicep only
 - CI/CD auth: GitHub OIDC (no client secret)
@@ -17,7 +17,7 @@ This document is the source of truth for the `dev` backend infrastructure deploy
 Deployment is **subscription-scope** and creates three resource groups:
 
 - `rg-agon-dev-frc-net`: VNet, subnets, private DNS zones
-- `rg-agon-dev-frc-app`: App Service, Front Door/WAF, monitoring + alerts
+- `rg-agon-dev-frc-app`: App Service, Application Gateway WAF, monitoring + alerts
 - `rg-agon-dev-frc-data`: PostgreSQL, Redis, Key Vault (+ private endpoints)
 
 This split follows Azure operational best practice: isolate lifecycle and access by domain (network/app/data), not by single mega-RG.
@@ -39,6 +39,7 @@ Naming follows Azure CAF guidance:
 - Region: `francecentral` (or your approved region)
 - Prefix: `agon-dev-frc` (or your approved prefix)
 - Alert email: `<your-alert-email>`
+- `appGatewaySubnetPrefix`: `10.42.4.0/24` (default in dev)
 
 ## One-Time Azure Identity Setup (OIDC)
 
@@ -132,6 +133,24 @@ Optional (written into Key Vault during deploy):
   - Trigger: push/merge to `main` (infra paths), or manual dispatch
   - Runs subscription deployment to create/update `dev` infrastructure
 
+## Legacy Front Door Cleanup (if previously deployed)
+
+If older runs created Front Door/CDN resources, remove them manually from `rg-agon-dev-frc-app`:
+
+```bash
+az resource delete \
+  --resource-group rg-agon-dev-frc-app \
+  --resource-type Microsoft.Cdn/profiles \
+  --name afd-agon-dev-frc
+
+az resource delete \
+  --resource-group rg-agon-dev-frc-app \
+  --resource-type Microsoft.Cdn/cdnWebApplicationFirewallPolicies \
+  --name waf-agon-dev-frc
+```
+
+Then rerun deployment from `main`.
+
 ## Execution Flow
 
 1. Open PR with infra changes -> validation workflow runs (`build` + `what-if`)
@@ -162,7 +181,8 @@ Add `User Access Administrator` (or `Owner`) in addition to `Contributor`.
 
 ## Security Posture (Dev Baseline)
 
-- Front Door + WAF for internet entrypoint
-- App Service restricted to Front Door origin traffic
+- Internet ingress through Application Gateway WAF only
+- App Service public network access disabled
+- App Service reachable privately via Private Endpoint from Application Gateway subnet
 - Key Vault/Redis/PostgreSQL on private networking paths
 - Runtime secrets via Key Vault references + managed identity

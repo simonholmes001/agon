@@ -26,6 +26,9 @@
     "postgresSubnetPrefix": {
       "value": "10.42.3.0/24"
     },
+    "appGatewaySubnetPrefix": {
+      "value": "10.42.4.0/24"
+    },
     "alertEmail": {
       "value": "simonholmesabc@gmail.com"
     },
