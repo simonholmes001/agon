@@ -1,5 +1,12 @@
 # @agon_agents/cli
 
+## 0.1.4
+
+### Patch Changes
+
+- Add `agon self-update`, send CLI version headers on API requests, and show clearer upgrade guidance when backend requires a newer CLI version.
+- Fix shell prompt rendering so the `>` marker stays vertically aligned when typing starts.
+
 ## 0.1.3
 
 ### Patch Changes
