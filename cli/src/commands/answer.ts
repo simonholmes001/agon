@@ -77,7 +77,11 @@ export default class Answer extends Command {
 
       // Get API client
       const config = await this.configManager.load();
-      const apiClient = new AgonAPIClient(config.apiUrl);
+      const apiClient = new AgonAPIClient(
+        config.apiUrl,
+        this.config.pjson.name ?? '@agon_agents/cli',
+        this.config.pjson.version ?? '0.0.0'
+      );
       const messagesBeforeSubmit = await apiClient.getMessages(sessionId);
       const previousAssistantMessage = getLatestPostDeliveryAssistantMessage(messagesBeforeSubmit);
 

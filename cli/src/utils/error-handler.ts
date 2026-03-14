@@ -14,6 +14,7 @@ export enum ErrorCode {
   INVALID_INPUT = 'INVALID_INPUT',
   RATE_LIMIT = 'RATE_LIMIT',
   BACKEND_UNAVAILABLE = 'BACKEND_UNAVAILABLE',
+  CLI_UPGRADE_REQUIRED = 'CLI_UPGRADE_REQUIRED',
   UNKNOWN = 'UNKNOWN',
 }
 
@@ -85,7 +86,8 @@ export function isApiError(error: unknown): boolean {
     return (
       error.code === ErrorCode.API_ERROR ||
       error.code === ErrorCode.BACKEND_UNAVAILABLE ||
-      error.code === ErrorCode.RATE_LIMIT
+      error.code === ErrorCode.RATE_LIMIT ||
+      error.code === ErrorCode.CLI_UPGRADE_REQUIRED
     );
   }
   

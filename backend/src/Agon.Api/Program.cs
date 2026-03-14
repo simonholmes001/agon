@@ -299,6 +299,7 @@ var app = builder.Build();
 
 // Global exception handling (must be first in pipeline)
 app.UseMiddleware<GlobalExceptionMiddleware>();
+app.UseMiddleware<MinimumCliVersionMiddleware>();
 
 // Apply EF Core migrations at startup so fresh environments have required schema.
 using (var scope = app.Services.CreateScope())

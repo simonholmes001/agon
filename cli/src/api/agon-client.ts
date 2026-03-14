@@ -23,14 +23,24 @@ export class AgonAPIClient {
   private readonly client: AxiosInstance;
   private readonly maxRetries = 2;
   private readonly logger: Logger;
+  private readonly packageName: string;
+  private readonly cliVersion: string;
 
-  constructor(baseURL: string = 'http://localhost:5000') {
+  constructor(
+    baseURL: string = 'http://localhost:5000',
+    packageName: string = '@agon_agents/cli',
+    cliVersion: string = '0.0.0'
+  ) {
     this.logger = new Logger('AgonAPIClient');
+    this.packageName = packageName;
+    this.cliVersion = cliVersion;
     this.client = axios.create({
       baseURL,
       timeout: 30000, // 30 seconds
       headers: {
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        'X-Agon-CLI-Version': this.cliVersion,
+        'User-Agent': `${this.packageName}/${this.cliVersion}`
       }
     });
 
@@ -219,7 +229,7 @@ export class AgonAPIClient {
     if (error.response) {
       const status = error.response.status;
       const data = error.response.data as any;
-      const message = data?.message || error.message;
+      const message = data?.detail || data?.message || error.message;
 
       this.logger.error('API error', { status, message });
 
@@ -241,6 +251,15 @@ export class AgonAPIClient {
             ErrorCode.RATE_LIMIT,
             'Rate limit exceeded. Please try again later.',
             ['Wait a few minutes before retrying']
+          );
+        case 426:
+          return new AgonError(
+            ErrorCode.CLI_UPGRADE_REQUIRED,
+            'CLI update required by backend policy.',
+            [
+              'Run `agon self-update`',
+              `Or run \`npm install -g ${this.packageName}@latest\``
+            ]
           );
         case 500:
         case 502:

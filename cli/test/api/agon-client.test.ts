@@ -11,6 +11,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import axios from 'axios';
 import type { AxiosInstance } from 'axios';
 import { AgonAPIClient } from '../../src/api/agon-client.js';
+import { AgonError, ErrorCode } from '../../src/utils/error-handler.js';
 import type { CreateSessionRequest, SessionResponse } from '../../src/api/types.js';
 
 vi.mock('axios');
@@ -33,7 +34,7 @@ describe('AgonAPIClient', () => {
 
     (axios.create as any).mockReturnValue(mockAxios);
     
-    client = new AgonAPIClient('http://localhost:5000');
+    client = new AgonAPIClient('http://localhost:5000', '@agon_agents/cli', '0.1.3');
   });
 
   describe('createSession', () => {
@@ -149,6 +150,19 @@ describe('AgonAPIClient', () => {
       // Act & Assert
       await expect(client.getSession(sessionId)).rejects.toThrow();
     });
+
+    it('should map 426 errors to CLI upgrade required', async () => {
+      const error: any = new Error('Request failed with status code 426');
+      error.response = {
+        status: 426,
+        data: { detail: 'Please upgrade Agon CLI.' }
+      };
+      const mapped = (client as any).mapError(error);
+      expect(mapped).toBeInstanceOf(AgonError);
+      const agonError = mapped as AgonError;
+      expect(agonError.code).toBe(ErrorCode.CLI_UPGRADE_REQUIRED);
+      expect(agonError.suggestions).toContain('Run `agon self-update`');
+    });
   });
 
   describe('timeout handling', () => {
@@ -157,6 +171,17 @@ describe('AgonAPIClient', () => {
       expect(axios.create).toHaveBeenCalledWith(
         expect.objectContaining({
           timeout: 30000
+        })
+      );
+    });
+
+    it('should set CLI version headers for backend policy enforcement', async () => {
+      expect(axios.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          headers: expect.objectContaining({
+            'X-Agon-CLI-Version': '0.1.3',
+            'User-Agent': '@agon_agents/cli/0.1.3'
+          })
         })
       );
     });

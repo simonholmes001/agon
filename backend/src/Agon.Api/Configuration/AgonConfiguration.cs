@@ -14,4 +14,5 @@ public sealed class AgonConfiguration
     public int SessionBudgetTokens { get; set; } = 50000;
     public double ConvergenceThreshold { get; set; } = 0.75;
     public int HighFrictionThreshold { get; set; } = 70;
+    public string MinCliVersion { get; set; } = "0.1.3";
 }

@@ -45,7 +45,11 @@ export default class Shell extends Command {
     const configManager = new ConfigManager();
     const sessionManager = new SessionManager();
     const config = await configManager.load();
-    const apiClient = new AgonAPIClient(config.apiUrl);
+    const apiClient = new AgonAPIClient(
+      config.apiUrl,
+      this.config.pjson.name ?? '@agon_agents/cli',
+      this.config.pjson.version ?? '0.0.0'
+    );
     this.apiClient = apiClient;
     this.sessionManager = sessionManager;
     this.initializeKeypressEvents = createKeypressInitializer(input);
@@ -80,7 +84,8 @@ export default class Shell extends Command {
     });
     if (updateInfo) {
       this.log(chalk.yellow(`Update available: v${updateInfo.currentVersion} → v${updateInfo.latestVersion}`));
-      this.log(chalk.cyan(`Install: ${updateInfo.installCommand}`));
+      this.log(chalk.cyan('Install: agon self-update'));
+      this.log(chalk.dim(`Fallback: ${updateInfo.installCommand}`));
     }
     this.log('');
 
@@ -238,7 +243,7 @@ export default class Shell extends Command {
 
     return await new Promise<string>((resolve) => {
       let value = '';
-      let cursorLineIndex = 0;
+      let cursorLineIndex = getPromptCursorPosition(frame, value, 0).lineIndex;
       let cursorIndex = 0;
 
       const redraw = (): void => {
