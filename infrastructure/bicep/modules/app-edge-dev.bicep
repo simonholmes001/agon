@@ -18,6 +18,15 @@ param alertEmail string
 @description('App Service VNet integration subnet resource ID.')
 param appSubnetId string
 
+@description('Application Gateway dedicated subnet resource ID.')
+param appGatewaySubnetId string
+
+@description('Private endpoint subnet resource ID.')
+param privateEndpointSubnetId string
+
+@description('Private DNS zone resource ID for App Service private endpoint resolution.')
+param appServicePrivateDnsZoneId string
+
 @description('Key Vault secret URI for PostgreSQL connection string.')
 param postgresConnectionSecretUri string
 
@@ -43,7 +52,6 @@ var tags = {
 }
 
 var uniqueSuffix = take(uniqueString(subscription().id, resourceGroup().id, namePrefix, environment), 12)
-var endpointPrefix = replace(namePrefix, '-', '')
 
 var appServicePlanName = 'asp-${namePrefix}'
 var appServiceName = 'app-${namePrefix}-${uniqueSuffix}'
@@ -51,12 +59,15 @@ var appInsightsName = 'appi-${namePrefix}'
 var logAnalyticsName = 'log-${namePrefix}'
 var actionGroupName = 'ag-${namePrefix}-ops'
 
-var frontDoorProfileName = 'afd-${namePrefix}'
-var frontDoorEndpointName = 'afd-${endpointPrefix}-${uniqueSuffix}'
-var frontDoorOriginGroupName = 'og-default'
-var frontDoorOriginName = 'app-origin'
-var frontDoorRouteName = 'route-default'
-var frontDoorWafPolicyName = 'waf-${namePrefix}'
+var appGatewayName = 'agw-${namePrefix}'
+var appGatewayPublicIpName = 'pip-${namePrefix}-agw'
+var frontendIpConfigName = 'feip-public'
+var frontendPortName = 'feport-80'
+var backendPoolName = 'be-appservice'
+var backendHttpSettingsName = 'be-https'
+var probeName = 'probe-health'
+var httpListenerName = 'listener-http'
+var requestRoutingRuleName = 'rule-default'
 
 resource logAnalytics 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
   name: logAnalyticsName
@@ -107,7 +118,7 @@ resource appService 'Microsoft.Web/sites@2023-12-01' = {
   properties: {
     serverFarmId: appServicePlan.id
     httpsOnly: true
-    publicNetworkAccess: 'Enabled'
+    publicNetworkAccess: 'Disabled'
     virtualNetworkSubnetId: appSubnetId
     siteConfig: {
       linuxFxVersion: 'DOTNETCORE|9.0'
@@ -148,151 +159,180 @@ resource appService 'Microsoft.Web/sites@2023-12-01' = {
   }
 }
 
-resource frontDoorProfile 'Microsoft.Cdn/profiles@2023-05-01' = {
-  name: frontDoorProfileName
-  location: 'global'
-  tags: tags
-  sku: {
-    name: 'Premium_AzureFrontDoor'
-  }
-}
-
-resource frontDoorWafPolicy 'Microsoft.Cdn/CdnWebApplicationFirewallPolicies@2023-05-01' = {
-  name: frontDoorWafPolicyName
-  location: 'global'
-  sku: {
-    name: 'Premium_AzureFrontDoor'
-  }
+resource appServicePrivateEndpoint 'Microsoft.Network/privateEndpoints@2023-11-01' = {
+  name: 'pep-${appService.name}'
+  location: location
   tags: tags
   properties: {
-    policySettings: {
-      enabledState: 'Enabled'
-      mode: 'Prevention'
+    subnet: {
+      id: privateEndpointSubnetId
     }
-    managedRules: {
-      managedRuleSets: [
-        {
-          ruleSetType: 'Microsoft_DefaultRuleSet'
-          ruleSetVersion: '2.1'
+    privateLinkServiceConnections: [
+      {
+        name: 'appServiceConnection'
+        properties: {
+          privateLinkServiceId: appService.id
+          groupIds: [
+            'sites'
+          ]
         }
-        {
-          ruleSetType: 'Microsoft_BotManagerRuleSet'
-          ruleSetVersion: '1.0'
-        }
-      ]
-    }
-  }
-}
-
-resource frontDoorEndpoint 'Microsoft.Cdn/profiles/afdEndpoints@2023-05-01' = {
-  parent: frontDoorProfile
-  name: frontDoorEndpointName
-  location: 'global'
-  tags: tags
-  properties: {
-    enabledState: 'Enabled'
-  }
-}
-
-resource frontDoorOriginGroup 'Microsoft.Cdn/profiles/originGroups@2023-05-01' = {
-  parent: frontDoorProfile
-  name: frontDoorOriginGroupName
-  properties: {
-    sessionAffinityState: 'Disabled'
-    loadBalancingSettings: {
-      sampleSize: 4
-      successfulSamplesRequired: 3
-      additionalLatencyInMilliseconds: 0
-    }
-    healthProbeSettings: {
-      probeIntervalInSeconds: 120
-      probePath: '/health'
-      probeProtocol: 'Https'
-      probeRequestType: 'HEAD'
-    }
-  }
-}
-
-resource frontDoorOrigin 'Microsoft.Cdn/profiles/originGroups/origins@2023-05-01' = {
-  parent: frontDoorOriginGroup
-  name: frontDoorOriginName
-  properties: {
-    hostName: appService.properties.defaultHostName
-    originHostHeader: appService.properties.defaultHostName
-    priority: 1
-    weight: 1000
-    enabledState: 'Enabled'
-    httpsPort: 443
-  }
-}
-
-resource frontDoorRoute 'Microsoft.Cdn/profiles/afdEndpoints/routes@2023-05-01' = {
-  parent: frontDoorEndpoint
-  name: frontDoorRouteName
-  properties: {
-    enabledState: 'Enabled'
-    forwardingProtocol: 'HttpsOnly'
-    httpsRedirect: 'Enabled'
-    linkToDefaultDomain: 'Enabled'
-    patternsToMatch: [
-      '/*'
-    ]
-    supportedProtocols: [
-      'Http'
-      'Https'
-    ]
-    originGroup: {
-      id: frontDoorOriginGroup.id
-    }
-  }
-}
-
-resource frontDoorSecurityPolicy 'Microsoft.Cdn/profiles/securityPolicies@2023-05-01' = {
-  parent: frontDoorProfile
-  name: 'sp-default'
-  properties: {
-    parameters: {
-      type: 'WebApplicationFirewall'
-      wafPolicy: {
-        id: frontDoorWafPolicy.id
       }
-      associations: [
-        {
-          domains: [
+    ]
+  }
+}
+
+resource appServicePrivateDnsZoneGroup 'Microsoft.Network/privateEndpoints/privateDnsZoneGroups@2023-11-01' = {
+  parent: appServicePrivateEndpoint
+  name: 'default'
+  properties: {
+    privateDnsZoneConfigs: [
+      {
+        name: 'appsvc-zone'
+        properties: {
+          privateDnsZoneId: appServicePrivateDnsZoneId
+        }
+      }
+    ]
+  }
+}
+
+resource appGatewayPublicIp 'Microsoft.Network/publicIPAddresses@2023-09-01' = {
+  name: appGatewayPublicIpName
+  location: location
+  tags: tags
+  sku: {
+    name: 'Standard'
+  }
+  properties: {
+    publicIPAllocationMethod: 'Static'
+    publicIPAddressVersion: 'IPv4'
+  }
+}
+
+resource appGateway 'Microsoft.Network/applicationGateways@2023-09-01' = {
+  name: appGatewayName
+  location: location
+  tags: tags
+  properties: {
+    sku: {
+      name: 'WAF_v2'
+      tier: 'WAF_v2'
+    }
+    autoscaleConfiguration: {
+      minCapacity: 1
+      maxCapacity: 2
+    }
+    gatewayIPConfigurations: [
+      {
+        name: 'gwipc-main'
+        properties: {
+          subnet: {
+            id: appGatewaySubnetId
+          }
+        }
+      }
+    ]
+    frontendIPConfigurations: [
+      {
+        name: frontendIpConfigName
+        properties: {
+          publicIPAddress: {
+            id: appGatewayPublicIp.id
+          }
+        }
+      }
+    ]
+    frontendPorts: [
+      {
+        name: frontendPortName
+        properties: {
+          port: 80
+        }
+      }
+    ]
+    backendAddressPools: [
+      {
+        name: backendPoolName
+        properties: {
+          backendAddresses: [
             {
-              id: frontDoorEndpoint.id
+              fqdn: appService.properties.defaultHostName
             }
           ]
-          patternsToMatch: [
-            '/*'
-          ]
-        }
-      ]
-    }
-  }
-}
-
-resource appWebConfig 'Microsoft.Web/sites/config@2023-12-01' = {
-  parent: appService
-  name: 'web'
-  properties: {
-    ipSecurityRestrictionsDefaultAction: 'Deny'
-    scmIpSecurityRestrictionsUseMain: true
-    ipSecurityRestrictions: [
-      {
-        name: 'Allow-Azure-FrontDoor'
-        description: 'Allow only traffic coming through Azure Front Door with matching profile ID.'
-        action: 'Allow'
-        priority: 100
-        tag: 'ServiceTag'
-        ipAddress: 'AzureFrontDoor.Backend'
-        headers: {
-          'x-azure-fdid': [
-            frontDoorProfile.properties.frontDoorId
-          ]
         }
       }
     ]
+    backendHttpSettingsCollection: [
+      {
+        name: backendHttpSettingsName
+        properties: {
+          protocol: 'Https'
+          port: 443
+          requestTimeout: 30
+          hostName: appService.properties.defaultHostName
+          pickHostNameFromBackendAddress: false
+          probe: {
+            id: resourceId('Microsoft.Network/applicationGateways/probes', appGatewayName, probeName)
+          }
+        }
+      }
+    ]
+    probes: [
+      {
+        name: probeName
+        properties: {
+          protocol: 'Https'
+          path: '/health'
+          interval: 30
+          timeout: 30
+          unhealthyThreshold: 3
+          pickHostNameFromBackendHttpSettings: true
+          match: {
+            statusCodes: [
+              '200-399'
+            ]
+          }
+        }
+      }
+    ]
+    httpListeners: [
+      {
+        name: httpListenerName
+        properties: {
+          frontendIPConfiguration: {
+            id: resourceId('Microsoft.Network/applicationGateways/frontendIPConfigurations', appGatewayName, frontendIpConfigName)
+          }
+          frontendPort: {
+            id: resourceId('Microsoft.Network/applicationGateways/frontendPorts', appGatewayName, frontendPortName)
+          }
+          protocol: 'Http'
+        }
+      }
+    ]
+    requestRoutingRules: [
+      {
+        name: requestRoutingRuleName
+        properties: {
+          ruleType: 'Basic'
+          priority: 100
+          httpListener: {
+            id: resourceId('Microsoft.Network/applicationGateways/httpListeners', appGatewayName, httpListenerName)
+          }
+          backendAddressPool: {
+            id: resourceId('Microsoft.Network/applicationGateways/backendAddressPools', appGatewayName, backendPoolName)
+          }
+          backendHttpSettings: {
+            id: resourceId('Microsoft.Network/applicationGateways/backendHttpSettingsCollection', appGatewayName, backendHttpSettingsName)
+          }
+        }
+      }
+    ]
+    webApplicationFirewallConfiguration: {
+      enabled: true
+      firewallMode: 'Prevention'
+      ruleSetType: 'OWASP'
+      ruleSetVersion: '3.2'
+    }
   }
 }
 
@@ -353,5 +393,5 @@ resource appServiceAvailabilityAlert 'Microsoft.Insights/metricAlerts@2018-03-01
 output appServiceName string = appService.name
 output appServiceDefaultHostName string = appService.properties.defaultHostName
 output appPrincipalId string = appService.identity.principalId
-output frontDoorEndpointHostName string = frontDoorEndpoint.properties.hostName
-output frontDoorProfileId string = frontDoorProfile.id
+output appGatewayName string = appGateway.name
+output appGatewayPublicIpAddress string = appGatewayPublicIp.properties.ipAddress
