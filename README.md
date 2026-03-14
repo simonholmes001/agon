@@ -200,6 +200,7 @@ After launching `agon`, use these in-shell commands:
 Notes:
 - `agon --version` prints the installed CLI version and exits.
 - `agon --help` shows launcher help.
+- By default, Agon CLI connects to the hosted backend endpoint (no manual `apiUrl` setup required for end users).
 - On startup, Agon checks npm and alerts when a newer stable version is available.
 
 ### Web Application (In Development)
@@ -235,7 +236,11 @@ cd backend
 dotnet run --project src/Agon.Api/Agon.Api.csproj
 ```
 
-API default URL: `http://localhost:5000`
+For local backend testing, point the CLI to your local API process:
+
+```bash
+AGON_API_URL=http://localhost:5000 npm exec -- agon
+```
 
 #### 3) Run a local client
 

@@ -19,6 +19,8 @@ import { stringify as yamlStringify } from 'yaml';
 import * as path from 'node:path';
 import * as os from 'node:os';
 
+const DEFAULT_HOSTED_API_URL = 'http://20.111.24.4';
+
 // Configuration schema
 const ConfigSchema = z.object({
   apiUrl: z.string().url().optional(),
@@ -30,7 +32,7 @@ const ConfigSchema = z.object({
 export type AgonConfig = z.infer<typeof ConfigSchema>;
 
 const DEFAULT_CONFIG: Required<AgonConfig> = {
-  apiUrl: 'http://localhost:5000',
+  apiUrl: resolveDefaultApiUrl(),
   defaultFriction: 50,
   researchEnabled: true,
   logLevel: 'info'
@@ -159,5 +161,19 @@ export class ConfigManager {
     } catch {
       return null;
     }
+  }
+}
+
+function resolveDefaultApiUrl(): string {
+  const envUrl = process.env.AGON_API_URL?.trim();
+  if (!envUrl) {
+    return DEFAULT_HOSTED_API_URL;
+  }
+
+  try {
+    new URL(envUrl);
+    return envUrl;
+  } catch {
+    return DEFAULT_HOSTED_API_URL;
   }
 }

@@ -27,7 +27,7 @@ describe('ConfigManager', () => {
       const defaults = configManager.getDefaults();
 
       // Assert
-      expect(defaults.apiUrl).toBe('http://localhost:5000');
+      expect(defaults.apiUrl).toMatch(/^https?:\/\//);
       expect(defaults.defaultFriction).toBe(50);
       expect(defaults.researchEnabled).toBe(true);
       expect(defaults.logLevel).toBe('info');
@@ -135,7 +135,7 @@ describe('ConfigManager', () => {
 
       // Assert
       expect(merged.defaultFriction).toBe(75); // From partial
-      expect(merged.apiUrl).toBe('http://localhost:5000'); // From defaults
+      expect(merged.apiUrl).toBe(configManager.getDefaults().apiUrl); // From defaults
       expect(merged.researchEnabled).toBe(true); // From defaults
       expect(merged.logLevel).toBe('info'); // From defaults
     });
