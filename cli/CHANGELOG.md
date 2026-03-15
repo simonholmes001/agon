@@ -1,5 +1,11 @@
 # @agon_agents/cli
 
+## 0.1.8
+
+### Patch Changes
+
+- Improve follow-up reliability and UX by mapping gateway timeouts (HTTP 504) to backend-unavailable guidance, preserving moderator question numbering in shell rendering, and refining moderator prompt behavior to ask adaptive non-repetitive clarifications.
+
 ## 0.1.7
 
 ### Patch Changes
