@@ -66,6 +66,11 @@ param appGatewaySubnetPrefix string = '10.42.4.0/24'
 ])
 param appGatewayWafMode string = 'Detection'
 
+@description('Application Gateway backend request timeout in seconds.')
+@minValue(1)
+@maxValue(86400)
+param appGatewayRequestTimeoutSeconds int = 120
+
 var commonTags = {
   environment: environment
   workload: workloadName
@@ -144,6 +149,7 @@ module appEdge './modules/app-edge-dev.bicep' = {
     namePrefix: namePrefix
     alertEmail: alertEmail
     appGatewayWafMode: appGatewayWafMode
+    appGatewayRequestTimeoutSeconds: appGatewayRequestTimeoutSeconds
     appSubnetId: network.outputs.appSubnetId
     appGatewaySubnetId: network.outputs.appGatewaySubnetId
     privateEndpointSubnetId: network.outputs.privateEndpointSubnetId

@@ -39,7 +39,7 @@ export function normalizeMarkdownStructure(markdown: string): string {
   const numberedPattern = /^(\d+)[.)]\s+(.+)$/;
   const bulletPattern = /^[-*•●▪◦∙·]\s+(.+)$/;
   const continuationPattern = /^(and|or|also|plus|including|where|pick|choose|reply|current|desired|what(?:'s| is)?|budget|timeline|tech|non-negotiables?)\b/i;
-  const listTerminationPattern = /^(once|after that|after you answer|then i(?:'|)ll|thanks)\b/i;
+  const listTerminationPattern = /^(once|after that|after you answer|then i(?:'|)ll|thanks|next steps?:)\b/i;
   let insideNumberedList = false;
   let numberedItemCounter = 0;
   let pendingBlank = false;
@@ -100,9 +100,12 @@ export function normalizeMarkdownStructure(markdown: string): string {
 
     if (insideNumberedList) {
       const previous = normalized.at(-1) ?? '';
-      const followsSubItem = /^\s+-\s+/.test(previous) || /^\s{5,}\S+/.test(previous);
-      if (followsSubItem && !listTerminationPattern.test(trimmed)) {
-        normalized.push(`     ${trimmed}`);
+      const followsNumberedItem = /^\d+\.\s+/.test(previous);
+      const followsSubItem = /^\s+-\s+/.test(previous);
+      const followsContinuation = /^\s{3,}\S+/.test(previous);
+      if ((followsNumberedItem || followsSubItem || followsContinuation) && !listTerminationPattern.test(trimmed)) {
+        const indent = followsNumberedItem ? '   ' : '     ';
+        normalized.push(`${indent}${trimmed}`);
         continue;
       }
     }

@@ -212,6 +212,26 @@ describe('Markdown Renderer', () => {
       expect(normalized).not.toContain('\n1. Constraints you do have');
     });
 
+    it('should keep numbering progression when a numbered item contains plain continuation lines', () => {
+      const text = [
+        'Please answer these 3 questions:',
+        '',
+        '1. Primary persona (pick one for MVP): Which specific group are we designing for first? Examples: "busy urban professionals 25-40 seeking',
+        'long-term relationship," "divorced 40-60 professionals re-entering dating," "faith-based professionals," etc.',
+        '',
+        '1. Hard constraints (numbers): What is your budget and timeline?',
+        '2. Core matching behavior for MVP: What one matching outcome should AI optimize for?'
+      ].join('\n');
+
+      const normalized = normalizeMarkdownStructure(text);
+      expect(normalized).toContain('1. Primary persona (pick one for MVP): Which specific group are we designing for first? Examples: "busy urban professionals 25-40 seeking');
+      expect(normalized).toContain('   long-term relationship," "divorced 40-60 professionals re-entering dating," "faith-based professionals," etc.');
+      expect(normalized).toContain('2. Hard constraints (numbers): What is your budget and timeline?');
+      expect(normalized).toContain('3. Core matching behavior for MVP: What one matching outcome should AI optimize for?');
+      expect(normalized).not.toContain('\n1. Hard constraints');
+      expect(normalized).not.toContain('\n2. Core matching behavior for MVP');
+    });
+
     it('should keep numbering progression when option bullets use unicode bullet characters', () => {
       const text = [
         '1. Primary persona',

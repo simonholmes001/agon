@@ -264,10 +264,15 @@ export class AgonAPIClient {
         case 500:
         case 502:
         case 503:
+        case 504:
           return new AgonError(
             ErrorCode.BACKEND_UNAVAILABLE,
             'Backend service unavailable. Please try again.',
-            ['Check if the backend is running', 'Verify API URL in config']
+            [
+              'Check if the backend is running',
+              'Verify API URL in config',
+              'If this happens during long responses, the gateway timeout may be too low'
+            ]
           );
         default:
           return new AgonError(ErrorCode.API_ERROR, message);
