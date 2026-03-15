@@ -1,5 +1,12 @@
 # @agon_agents/cli
 
+## 0.1.7
+
+### Patch Changes
+
+- Clarify shell update instructions so users are explicitly told to exit the interactive shell before running update commands in the terminal.
+- Improve top-level CLI help so `agon --help` explicitly lists global flags including `--help`, `--version`, and `--self-update`.
+
 ## 0.1.6
 
 ### Patch Changes
