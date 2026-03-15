@@ -151,6 +151,15 @@ describe('AgonAPIClient', () => {
       await expect(client.getSession(sessionId)).rejects.toThrow();
     });
 
+    it('should map 504 errors to backend unavailable', () => {
+      const error: any = new Error('Gateway Timeout');
+      error.response = { status: 504, data: {} };
+      const mapped = (client as any).mapError(error);
+      expect(mapped).toBeInstanceOf(AgonError);
+      const agonError = mapped as AgonError;
+      expect(agonError.code).toBe(ErrorCode.BACKEND_UNAVAILABLE);
+    });
+
     it('should map 426 errors to CLI upgrade required', async () => {
       const error: any = new Error('Request failed with status code 426');
       error.response = {

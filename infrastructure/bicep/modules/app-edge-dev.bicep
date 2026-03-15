@@ -22,6 +22,11 @@ param alertEmail string
 ])
 param appGatewayWafMode string = 'Detection'
 
+@description('Application Gateway backend request timeout in seconds.')
+@minValue(1)
+@maxValue(86400)
+param appGatewayRequestTimeoutSeconds int = 120
+
 @description('App Service VNet integration subnet resource ID.')
 param appSubnetId string
 
@@ -274,7 +279,7 @@ resource appGateway 'Microsoft.Network/applicationGateways@2023-09-01' = {
         properties: {
           protocol: 'Https'
           port: 443
-          requestTimeout: 30
+          requestTimeout: appGatewayRequestTimeoutSeconds
           hostName: appService.properties.defaultHostName
           pickHostNameFromBackendAddress: false
           probe: {
