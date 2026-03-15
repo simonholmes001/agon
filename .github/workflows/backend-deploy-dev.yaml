@@ -6,6 +6,8 @@ on:
     paths:
       - 'backend/**'
       - '.github/workflows/backend-deploy-dev.yaml'
+      - 'infrastructure/bicep/main.bicep'
+      - 'infrastructure/bicep/modules/app-edge-dev.bicep'
   workflow_dispatch:
 
 permissions:

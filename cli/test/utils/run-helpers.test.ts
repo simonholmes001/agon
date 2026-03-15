@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { shouldPrintVersion, shouldSelfUpdate } from '../../bin/run-helpers.js';
+import {
+  buildTopLevelHelp,
+  shouldPrintTopLevelHelp,
+  shouldPrintVersion,
+  shouldSelfUpdate
+} from '../../bin/run-helpers.js';
 
 describe('run helpers', () => {
   it('returns true for --version', () => {
@@ -26,5 +31,21 @@ describe('run helpers', () => {
 
   it('returns false for non self-update args', () => {
     expect(shouldSelfUpdate(['--help'])).toBe(false);
+  });
+
+  it('returns true for top-level --help', () => {
+    expect(shouldPrintTopLevelHelp(['--help'])).toBe(true);
+    expect(shouldPrintTopLevelHelp(['-h'])).toBe(true);
+  });
+
+  it('returns false for command help syntax', () => {
+    expect(shouldPrintTopLevelHelp(['start', '--help'])).toBe(false);
+  });
+
+  it('includes all global flags in top-level help output', () => {
+    const text = buildTopLevelHelp('agon');
+    expect(text).toContain('--help');
+    expect(text).toContain('--version');
+    expect(text).toContain('--self-update');
   });
 });

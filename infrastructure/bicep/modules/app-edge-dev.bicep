@@ -128,7 +128,6 @@ resource appService 'Microsoft.Web/sites@2023-12-01' = {
     publicNetworkAccess: 'Disabled'
     virtualNetworkSubnetId: appSubnetId
     siteConfig: {
-      linuxFxVersion: 'DOTNETCORE|9.0'
       ftpsState: 'Disabled'
       minTlsVersion: '1.2'
       vnetRouteAllEnabled: true
