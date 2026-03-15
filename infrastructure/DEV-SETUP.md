@@ -142,6 +142,7 @@ Optional (written into Key Vault during deploy):
 - `.github/workflows/backend-deploy-dev.yaml`
   - Trigger: push/merge to `main` (backend paths), or manual dispatch
   - Runs backend tests, builds and pushes Docker image to Docker Hub, deploys container to App Service, verifies `/health` through Application Gateway
+  - Also triggers when App Service edge IaC changes (`main.bicep` / `app-edge-dev.bicep`) so container runtime settings are reapplied automatically
 
 ## Legacy Front Door Cleanup (if previously deployed)
 

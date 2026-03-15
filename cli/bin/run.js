@@ -2,7 +2,12 @@
 import { execute } from '@oclif/core';
 import { createRequire } from 'node:module';
 import { spawn } from 'node:child_process';
-import { shouldPrintVersion, shouldSelfUpdate } from './run-helpers.js';
+import {
+  buildTopLevelHelp,
+  shouldPrintTopLevelHelp,
+  shouldPrintVersion,
+  shouldSelfUpdate
+} from './run-helpers.js';
 
 const args = process.argv.slice(2);
 const require = createRequire(import.meta.url);
@@ -11,6 +16,12 @@ const packageName = pkg.name ?? '@agon_agents/cli';
 
 if (shouldPrintVersion(args)) {
   console.log(pkg.version);
+  process.exit(0);
+}
+
+if (shouldPrintTopLevelHelp(args)) {
+  const binName = pkg.oclif?.bin ?? 'agon';
+  console.log(buildTopLevelHelp(binName));
   process.exit(0);
 }
 

@@ -84,8 +84,10 @@ export default class Shell extends Command {
     });
     if (updateInfo) {
       this.log(chalk.yellow(`Update available: v${updateInfo.currentVersion} → v${updateInfo.latestVersion}`));
-      this.log(chalk.cyan('Install: agon --self-update'));
-      this.log(chalk.dim(`Fallback: ${updateInfo.installCommand}`));
+      this.log(chalk.cyan('To update: exit Agon shell first, then run in your terminal:'));
+      this.log(chalk.cyan('  agon --self-update'));
+      this.log(chalk.dim('If that fails, run:'));
+      this.log(chalk.dim(`  ${updateInfo.installCommand}`));
     }
     this.log('');
 
