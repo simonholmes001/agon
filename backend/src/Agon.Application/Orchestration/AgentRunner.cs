@@ -63,7 +63,8 @@ public sealed class AgentRunner : IAgentRunner
             state.FrictionLevel,
             state.ClarificationRoundCount,
             state.UserMessages,
-            false); // Research tools not used during clarification
+            false, // Research tools not used during clarification
+            state.Attachments);
 
         var response = await RunWithTimeoutAsync(moderator, context, cancellationToken);
 
@@ -124,7 +125,8 @@ public sealed class AgentRunner : IAgentRunner
             state.CurrentRound,
             state.UserMessages,
             priorContext,
-            state.ResearchToolsEnabled);
+            state.ResearchToolsEnabled,
+            state.Attachments);
 
         var response = await RunWithTimeoutAsync(assistant, context, cancellationToken);
         AccumulateTokens(state, [response]);
@@ -168,7 +170,8 @@ public sealed class AgentRunner : IAgentRunner
                 state.TruthMap,
                 state.FrictionLevel,
                 state.CurrentRound,
-                state.ResearchToolsEnabled))
+                state.ResearchToolsEnabled,
+                state.Attachments))
             .ToList();
 
         var responses = await DispatchParallelAsync(councilAgents, contexts, cancellationToken);
@@ -214,7 +217,8 @@ public sealed class AgentRunner : IAgentRunner
                 state.FrictionLevel,
                 state.CurrentRound,
                 targets,
-                state.ResearchToolsEnabled);
+                state.ResearchToolsEnabled,
+                state.Attachments);
         }).ToList();
 
         var responses = await DispatchParallelAsync(councilAgents, contexts, cancellationToken);
@@ -254,7 +258,8 @@ public sealed class AgentRunner : IAgentRunner
             state.TruthMap,
             state.FrictionLevel,
             state.CurrentRound,
-            state.ResearchToolsEnabled);
+            state.ResearchToolsEnabled,
+            state.Attachments);
 
         var response = await RunWithTimeoutAsync(synthesizer, context, cancellationToken);
 
@@ -297,7 +302,8 @@ public sealed class AgentRunner : IAgentRunner
                 state.FrictionLevel,
                 state.CurrentRound,
                 microDirective,
-                state.ResearchToolsEnabled))
+                state.ResearchToolsEnabled,
+                state.Attachments))
             .ToList();
 
         var responses = await DispatchParallelAsync(targeted, contexts, cancellationToken);

@@ -30,11 +30,22 @@ describe('shell engine', () => {
       setParam: vi.fn(),
       clearShellSessionSelection: vi.fn(),
       selectSession: vi.fn().mockResolvedValue(session),
+      resumeSession: vi.fn().mockResolvedValue(session),
+      listSessions: vi.fn().mockResolvedValue([session]),
       getStatus: vi.fn().mockResolvedValue(session),
       getArtifact: vi.fn().mockResolvedValue({
         sessionId: 'session-123',
         content: '# Verdict',
         raw: false
+      }),
+      attachDocument: vi.fn().mockResolvedValue({
+        sessionId: 'session-123',
+        attachment: {
+          fileName: 'spec.md',
+          contentType: 'text/markdown',
+          sizeBytes: 1024,
+          hasExtractedText: true
+        }
       }),
       submitFollowUp: vi.fn().mockResolvedValue({
         session,
@@ -77,8 +88,26 @@ describe('shell engine', () => {
     await engine.handleInput('/help');
     expect(print).toHaveBeenCalledWith('Commands:');
     expect(print).toHaveBeenCalledWith('  /set <key> <value>            Persist config key (apiUrl|defaultFriction|researchEnabled|logLevel)');
+    expect(print).toHaveBeenCalledWith('  /show-sessions                List your sessions');
+    expect(print).toHaveBeenCalledWith('  /resume [session-id]          Resume latest session (or specific session)');
+    expect(print).toHaveBeenCalledWith('  /refresh [artifact]           Refresh latest artifact (default: verdict)');
+    expect(print).toHaveBeenCalledWith('  /attach <file-path>           Attach a document/image to the active session');
     expect(print).toHaveBeenCalledWith('  /exit                         Exit shell (also: /quit)');
     expect(print).toHaveBeenCalledWith('  /set defaultFriction 75');
+  });
+
+  it('executes /show-sessions via controller', async () => {
+    await engine.handleInput('/show-sessions');
+    expect(controller.listSessions).toHaveBeenCalled();
+    expect(print).toHaveBeenCalledWith('Sessions:');
+  });
+
+  it('executes /resume with optional session id', async () => {
+    await engine.handleInput('/resume');
+    expect(controller.resumeSession).toHaveBeenCalledWith(undefined);
+
+    await engine.handleInput('/resume session-123');
+    expect(controller.resumeSession).toHaveBeenCalledWith('session-123');
   });
 
   it('executes /status via controller', async () => {
@@ -98,6 +127,22 @@ describe('shell engine', () => {
     expect(controller.getArtifact).toHaveBeenCalledWith('verdict', {
       refresh: true,
       raw: true,
+      sessionId: undefined
+    });
+  });
+
+  it('executes /refresh with default and explicit artifact', async () => {
+    await engine.handleInput('/refresh');
+    expect(controller.getArtifact).toHaveBeenCalledWith('verdict', {
+      refresh: true,
+      raw: false,
+      sessionId: undefined
+    });
+
+    await engine.handleInput('/refresh prd');
+    expect(controller.getArtifact).toHaveBeenCalledWith('prd', {
+      refresh: true,
+      raw: false,
       sessionId: undefined
     });
   });
@@ -144,5 +189,18 @@ describe('shell engine', () => {
   it('supports explicit /follow-up command', async () => {
     await engine.handleInput('/follow-up revise this');
     expect(controller.submitFollowUp).toHaveBeenCalledWith('revise this');
+  });
+
+  it('supports explicit /attach command', async () => {
+    const outcome = await engine.handleInput('/attach ./docs/spec.md');
+    expect(controller.attachDocument).toHaveBeenCalledWith('./docs/spec.md');
+    expect(outcome).toEqual({
+      kind: 'attachment',
+      sessionId: 'session-123',
+      fileName: 'spec.md',
+      contentType: 'text/markdown',
+      sizeBytes: 1024,
+      hasExtractedText: true
+    });
   });
 });

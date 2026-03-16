@@ -112,6 +112,32 @@ public sealed class MafCouncilAgent : ICouncilAgent
             }
         }
 
+        if (context.Attachments.Count > 0)
+        {
+            sb.AppendLine("# Attached Documents");
+            sb.AppendLine("The user attached the following files for this discussion:");
+            sb.AppendLine();
+            for (int i = 0; i < context.Attachments.Count; i++)
+            {
+                var attachment = context.Attachments[i];
+                sb.AppendLine($"{i + 1}. {attachment.FileName} ({attachment.ContentType}, {attachment.SizeBytes} bytes)");
+                sb.AppendLine($"   Secure URL: {attachment.AccessUrl}");
+                if (!string.IsNullOrWhiteSpace(attachment.ExtractedText))
+                {
+                    var snippet = attachment.ExtractedText.Length > 2000
+                        ? attachment.ExtractedText[..2000] + "..."
+                        : attachment.ExtractedText;
+                    sb.AppendLine("   Extracted text excerpt:");
+                    sb.AppendLine("   ```text");
+                    sb.AppendLine(snippet);
+                    sb.AppendLine("   ```");
+                }
+                sb.AppendLine();
+            }
+            sb.AppendLine("Use these attachments as part of your reasoning and recommendations.");
+            sb.AppendLine();
+        }
+
         if (!string.IsNullOrWhiteSpace(context.MicroDirective))
         {
             sb.AppendLine("# Task Directive");

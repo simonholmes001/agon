@@ -242,7 +242,8 @@ public class SessionServiceTests
             sessionRepo,
             StubTruthMapRepo(),
             StubSnapshotStore(),
-            broadcaster);
+            attachmentRepo: null,
+            broadcaster: broadcaster);
 
         await svcWithBroadcaster.StartClarificationAsync(state.SessionId);
 
@@ -289,7 +290,8 @@ public class SessionServiceTests
             StubSessionRepo(state),
             StubTruthMapRepo(),
             StubSnapshotStore(),
-            broadcaster);
+            attachmentRepo: null,
+            broadcaster: broadcaster);
 
         await svcWithBroadcaster.AdvancePhaseAsync(state, SessionPhase.AnalysisRound);
 
@@ -577,7 +579,8 @@ public class SessionServiceTests
             sessionRepo ?? StubSessionRepo(),
             truthMapRepo ?? StubTruthMapRepo(),
             snapshotStore ?? StubSnapshotStore(),
-            broadcaster,
+            attachmentRepo: null,
+            broadcaster: broadcaster,
             orchestrator != null 
                 ? new Lazy<IOrchestrator>(() => orchestrator) 
                 : new Lazy<IOrchestrator>(() => Substitute.For<IOrchestrator>()));

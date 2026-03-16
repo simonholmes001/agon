@@ -6,6 +6,8 @@
  */
 
 import axios, { type AxiosInstance, type AxiosError } from 'axios';
+import { readFile, stat } from 'node:fs/promises';
+import path from 'node:path';
 import { Logger } from '../utils/logger.js';
 import { AgonError, ErrorCode } from '../utils/error-handler.js';
 import type { 
@@ -16,7 +18,8 @@ import type {
   Artifact,
   ArtifactType,
   Message,
-  SubmitMessageRequest
+  SubmitMessageRequest,
+  SessionAttachment
 } from './types.js';
 
 export class AgonAPIClient {
@@ -109,6 +112,14 @@ export class AgonAPIClient {
    */
   async getSession(sessionId: string): Promise<SessionResponse> {
     const response = await this.client.get<SessionResponse>(`/sessions/${sessionId}`);
+    return response.data;
+  }
+
+  /**
+   * List sessions for the current user
+   */
+  async listSessions(): Promise<SessionResponse[]> {
+    const response = await this.client.get<SessionResponse[]>('/sessions');
     return response.data;
   }
 
@@ -208,6 +219,63 @@ export class AgonAPIClient {
     return response.data;
   }
 
+  /**
+   * Upload a file attachment for a session.
+   */
+  async uploadAttachment(sessionId: string, filePath: string): Promise<SessionAttachment> {
+    const resolvedPath = filePath.trim();
+    if (!resolvedPath) {
+      throw new AgonError(
+        ErrorCode.INVALID_INPUT,
+        'Attachment path cannot be empty.',
+        ['Provide a valid file path']
+      );
+    }
+
+    const [buffer, fileStats] = await Promise.all([
+      readFile(resolvedPath),
+      stat(resolvedPath)
+    ]);
+
+    if (!fileStats.isFile()) {
+      throw new AgonError(
+        ErrorCode.INVALID_INPUT,
+        'Attachment path must point to a file.',
+        ['Provide a file path, not a directory']
+      );
+    }
+
+    const fileName = path.basename(resolvedPath);
+    const contentType = guessContentType(fileName);
+    const form = new FormData();
+    form.append('file', new Blob([buffer], { type: contentType }), fileName);
+
+    this.logger.debug('Uploading attachment', {
+      sessionId,
+      fileName,
+      sizeBytes: fileStats.size,
+      contentType
+    });
+
+    const response = await this.client.post<SessionAttachment>(
+      `/sessions/${sessionId}/attachments`,
+      form,
+      { timeout: 120000 }
+    );
+
+    return response.data;
+  }
+
+  /**
+   * List session attachments.
+   */
+  async listAttachments(sessionId: string): Promise<SessionAttachment[]> {
+    const response = await this.client.get<SessionAttachment[]>(
+      `/sessions/${sessionId}/attachments`
+    );
+    return response.data;
+  }
+
   // Helper methods
 
   private shouldRetry(error: AxiosError): boolean {
@@ -285,7 +353,7 @@ export class AgonAPIClient {
     const timeoutMessage = (error.message || '').toLowerCase().includes('timeout');
     const timeoutSuggestions = [
       'The backend may still be processing your request',
-      'Run `agon show verdict --refresh` to check for new assistant output',
+      'Run `/refresh verdict` in shell to check for new assistant output',
       'Retry with the same message if no new response appears'
     ];
 
@@ -301,4 +369,34 @@ export class AgonAPIClient {
   private delay(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
   }
+}
+
+function guessContentType(fileName: string): string {
+  const extension = path.extname(fileName).toLowerCase();
+  const map: Record<string, string> = {
+    '.txt': 'text/plain',
+    '.md': 'text/markdown',
+    '.markdown': 'text/markdown',
+    '.json': 'application/json',
+    '.csv': 'text/csv',
+    '.xml': 'application/xml',
+    '.yaml': 'application/x-yaml',
+    '.yml': 'application/x-yaml',
+    '.html': 'text/html',
+    '.htm': 'text/html',
+    '.pdf': 'application/pdf',
+    '.doc': 'application/msword',
+    '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    '.xls': 'application/vnd.ms-excel',
+    '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    '.ppt': 'application/vnd.ms-powerpoint',
+    '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    '.png': 'image/png',
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.gif': 'image/gif',
+    '.webp': 'image/webp'
+  };
+
+  return map[extension] ?? 'application/octet-stream';
 }

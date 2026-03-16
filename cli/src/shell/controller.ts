@@ -1,4 +1,4 @@
-import type { ArtifactType, Message, SessionResponse } from '../api/types.js';
+import type { ArtifactType, Message, SessionAttachment, SessionResponse } from '../api/types.js';
 import {
   getLatestPostDeliveryAssistantMessage,
   getLatestResponseMessageAfter,
@@ -15,9 +15,11 @@ interface ApiClientLike {
   }): Promise<SessionResponse>;
   startSession(sessionId: string): Promise<void>;
   getSession(sessionId: string): Promise<SessionResponse>;
+  listSessions(): Promise<SessionResponse[]>;
   getMessages(sessionId: string): Promise<Message[]>;
   submitMessage(sessionId: string, content: string): Promise<SessionResponse>;
   getArtifact(sessionId: string, type: ArtifactType): Promise<{ content: string }>;
+  uploadAttachment(sessionId: string, filePath: string): Promise<SessionAttachment>;
 }
 
 interface SessionManagerLike {
@@ -166,6 +168,43 @@ export class ShellController {
     return session;
   }
 
+  async listSessions(): Promise<SessionResponse[]> {
+    try {
+      const sessions = await this.apiClient.listSessions();
+      for (const session of sessions) {
+        await this.sessionManager.saveSession(session);
+      }
+
+      return [...sessions].sort(
+        (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+      );
+    } catch {
+      const cached = await this.sessionManager.listSessions();
+      return [...cached].sort(
+        (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+      );
+    }
+  }
+
+  async resumeSession(sessionId?: string): Promise<SessionResponse> {
+    if (sessionId) {
+      return this.selectSession(sessionId);
+    }
+
+    const sessions = await this.listSessions();
+    if (sessions.length === 0) {
+      throw new Error('No sessions found to resume.');
+    }
+
+    const candidate =
+      sessions.find(session => {
+        const normalized = normalizeStatus(session.status);
+        return normalized === 'active' || normalized === 'paused';
+      }) ?? sessions[0];
+
+    return this.selectSession(candidate.id);
+  }
+
   async clearShellSessionSelection(): Promise<void> {
     this.shellSessionId = null;
     this.awaitingNewIdea = true;
@@ -207,6 +246,24 @@ export class ShellController {
       content,
       raw: options.raw
     };
+  }
+
+  async attachDocument(
+    filePath: string,
+    explicitSessionId?: string
+  ): Promise<{ sessionId: string; attachment: SessionAttachment }> {
+    const sessionId = await this.resolveSessionId(explicitSessionId);
+    if (!sessionId) {
+      throw new Error('No active session found. Start or resume a session before attaching documents.');
+    }
+
+    const attachment = await this.apiClient.uploadAttachment(sessionId, filePath);
+
+    // Ensure shell remains pinned to this active discussion session.
+    this.shellSessionId = sessionId;
+    this.awaitingNewIdea = false;
+
+    return { sessionId, attachment };
   }
 
   async getActiveSession(): Promise<SessionResponse | null> {

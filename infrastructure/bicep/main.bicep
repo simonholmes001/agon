@@ -71,6 +71,23 @@ param appGatewayWafMode string = 'Detection'
 @maxValue(86400)
 param appGatewayRequestTimeoutSeconds int = 120
 
+@description('Enable JWT bearer authentication in the backend API.')
+param authEnabled bool = false
+
+@description('JWT authority URL for Microsoft Entra validation.')
+param jwtAuthority string = ''
+
+@description('JWT audience expected by the backend API.')
+param jwtAudience string = ''
+
+@description('PFX certificate for Application Gateway HTTPS listener (base64-encoded).')
+@secure()
+param appGatewaySslCertificatePfxBase64 string = ''
+
+@description('Password for Application Gateway HTTPS listener certificate.')
+@secure()
+param appGatewaySslCertificatePassword string = ''
+
 var commonTags = {
   environment: environment
   workload: workloadName
@@ -150,6 +167,11 @@ module appEdge './modules/app-edge-dev.bicep' = {
     alertEmail: alertEmail
     appGatewayWafMode: appGatewayWafMode
     appGatewayRequestTimeoutSeconds: appGatewayRequestTimeoutSeconds
+    authEnabled: authEnabled
+    jwtAuthority: jwtAuthority
+    jwtAudience: jwtAudience
+    appGatewaySslCertificatePfxBase64: appGatewaySslCertificatePfxBase64
+    appGatewaySslCertificatePassword: appGatewaySslCertificatePassword
     appSubnetId: network.outputs.appSubnetId
     appGatewaySubnetId: network.outputs.appGatewaySubnetId
     privateEndpointSubnetId: network.outputs.privateEndpointSubnetId

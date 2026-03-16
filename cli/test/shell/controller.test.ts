@@ -21,9 +21,11 @@ describe('shell controller', () => {
       createSession: vi.fn(),
       startSession: vi.fn(),
       getSession: vi.fn(),
+      listSessions: vi.fn(),
       getMessages: vi.fn(),
       submitMessage: vi.fn(),
-      getArtifact: vi.fn()
+      getArtifact: vi.fn(),
+      uploadAttachment: vi.fn()
     };
 
     sessionManager = {
@@ -199,6 +201,34 @@ describe('shell controller', () => {
     expect(session.id).toBe('session-123');
   });
 
+  it('lists sessions from API and syncs cache', async () => {
+    const sessions: SessionResponse[] = [
+      { ...baseSession, id: 'older', updatedAt: '2026-03-10T10:00:00Z' },
+      { ...baseSession, id: 'newer', updatedAt: '2026-03-10T11:00:00Z' }
+    ];
+    apiClient.listSessions.mockResolvedValue(sessions);
+
+    const result = await controller.listSessions();
+
+    expect(apiClient.listSessions).toHaveBeenCalled();
+    expect(sessionManager.saveSession).toHaveBeenCalledTimes(2);
+    expect(result[0].id).toBe('newer');
+  });
+
+  it('resumes latest active session when session id is omitted', async () => {
+    const sessions: SessionResponse[] = [
+      { ...baseSession, id: 'complete-1', status: 'complete', updatedAt: '2026-03-10T10:00:00Z' },
+      { ...baseSession, id: 'active-1', status: 'active', updatedAt: '2026-03-10T09:00:00Z' }
+    ];
+    apiClient.listSessions.mockResolvedValue(sessions);
+    sessionManager.getSession.mockResolvedValue({ ...baseSession, id: 'active-1' });
+
+    const resumed = await controller.resumeSession();
+
+    expect(resumed.id).toBe('active-1');
+    expect(sessionManager.setCurrentSessionId).toHaveBeenCalledWith('active-1');
+  });
+
   it('shows artifact using cache when refresh is false', async () => {
     sessionManager.getCurrentSessionId.mockResolvedValue('session-123');
     sessionManager.getArtifact.mockResolvedValue('# Cached Verdict');
@@ -208,6 +238,26 @@ describe('shell controller', () => {
     expect(sessionManager.getArtifact).toHaveBeenCalledWith('session-123', 'verdict');
     expect(apiClient.getArtifact).not.toHaveBeenCalled();
     expect(result.content).toBe('# Cached Verdict');
+  });
+
+  it('uploads an attachment to the active session', async () => {
+    sessionManager.getCurrentSessionId.mockResolvedValue('session-123');
+    apiClient.uploadAttachment.mockResolvedValue({
+      id: 'att-1',
+      sessionId: 'session-123',
+      fileName: 'brief.md',
+      contentType: 'text/markdown',
+      sizeBytes: 2048,
+      accessUrl: 'https://example.test/brief.md',
+      uploadedAt: '2026-03-16T12:00:00Z',
+      hasExtractedText: true
+    });
+
+    const result = await controller.attachDocument('./brief.md');
+
+    expect(apiClient.uploadAttachment).toHaveBeenCalledWith('session-123', './brief.md');
+    expect(result.sessionId).toBe('session-123');
+    expect(result.attachment.fileName).toBe('brief.md');
   });
 
   it('treats /new as awaiting-idea mode and ignores persisted current session', async () => {

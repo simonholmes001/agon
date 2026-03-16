@@ -26,14 +26,17 @@ public sealed record AgentContext(
     /// <summary>Whether research tools are enabled for this session.</summary>
     bool ResearchToolsEnabled,
     /// <summary>User messages submitted during clarification (for Moderator agent only).</summary>
-    IReadOnlyList<UserMessage> UserMessages)
+    IReadOnlyList<UserMessage> UserMessages,
+    /// <summary>Uploaded documents/images attached to the session.</summary>
+    IReadOnlyList<SessionAttachment> Attachments)
 {
     public static AgentContext ForAnalysis(
         Guid sessionId,
         TruthMapModel truthMap,
         int frictionLevel,
         int roundNumber,
-        bool researchToolsEnabled = false) =>
+        bool researchToolsEnabled = false,
+        IReadOnlyList<SessionAttachment>? attachments = null) =>
         new(
             sessionId,
             truthMap,
@@ -44,7 +47,8 @@ public sealed record AgentContext(
             [],
             null,
             researchToolsEnabled,
-            []);
+            [],
+            attachments ?? []);
 
     public static AgentContext ForCritique(
         Guid sessionId,
@@ -52,7 +56,8 @@ public sealed record AgentContext(
         int frictionLevel,
         int roundNumber,
         IReadOnlyList<AgentMessage> critiqueTargetMessages,
-        bool researchToolsEnabled = false) =>
+        bool researchToolsEnabled = false,
+        IReadOnlyList<SessionAttachment>? attachments = null) =>
         new(
             sessionId,
             truthMap,
@@ -63,7 +68,8 @@ public sealed record AgentContext(
             [],
             null,
             researchToolsEnabled,
-            []);
+            [],
+            attachments ?? []);
 
     public static AgentContext ForTargetedLoop(
         Guid sessionId,
@@ -71,7 +77,8 @@ public sealed record AgentContext(
         int frictionLevel,
         int roundNumber,
         string microDirective,
-        bool researchToolsEnabled = false) =>
+        bool researchToolsEnabled = false,
+        IReadOnlyList<SessionAttachment>? attachments = null) =>
         new(
             sessionId,
             truthMap,
@@ -82,7 +89,8 @@ public sealed record AgentContext(
             [],
             microDirective,
             researchToolsEnabled,
-            []);
+            [],
+            attachments ?? []);
 
     public static AgentContext ForClarification(
         Guid sessionId,
@@ -90,7 +98,8 @@ public sealed record AgentContext(
         int frictionLevel,
         int roundNumber,
         IReadOnlyList<UserMessage> userMessages,
-        bool researchToolsEnabled = false) =>
+        bool researchToolsEnabled = false,
+        IReadOnlyList<SessionAttachment>? attachments = null) =>
         new(
             sessionId,
             truthMap,
@@ -101,7 +110,8 @@ public sealed record AgentContext(
             [],
             null,
             researchToolsEnabled,
-            userMessages);
+            userMessages,
+            attachments ?? []);
 
     public static AgentContext ForPostDelivery(
         Guid sessionId,
@@ -110,7 +120,8 @@ public sealed record AgentContext(
         int roundNumber,
         IReadOnlyList<UserMessage> userMessages,
         string? microDirective = null,
-        bool researchToolsEnabled = false) =>
+        bool researchToolsEnabled = false,
+        IReadOnlyList<SessionAttachment>? attachments = null) =>
         new(
             sessionId,
             truthMap,
@@ -121,7 +132,8 @@ public sealed record AgentContext(
             [],
             microDirective,
             researchToolsEnabled,
-            userMessages);
+            userMessages,
+            attachments ?? []);
 }
 
 /// <summary>A captured agent message from a prior round, used as critique input.</summary>

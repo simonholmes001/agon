@@ -27,6 +27,9 @@ public class AgonDbContext : DbContext
     // Agent messages (conversation history)
     public DbSet<AgentMessageEntity> AgentMessages => Set<AgentMessageEntity>();
 
+    // Session attachment metadata
+    public DbSet<SessionAttachmentEntity> SessionAttachments => Set<SessionAttachmentEntity>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
@@ -78,6 +81,11 @@ public class AgonDbContext : DbContext
             entity.Property(e => e.FrictionLevel).HasColumnName("friction_level");
             entity.Property(e => e.Status).HasColumnName("status").IsRequired();
             entity.Property(e => e.Phase).HasColumnName("phase").IsRequired();
+            entity.Property(e => e.CurrentRound).HasColumnName("current_round");
+            entity.Property(e => e.TokensUsed).HasColumnName("tokens_used");
+            entity.Property(e => e.TargetedLoopCount).HasColumnName("targeted_loop_count");
+            entity.Property(e => e.ClarificationIncomplete).HasColumnName("clarification_incomplete");
+            entity.Property(e => e.ClarificationRoundCount).HasColumnName("ClarificationRoundCount");
             entity.Property(e => e.ForkedFrom).HasColumnName("forked_from");
             entity.Property(e => e.ForkSnapshotId).HasColumnName("fork_snapshot_id");
             entity.Property(e => e.CreatedAt).HasColumnName("created_at");
@@ -85,6 +93,29 @@ public class AgonDbContext : DbContext
             
             entity.HasIndex(e => e.UserId);
             entity.HasIndex(e => e.Status);
+        });
+
+        // SessionAttachmentEntity
+        modelBuilder.Entity<SessionAttachmentEntity>(entity =>
+        {
+            entity.ToTable("session_attachments");
+            entity.HasKey(e => e.Id);
+
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.SessionId).HasColumnName("session_id");
+            entity.Property(e => e.UserId).HasColumnName("user_id");
+            entity.Property(e => e.FileName).HasColumnName("file_name").IsRequired();
+            entity.Property(e => e.ContentType).HasColumnName("content_type").IsRequired();
+            entity.Property(e => e.SizeBytes).HasColumnName("size_bytes");
+            entity.Property(e => e.BlobName).HasColumnName("blob_name").IsRequired();
+            entity.Property(e => e.BlobUri).HasColumnName("blob_uri").IsRequired();
+            entity.Property(e => e.AccessUrl).HasColumnName("access_url").IsRequired();
+            entity.Property(e => e.ExtractedText).HasColumnName("extracted_text");
+            entity.Property(e => e.UploadedAt).HasColumnName("uploaded_at");
+
+            entity.HasIndex(e => e.SessionId);
+            entity.HasIndex(e => new { e.SessionId, e.UploadedAt });
+            entity.HasIndex(e => e.UserId);
         });
     }
 }
@@ -124,9 +155,31 @@ public class SessionEntity
     public int FrictionLevel { get; set; }
     public string Status { get; set; } = string.Empty; // "active", "complete", etc.
     public string Phase { get; set; } = string.Empty; // Current session phase
+    public int CurrentRound { get; set; }
+    public int TokensUsed { get; set; }
+    public int TargetedLoopCount { get; set; }
+    public bool ClarificationIncomplete { get; set; }
     public int ClarificationRoundCount { get; set; }
     public Guid? ForkedFrom { get; set; }
     public Guid? ForkSnapshotId { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
+}
+
+/// <summary>
+/// Entity for uploaded session attachment metadata.
+/// </summary>
+public class SessionAttachmentEntity
+{
+    public Guid Id { get; set; }
+    public Guid SessionId { get; set; }
+    public Guid UserId { get; set; }
+    public string FileName { get; set; } = string.Empty;
+    public string ContentType { get; set; } = string.Empty;
+    public long SizeBytes { get; set; }
+    public string BlobName { get; set; } = string.Empty;
+    public string BlobUri { get; set; } = string.Empty;
+    public string AccessUrl { get; set; } = string.Empty;
+    public string? ExtractedText { get; set; }
+    public DateTime UploadedAt { get; set; }
 }

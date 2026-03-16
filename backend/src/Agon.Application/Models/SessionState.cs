@@ -34,6 +34,9 @@ public sealed class SessionState
     /// <summary>User messages submitted during clarification (responses to Moderator questions).</summary>
     public List<UserMessage> UserMessages { get; } = new();
 
+    /// <summary>Uploaded documents/images attached to this session.</summary>
+    public List<SessionAttachment> Attachments { get; } = new();
+
     public static SessionState Create(
         Guid sessionId,
         Guid userId,

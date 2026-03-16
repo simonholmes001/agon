@@ -10,7 +10,7 @@ namespace Agon.Infrastructure.Tests.Persistence;
 /// <summary>
 /// Unit tests for Truth Map Repository using in-memory database (no Docker required).
 /// </summary>
-public class TruthMapRepositoryTests : IDisposable
+    public class TruthMapRepositoryTests : IDisposable
 {
     private readonly AgonDbContext _dbContext;
     private readonly ITruthMapRepository _repository;
@@ -55,7 +55,7 @@ public class TruthMapRepositoryTests : IDisposable
         var sessionId = Guid.NewGuid();
         var patch = new TruthMapPatch(
             [
-                new PatchOperation(PatchOp.Add, "/claims/0", new { text = "Test claim", confidence = 0.8 })
+                new PatchOperation(PatchOp.Add, "/claims/0", BuildClaim("claim-1", "Test claim", 1, "gpt-agent"))
             ],
             new PatchMeta("gpt-agent", 1, "Initial claim", sessionId)
         );
@@ -83,12 +83,12 @@ public class TruthMapRepositoryTests : IDisposable
         var sessionId = Guid.NewGuid();
         
         var patch1 = new TruthMapPatch(
-            [new PatchOperation(PatchOp.Add, "/claims/0", new { text = "Claim 1" })],
+            [new PatchOperation(PatchOp.Add, "/claims/0", BuildClaim("claim-1", "Claim 1", 1, "gpt-agent"))],
             new PatchMeta("gpt-agent", 1, "First patch", sessionId)
         );
         
         var patch2 = new TruthMapPatch(
-            [new PatchOperation(PatchOp.Add, "/claims/1", new { text = "Claim 2" })],
+            [new PatchOperation(PatchOp.Add, "/claims/1", BuildClaim("claim-2", "Claim 2", 2, "gemini-agent"))],
             new PatchMeta("gemini-agent", 2, "Second patch", sessionId)
         );
 
@@ -120,15 +120,15 @@ public class TruthMapRepositoryTests : IDisposable
         var patches = new[]
         {
             new TruthMapPatch(
-                [new PatchOperation(PatchOp.Add, "/claims/0", new { text = "Claim 1" })],
+                [new PatchOperation(PatchOp.Add, "/claims/0", BuildClaim("claim-1", "Claim 1", 1, "gpt-agent"))],
                 new PatchMeta("gpt-agent", 1, "First", sessionId)
             ),
             new TruthMapPatch(
-                [new PatchOperation(PatchOp.Add, "/claims/1", new { text = "Claim 2" })],
+                [new PatchOperation(PatchOp.Add, "/claims/1", BuildClaim("claim-2", "Claim 2", 1, "gemini-agent"))],
                 new PatchMeta("gemini-agent", 1, "Second", sessionId)
             ),
             new TruthMapPatch(
-                [new PatchOperation(PatchOp.Add, "/risks/0", new { text = "Risk 1" })],
+                [new PatchOperation(PatchOp.Add, "/risks/0", BuildRisk("risk-1", "Risk 1", "claude-agent", "claim-1"))],
                 new PatchMeta("claude-agent", 2, "Third", sessionId)
             )
         };
@@ -158,11 +158,11 @@ public class TruthMapRepositoryTests : IDisposable
         var patches = new[]
         {
             new TruthMapPatch(
-                [new PatchOperation(PatchOp.Add, "/claims/0", new { text = "Initial claim" })],
+                [new PatchOperation(PatchOp.Add, "/claims/0", BuildClaim("claim-1", "Initial claim", 1, "gpt-agent"))],
                 new PatchMeta("gpt-agent", 1, "Add claim", sessionId)
             ),
             new TruthMapPatch(
-                [new PatchOperation(PatchOp.Add, "/risks/0", new { text = "Initial risk" })],
+                [new PatchOperation(PatchOp.Add, "/risks/0", BuildRisk("risk-1", "Initial risk", "gemini-agent", "claim-1"))],
                 new PatchMeta("gemini-agent", 1, "Add risk", sessionId)
             )
         };
@@ -202,18 +202,80 @@ public class TruthMapRepositoryTests : IDisposable
     }
 
     [Fact]
-    public async Task GetImpactSetAsync_ReturnsEmptySet()
+    public async Task GetImpactSetAsync_ReturnsTransitiveDependents()
     {
         // Arrange
         var sessionId = Guid.NewGuid();
-        var entityId = "claim-123";
+        var claimId = "claim-1";
+        var assumptionId = "assumption-1";
+        var decisionId = "decision-1";
+
+        var claimPatch = new TruthMapPatch(
+            [new PatchOperation(PatchOp.Add, "/claims/0", BuildClaim(claimId, "Claim", 1, "gpt-agent"))],
+            new PatchMeta("gpt-agent", 1, "Seed claim", sessionId)
+        );
+        var assumptionPatch = new TruthMapPatch(
+            [new PatchOperation(PatchOp.Add, "/assumptions/0", BuildAssumption(assumptionId, "Assumption", claimId))],
+            new PatchMeta("gemini-agent", 2, "Derived assumption", sessionId)
+        );
+        var decisionPatch = new TruthMapPatch(
+            [new PatchOperation(PatchOp.Add, "/decisions/0", BuildDecision(decisionId, "Decision", assumptionId))],
+            new PatchMeta("claude-agent", 3, "Derived decision", sessionId)
+        );
+
+        await _repository.ApplyPatchAsync(sessionId, claimPatch);
+        await _repository.ApplyPatchAsync(sessionId, assumptionPatch);
+        await _repository.ApplyPatchAsync(sessionId, decisionPatch);
 
         // Act
-        var impactSet = await _repository.GetImpactSetAsync(sessionId, entityId);
+        var impactSet = await _repository.GetImpactSetAsync(sessionId, claimId);
 
         // Assert
-        // Placeholder implementation returns empty set
         impactSet.Should().NotBeNull();
-        impactSet.Should().BeEmpty();
+        impactSet.Should().Contain(assumptionId);
+        impactSet.Should().Contain(decisionId);
     }
+
+    private static object BuildClaim(string id, string text, int round, string proposedBy) => new
+    {
+        id,
+        proposed_by = proposedBy,
+        round,
+        text,
+        confidence = 0.8f,
+        status = "Active",
+        derived_from = Array.Empty<string>(),
+        challenged_by = Array.Empty<string>()
+    };
+
+    private static object BuildRisk(string id, string text, string raisedBy, string derivedFromId) => new
+    {
+        id,
+        text,
+        category = "Technical",
+        severity = "Medium",
+        likelihood = "Low",
+        mitigation = "Monitor",
+        derived_from = new[] { derivedFromId },
+        raised_by = raisedBy
+    };
+
+    private static object BuildAssumption(string id, string text, string derivedFromId) => new
+    {
+        id,
+        text,
+        validation_step = "Validate via user testing",
+        derived_from = new[] { derivedFromId },
+        status = "Unvalidated"
+    };
+
+    private static object BuildDecision(string id, string text, string derivedFromId) => new
+    {
+        id,
+        text,
+        rationale = "Derived from assumption",
+        owner = "moderator",
+        derived_from = new[] { derivedFromId },
+        binding = true
+    };
 }

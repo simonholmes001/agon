@@ -35,6 +35,9 @@
     "appGatewayRequestTimeoutSeconds": {
       "value": 120
     },
+    "authEnabled": {
+      "value": false
+    },
     "alertEmail": {
       "value": "simonholmesabc@gmail.com"
     },

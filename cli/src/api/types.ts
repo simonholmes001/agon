@@ -96,3 +96,15 @@ export interface Message {
 export interface SubmitMessageRequest {
   content: string;
 }
+
+export interface SessionAttachment {
+  id: string;
+  sessionId: string;
+  fileName: string;
+  contentType: string;
+  sizeBytes: number;
+  accessUrl: string;
+  uploadedAt: string;
+  hasExtractedText: boolean;
+  extractedTextPreview?: string;
+}

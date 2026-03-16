@@ -10,17 +10,24 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import axios from 'axios';
 import type { AxiosInstance } from 'axios';
+import * as fsPromises from 'node:fs/promises';
 import { AgonAPIClient } from '../../src/api/agon-client.js';
 import { AgonError, ErrorCode } from '../../src/utils/error-handler.js';
 import type { CreateSessionRequest, SessionResponse } from '../../src/api/types.js';
 
 vi.mock('axios');
+vi.mock('node:fs/promises', () => ({
+  readFile: vi.fn(),
+  stat: vi.fn()
+}));
 
 describe('AgonAPIClient', () => {
   let client: AgonAPIClient;
   let mockAxios: AxiosInstance;
 
   beforeEach(() => {
+    vi.resetAllMocks();
+
     mockAxios = {
       get: vi.fn(),
       post: vi.fn(),
@@ -124,6 +131,34 @@ describe('AgonAPIClient', () => {
 
       // Act & Assert
       await expect(client.getSession(sessionId)).rejects.toThrow();
+    });
+  });
+
+  describe('listSessions', () => {
+    it('should retrieve sessions for the current user', async () => {
+      const mockResponse: SessionResponse[] = [
+        {
+          id: 'session-1',
+          status: 'active',
+          phase: 'Clarification',
+          createdAt: '2026-03-07T10:00:00Z',
+          updatedAt: '2026-03-07T10:05:00Z'
+        },
+        {
+          id: 'session-2',
+          status: 'complete',
+          phase: 'Deliver',
+          createdAt: '2026-03-06T10:00:00Z',
+          updatedAt: '2026-03-06T11:00:00Z'
+        }
+      ];
+
+      (mockAxios.get as any).mockResolvedValue({ data: mockResponse });
+
+      const result = await client.listSessions();
+
+      expect(mockAxios.get).toHaveBeenCalledWith('/sessions');
+      expect(result).toEqual(mockResponse);
     });
   });
 
@@ -307,6 +342,38 @@ describe('AgonAPIClient', () => {
 
       // Act & Assert
       await expect(client.submitMessage(sessionId, content)).rejects.toThrow();
+    });
+  });
+
+  describe('uploadAttachment', () => {
+    it('uploads a local file as multipart form-data', async () => {
+      const sessionId = 'session-123';
+      (fsPromises.readFile as any).mockResolvedValue(Buffer.from('hello world'));
+      (fsPromises.stat as any).mockResolvedValue({
+        isFile: () => true,
+        size: 11
+      });
+
+      const attachment = {
+        id: 'att-1',
+        sessionId,
+        fileName: 'brief.md',
+        contentType: 'text/markdown',
+        sizeBytes: 11,
+        accessUrl: 'https://example.test/brief.md',
+        uploadedAt: '2026-03-16T12:00:00Z',
+        hasExtractedText: true
+      };
+      (mockAxios.post as any).mockResolvedValue({ data: attachment });
+
+      const result = await client.uploadAttachment(sessionId, './brief.md');
+
+      expect(mockAxios.post).toHaveBeenCalledWith(
+        `/sessions/${sessionId}/attachments`,
+        expect.any(FormData),
+        expect.objectContaining({ timeout: 120000 })
+      );
+      expect(result).toEqual(attachment);
     });
   });
 

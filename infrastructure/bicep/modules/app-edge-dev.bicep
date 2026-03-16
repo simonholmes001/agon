@@ -27,6 +27,23 @@ param appGatewayWafMode string = 'Detection'
 @maxValue(86400)
 param appGatewayRequestTimeoutSeconds int = 120
 
+@description('Enable JWT bearer authentication in backend API runtime settings.')
+param authEnabled bool = false
+
+@description('JWT authority URL for token validation.')
+param jwtAuthority string = ''
+
+@description('JWT audience expected by the API.')
+param jwtAudience string = ''
+
+@description('PFX certificate for Application Gateway HTTPS listener (base64-encoded).')
+@secure()
+param appGatewaySslCertificatePfxBase64 string = ''
+
+@description('Password for Application Gateway HTTPS listener certificate.')
+@secure()
+param appGatewaySslCertificatePassword string = ''
+
 @description('App Service VNet integration subnet resource ID.')
 param appSubnetId string
 
@@ -74,12 +91,19 @@ var actionGroupName = 'ag-${namePrefix}-ops'
 var appGatewayName = 'agw-${namePrefix}'
 var appGatewayPublicIpName = 'pip-${namePrefix}-agw'
 var frontendIpConfigName = 'feip-public'
-var frontendPortName = 'feport-80'
+var frontendHttpPortName = 'feport-80'
+var frontendHttpsPortName = 'feport-443'
 var backendPoolName = 'be-appservice'
 var backendHttpSettingsName = 'be-https'
 var probeName = 'probe-health'
 var httpListenerName = 'listener-http'
+var httpsListenerName = 'listener-https'
 var requestRoutingRuleName = 'rule-default'
+var httpsRequestRoutingRuleName = 'rule-https-default'
+var httpRedirectRuleName = 'rule-http-redirect'
+var httpToHttpsRedirectName = 'redirect-http-to-https'
+var appGatewaySslCertificateName = 'agw-cert'
+var enableHttpsListener = !empty(appGatewaySslCertificatePfxBase64) && !empty(appGatewaySslCertificatePassword)
 
 resource logAnalytics 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
   name: logAnalyticsName
@@ -164,6 +188,18 @@ resource appService 'Microsoft.Web/sites@2023-12-01' = {
         {
           name: 'DEEPSEEK_KEY'
           value: empty(deepSeekSecretUri) ? '' : '@Microsoft.KeyVault(SecretUri=${deepSeekSecretUri})'
+        }
+        {
+          name: 'Authentication__Enabled'
+          value: authEnabled ? 'true' : 'false'
+        }
+        {
+          name: 'Authentication__AzureAd__Authority'
+          value: jwtAuthority
+        }
+        {
+          name: 'Authentication__AzureAd__Audience'
+          value: jwtAudience
         }
       ]
     }
@@ -255,9 +291,15 @@ resource appGateway 'Microsoft.Network/applicationGateways@2023-09-01' = {
     ]
     frontendPorts: [
       {
-        name: frontendPortName
+        name: frontendHttpPortName
         properties: {
           port: 80
+        }
+      }
+      if (enableHttpsListener) {
+        name: frontendHttpsPortName
+        properties: {
+          port: 443
         }
       }
     ]
@@ -306,6 +348,15 @@ resource appGateway 'Microsoft.Network/applicationGateways@2023-09-01' = {
         }
       }
     ]
+    sslCertificates: [
+      if (enableHttpsListener) {
+        name: appGatewaySslCertificateName
+        properties: {
+          data: appGatewaySslCertificatePfxBase64
+          password: appGatewaySslCertificatePassword
+        }
+      }
+    ]
     httpListeners: [
       {
         name: httpListenerName
@@ -314,20 +365,65 @@ resource appGateway 'Microsoft.Network/applicationGateways@2023-09-01' = {
             id: resourceId('Microsoft.Network/applicationGateways/frontendIPConfigurations', appGatewayName, frontendIpConfigName)
           }
           frontendPort: {
-            id: resourceId('Microsoft.Network/applicationGateways/frontendPorts', appGatewayName, frontendPortName)
+            id: resourceId('Microsoft.Network/applicationGateways/frontendPorts', appGatewayName, frontendHttpPortName)
           }
           protocol: 'Http'
         }
       }
+      if (enableHttpsListener) {
+        name: httpsListenerName
+        properties: {
+          frontendIPConfiguration: {
+            id: resourceId('Microsoft.Network/applicationGateways/frontendIPConfigurations', appGatewayName, frontendIpConfigName)
+          }
+          frontendPort: {
+            id: resourceId('Microsoft.Network/applicationGateways/frontendPorts', appGatewayName, frontendHttpsPortName)
+          }
+          protocol: 'Https'
+          sslCertificate: {
+            id: resourceId('Microsoft.Network/applicationGateways/sslCertificates', appGatewayName, appGatewaySslCertificateName)
+          }
+        }
+      }
+    ]
+    redirectConfigurations: [
+      if (enableHttpsListener) {
+        name: httpToHttpsRedirectName
+        properties: {
+          redirectType: 'Permanent'
+          targetListener: {
+            id: resourceId('Microsoft.Network/applicationGateways/httpListeners', appGatewayName, httpsListenerName)
+          }
+          includePath: true
+          includeQueryString: true
+        }
+      }
     ]
     requestRoutingRules: [
+      if (enableHttpsListener) {
+        name: httpRedirectRuleName
+        properties: {
+          ruleType: 'Basic'
+          priority: 90
+          httpListener: {
+            id: resourceId('Microsoft.Network/applicationGateways/httpListeners', appGatewayName, httpListenerName)
+          }
+          redirectConfiguration: {
+            id: resourceId('Microsoft.Network/applicationGateways/redirectConfigurations', appGatewayName, httpToHttpsRedirectName)
+          }
+        }
+      }
       {
-        name: requestRoutingRuleName
+        name: enableHttpsListener ? httpsRequestRoutingRuleName : requestRoutingRuleName
         properties: {
           ruleType: 'Basic'
           priority: 100
           httpListener: {
-            id: resourceId('Microsoft.Network/applicationGateways/httpListeners', appGatewayName, httpListenerName)
+            id: resourceId(
+              'Microsoft.Network/applicationGateways/httpListeners',
+              appGatewayName,
+              enableHttpsListener ? httpsListenerName : httpListenerName
+            )
           }
           backendAddressPool: {
             id: resourceId('Microsoft.Network/applicationGateways/backendAddressPools', appGatewayName, backendPoolName)

@@ -1,7 +1,12 @@
 using Agon.Application.Interfaces;
+using Agon.Application.Models;
 using Agon.Application.Services;
 using Agon.Domain.Sessions;
 using Microsoft.AspNetCore.Mvc;
+using System.Security.Claims;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.RegularExpressions;
 
 namespace Agon.Api.Controllers;
 
@@ -13,16 +18,45 @@ namespace Agon.Api.Controllers;
 [Route("[controller]")]
 public class SessionsController : ControllerBase
 {
+    private const long MaxAttachmentSizeBytes = 25 * 1024 * 1024; // 25 MB
+    private const int AttachmentPreviewChars = 500;
+    private const int MaxExtractedTextChars = 12000;
+
+    private static readonly HashSet<string> TextContentTypes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "application/json",
+        "application/xml",
+        "application/x-yaml",
+        "application/yaml",
+        "text/csv",
+        "application/csv",
+        "application/x-www-form-urlencoded",
+        "application/javascript",
+        "application/x-javascript",
+        "application/typescript",
+        "application/sql"
+    };
+
+    private static readonly HashSet<string> TextExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".txt", ".md", ".markdown", ".json", ".yaml", ".yml", ".csv", ".xml", ".html", ".htm",
+        ".log", ".ini", ".cfg", ".conf", ".toml", ".sql", ".ts", ".js", ".tsx", ".jsx",
+        ".cs", ".py", ".java", ".go", ".rb", ".php", ".ps1", ".sh", ".bat", ".env"
+    };
+
     private readonly ISessionService _sessionService;
+    private readonly IAttachmentStorageService? _attachmentStorage;
     private readonly ConversationHistoryService _conversationHistory;
     private readonly ILogger<SessionsController> _logger;
 
     public SessionsController(
         ISessionService sessionService,
+        IAttachmentStorageService? attachmentStorage,
         ConversationHistoryService conversationHistory,
         ILogger<SessionsController> logger)
     {
         _sessionService = sessionService;
+        _attachmentStorage = attachmentStorage;
         _conversationHistory = conversationHistory;
         _logger = logger;
     }
@@ -47,8 +81,7 @@ public class SessionsController : ControllerBase
             return BadRequest(new { error = "FrictionLevel must be between 0 and 100" });
         }
 
-        // TODO: Get actual userId from auth context
-        var userId = Guid.NewGuid();
+        var userId = ResolveCurrentUserId();
 
         var sessionState = await _sessionService.CreateAsync(
             userId,
@@ -70,6 +103,19 @@ public class SessionsController : ControllerBase
     }
 
     /// <summary>
+    /// GET /sessions — Lists sessions for the current user.
+    /// </summary>
+    [HttpGet]
+    [ProducesResponseType(typeof(IReadOnlyList<SessionResponse>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> ListSessions(CancellationToken cancellationToken)
+    {
+        var userId = ResolveCurrentUserId();
+        var sessions = await _sessionService.ListByUserAsync(userId, cancellationToken);
+        var response = sessions.Select(MapToResponse).ToList();
+        return Ok(response);
+    }
+
+    /// <summary>
     /// GET /sessions/{id} — Retrieves session state.
     /// </summary>
     [HttpGet("{id}")]
@@ -82,6 +128,11 @@ public class SessionsController : ControllerBase
         var sessionState = await _sessionService.GetAsync(id, cancellationToken);
 
         if (sessionState == null)
+        {
+            return NotFound(new { error = $"Session {id} not found" });
+        }
+
+        if (!IsOwnedByCurrentUser(sessionState))
         {
             return NotFound(new { error = $"Session {id} not found" });
         }
@@ -100,6 +151,12 @@ public class SessionsController : ControllerBase
         [FromRoute] Guid id,
         CancellationToken cancellationToken)
     {
+        var session = await _sessionService.GetAsync(id, cancellationToken);
+        if (session is null || !IsOwnedByCurrentUser(session))
+        {
+            return NotFound(new { error = $"Session {id} not found" });
+        }
+
         try
         {
             await _sessionService.StartClarificationAsync(id, cancellationToken);
@@ -132,14 +189,20 @@ public class SessionsController : ControllerBase
             return BadRequest(new { error = "Message content is required" });
         }
 
+        var session = await _sessionService.GetAsync(id, cancellationToken);
+        if (session is null || !IsOwnedByCurrentUser(session))
+        {
+            return NotFound(new { error = $"Session {id} not found" });
+        }
+
         try
         {
             await _sessionService.SubmitMessageAsync(id, request.Content, cancellationToken);
 
             _logger.LogInformation(
-                "Submitted message for session {SessionId}: {Content}",
+                "Submitted message for session {SessionId} (MessageLength={MessageLength})",
                 id,
-                request.Content);
+                request.Content.Length);
 
             return Accepted();
         }
@@ -167,6 +230,11 @@ public class SessionsController : ControllerBase
             return NotFound(new { error = $"Session {id} not found" });
         }
 
+        if (!IsOwnedByCurrentUser(sessionState))
+        {
+            return NotFound(new { error = $"Session {id} not found" });
+        }
+
         // Return the Truth Map as JSON
         return Ok(sessionState.TruthMap);
     }
@@ -181,6 +249,12 @@ public class SessionsController : ControllerBase
         [FromRoute] Guid id,
         CancellationToken cancellationToken)
     {
+        var sessionState = await _sessionService.GetAsync(id, cancellationToken);
+        if (sessionState is null || !IsOwnedByCurrentUser(sessionState))
+        {
+            return NotFound(new { error = $"Session {id} not found" });
+        }
+
         var snapshots = await _sessionService.ListSnapshotsAsync(id, cancellationToken);
 
         var response = snapshots.Select(s => new SnapshotResponse(
@@ -214,7 +288,10 @@ public class SessionsController : ControllerBase
                 return StatusCode(500, new { error = "No agents configured" });
             }
 
-            _logger.LogInformation("Testing agent {AgentId} with question: {Question}", agent.AgentId, request.Question);
+            _logger.LogInformation(
+                "Testing agent {AgentId} (QuestionLength={QuestionLength})",
+                agent.AgentId,
+                request.Question?.Length ?? 0);
 
             // Create a Truth Map seeded with the user's question as CoreIdea
             var sessionId = Guid.NewGuid();
@@ -234,7 +311,10 @@ public class SessionsController : ControllerBase
             // Invoke the agent
             var response = await agent.RunAsync(context, cancellationToken);
 
-            _logger.LogInformation("Agent {AgentId} responded: {Message}", agent.AgentId, response.Message);
+            _logger.LogInformation(
+                "Agent {AgentId} responded (MessageLength={MessageLength})",
+                agent.AgentId,
+                response.Message?.Length ?? 0);
 
             var patchCount = response.Patch != null ? 1 : 0;
 
@@ -247,7 +327,7 @@ public class SessionsController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to test agent");
-            return StatusCode(500, new { error = ex.Message, stackTrace = ex.StackTrace });
+            return StatusCode(500, new { error = "Agent test failed." });
         }
     }
 
@@ -262,6 +342,12 @@ public class SessionsController : ControllerBase
         [FromRoute] Guid id,
         CancellationToken cancellationToken)
     {
+        var session = await _sessionService.GetAsync(id, cancellationToken);
+        if (session is null || !IsOwnedByCurrentUser(session))
+        {
+            return NotFound(new { error = $"Session {id} not found" });
+        }
+
         var messages = await _conversationHistory.GetMessagesAsync(id, cancellationToken);
         
         var response = messages.Select(m => new MessageResponse(
@@ -276,6 +362,132 @@ public class SessionsController : ControllerBase
             response.Count,
             id);
         
+        return Ok(response);
+    }
+
+    /// <summary>
+    /// POST /sessions/{id}/attachments — Upload any document/image to the active discussion.
+    /// Metadata is persisted, file is stored in blob storage, and extracted text (when available)
+    /// is injected into subsequent agent context.
+    /// </summary>
+    [HttpPost("{id}/attachments")]
+    [RequestSizeLimit(MaxAttachmentSizeBytes)]
+    [ProducesResponseType(typeof(SessionAttachmentResponse), StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
+    public async Task<IActionResult> UploadAttachment(
+        [FromRoute] Guid id,
+        [FromForm] UploadAttachmentRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (_attachmentStorage is null)
+        {
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, new
+            {
+                error = "Attachment storage is not configured."
+            });
+        }
+
+        if (request.File is null || request.File.Length == 0)
+        {
+            return BadRequest(new { error = "Attachment file is required." });
+        }
+
+        if (request.File.Length > MaxAttachmentSizeBytes)
+        {
+            return BadRequest(new { error = $"Attachment exceeds max size of {MaxAttachmentSizeBytes / (1024 * 1024)} MB." });
+        }
+
+        var session = await _sessionService.GetAsync(id, cancellationToken);
+        if (session is null || !IsOwnedByCurrentUser(session))
+        {
+            return NotFound(new { error = $"Session {id} not found" });
+        }
+
+        var safeFileName = SanitizeFileName(request.File.FileName);
+        var contentType = string.IsNullOrWhiteSpace(request.File.ContentType)
+            ? GuessContentType(safeFileName)
+            : request.File.ContentType.Trim();
+
+        byte[] fileBytes;
+        await using (var source = request.File.OpenReadStream())
+        await using (var copy = new MemoryStream())
+        {
+            await source.CopyToAsync(copy, cancellationToken);
+            fileBytes = copy.ToArray();
+        }
+
+        var blobName = $"{id:N}/{DateTimeOffset.UtcNow:yyyyMMddHHmmssfff}-{Guid.NewGuid():N}-{safeFileName}";
+        await using var uploadStream = new MemoryStream(fileBytes, writable: false);
+        var uploaded = await _attachmentStorage.UploadAsync(
+            blobName,
+            uploadStream,
+            contentType,
+            cancellationToken);
+
+        var extractedText = TryExtractText(fileBytes, safeFileName, contentType);
+
+        var attachment = new SessionAttachment(
+            AttachmentId: Guid.NewGuid(),
+            SessionId: id,
+            UserId: session.UserId,
+            FileName: safeFileName,
+            ContentType: contentType,
+            SizeBytes: request.File.Length,
+            BlobName: uploaded.BlobName,
+            BlobUri: uploaded.BlobUri,
+            AccessUrl: uploaded.AccessUrl,
+            ExtractedText: extractedText,
+            UploadedAt: DateTimeOffset.UtcNow);
+
+        SessionAttachment saved;
+        try
+        {
+            saved = await _sessionService.SaveAttachmentAsync(attachment, cancellationToken);
+        }
+        catch (InvalidOperationException ex)
+        {
+            _logger.LogWarning(ex, "Attachment metadata persistence is not configured.");
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, new
+            {
+                error = "Attachment metadata persistence is not configured."
+            });
+        }
+
+        _logger.LogInformation(
+            "Uploaded attachment {AttachmentId} for session {SessionId} (FileName={FileName}, ContentType={ContentType}, SizeBytes={SizeBytes}, ExtractedText={HasExtractedText})",
+            saved.AttachmentId,
+            id,
+            saved.FileName,
+            saved.ContentType,
+            saved.SizeBytes,
+            !string.IsNullOrWhiteSpace(saved.ExtractedText));
+
+        return CreatedAtAction(
+            nameof(ListAttachments),
+            new { id },
+            MapAttachmentResponse(saved));
+    }
+
+    /// <summary>
+    /// GET /sessions/{id}/attachments — List all files attached to a session.
+    /// </summary>
+    [HttpGet("{id}/attachments")]
+    [ProducesResponseType(typeof(IReadOnlyList<SessionAttachmentResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> ListAttachments(
+        [FromRoute] Guid id,
+        CancellationToken cancellationToken)
+    {
+        var session = await _sessionService.GetAsync(id, cancellationToken);
+        if (session is null || !IsOwnedByCurrentUser(session))
+        {
+            return NotFound(new { error = $"Session {id} not found" });
+        }
+
+        var attachments = await _sessionService.ListAttachmentsAsync(id, cancellationToken);
+        var response = attachments.Select(MapAttachmentResponse).ToList();
         return Ok(response);
     }
 
@@ -298,6 +510,8 @@ public class SessionsController : ControllerBase
     {
         var sessionState = await _sessionService.GetAsync(id, cancellationToken);
         if (sessionState is null)
+            return NotFound(new { error = $"Session {id} not found" });
+        if (!IsOwnedByCurrentUser(sessionState))
             return NotFound(new { error = $"Session {id} not found" });
 
         var messages = await _conversationHistory.GetMessagesAsync(id, cancellationToken);
@@ -356,6 +570,8 @@ public class SessionsController : ControllerBase
         var messages = await _conversationHistory.GetMessagesAsync(id, cancellationToken);
         var sessionState = await _sessionService.GetAsync(id, cancellationToken);
         if (sessionState is null)
+            return NotFound(new { error = $"Session {id} not found" });
+        if (!IsOwnedByCurrentUser(sessionState))
             return NotFound(new { error = $"Session {id} not found" });
 
         var artifacts = new List<ArtifactResponse>();
@@ -424,6 +640,155 @@ public class SessionsController : ControllerBase
             sessionState.CreatedAt,
             sessionState.UpdatedAt);
     }
+
+    private static SessionAttachmentResponse MapAttachmentResponse(SessionAttachment attachment)
+    {
+        var preview = string.IsNullOrWhiteSpace(attachment.ExtractedText)
+            ? null
+            : attachment.ExtractedText[..Math.Min(attachment.ExtractedText.Length, AttachmentPreviewChars)];
+
+        return new SessionAttachmentResponse(
+            attachment.AttachmentId,
+            attachment.SessionId,
+            attachment.FileName,
+            attachment.ContentType,
+            attachment.SizeBytes,
+            attachment.AccessUrl,
+            attachment.UploadedAt,
+            !string.IsNullOrWhiteSpace(attachment.ExtractedText),
+            preview);
+    }
+
+    private static string SanitizeFileName(string fileName)
+    {
+        var baseName = Path.GetFileName(fileName);
+        if (string.IsNullOrWhiteSpace(baseName))
+        {
+            return $"attachment-{Guid.NewGuid():N}.bin";
+        }
+
+        var cleaned = Regex.Replace(baseName.Trim(), @"\s+", " ");
+        cleaned = Regex.Replace(cleaned, @"[^a-zA-Z0-9._ -]", "-");
+        return string.IsNullOrWhiteSpace(cleaned)
+            ? $"attachment-{Guid.NewGuid():N}.bin"
+            : cleaned;
+    }
+
+    private static string GuessContentType(string fileName)
+    {
+        return Path.GetExtension(fileName).ToLowerInvariant() switch
+        {
+            ".txt" => "text/plain",
+            ".md" or ".markdown" => "text/markdown",
+            ".json" => "application/json",
+            ".csv" => "text/csv",
+            ".xml" => "application/xml",
+            ".yaml" or ".yml" => "application/x-yaml",
+            ".html" or ".htm" => "text/html",
+            ".pdf" => "application/pdf",
+            ".doc" => "application/msword",
+            ".docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ".xls" => "application/vnd.ms-excel",
+            ".xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            ".ppt" => "application/vnd.ms-powerpoint",
+            ".pptx" => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            ".png" => "image/png",
+            ".jpg" or ".jpeg" => "image/jpeg",
+            ".gif" => "image/gif",
+            ".webp" => "image/webp",
+            _ => "application/octet-stream"
+        };
+    }
+
+    private static string? TryExtractText(byte[] bytes, string fileName, string contentType)
+    {
+        if (bytes.Length == 0 || !IsTextLike(fileName, contentType))
+        {
+            return null;
+        }
+
+        string extracted;
+        try
+        {
+            extracted = Encoding.UTF8.GetString(bytes);
+        }
+        catch
+        {
+            return null;
+        }
+
+        extracted = extracted.Replace("\r\n", "\n").Replace('\r', '\n');
+        extracted = Regex.Replace(extracted, @"[\u0000-\u0008\u000B\u000C\u000E-\u001F]", " ");
+        extracted = extracted.Trim();
+
+        if (string.IsNullOrWhiteSpace(extracted))
+        {
+            return null;
+        }
+
+        if (extracted.Length > MaxExtractedTextChars)
+        {
+            extracted = extracted[..MaxExtractedTextChars];
+        }
+
+        return extracted;
+    }
+
+    private static bool IsTextLike(string fileName, string contentType)
+    {
+        if (!string.IsNullOrWhiteSpace(contentType))
+        {
+            var normalized = contentType.Split(';')[0].Trim();
+            if (normalized.StartsWith("text/", StringComparison.OrdinalIgnoreCase)
+                || TextContentTypes.Contains(normalized))
+            {
+                return true;
+            }
+        }
+
+        var extension = Path.GetExtension(fileName);
+        return !string.IsNullOrWhiteSpace(extension) && TextExtensions.Contains(extension);
+    }
+
+    private Guid ResolveCurrentUserId()
+    {
+        var claimValue =
+            User.FindFirstValue("oid")
+            ?? User.FindFirstValue(ClaimTypes.NameIdentifier)
+            ?? User.FindFirstValue("sub");
+
+        if (!string.IsNullOrWhiteSpace(claimValue))
+        {
+            if (Guid.TryParse(claimValue, out var parsed))
+            {
+                return parsed;
+            }
+
+            return DeterministicGuidFromString(claimValue);
+        }
+
+        if (Request.Headers.TryGetValue("X-Agon-User-Id", out var headerValue)
+            && Guid.TryParse(headerValue.ToString(), out var headerGuid))
+        {
+            return headerGuid;
+        }
+
+        return Guid.Empty;
+    }
+
+    private static Guid DeterministicGuidFromString(string input)
+    {
+        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(input));
+        var guidBytes = new byte[16];
+        Array.Copy(bytes, guidBytes, 16);
+        return new Guid(guidBytes);
+    }
+
+    private bool IsOwnedByCurrentUser(Application.Models.SessionState state)
+    {
+        var userId = ResolveCurrentUserId();
+        return userId == Guid.Empty || state.UserId == userId;
+    }
 }
 
 // ── DTOs ────────────────────────────────────────────────────────────────
@@ -431,6 +796,11 @@ public class SessionsController : ControllerBase
 public record CreateSessionRequest(string Idea, int FrictionLevel);
 
 public record MessageRequest(string Content);
+
+public sealed class UploadAttachmentRequest
+{
+    public IFormFile? File { get; init; }
+}
 
 public record SessionResponse(
     Guid Id,
@@ -462,3 +832,14 @@ public record ArtifactResponse(
     string Content,
     int Version,
     DateTimeOffset CreatedAt);
+
+public record SessionAttachmentResponse(
+    Guid Id,
+    Guid SessionId,
+    string FileName,
+    string ContentType,
+    long SizeBytes,
+    string AccessUrl,
+    DateTimeOffset UploadedAt,
+    bool HasExtractedText,
+    string? ExtractedTextPreview);

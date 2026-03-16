@@ -153,7 +153,9 @@ export default class Shell extends Command {
           renderMessagePanel(title, outcome.response.message, color, (line) => this.log(line));
           this.log('Next steps:');
           this.log('  • Continue in this shell: type your next message');
+          this.log('  • Attach a document: /attach "<file-path>"');
           this.log('  • Explicit follow-up: /follow-up "<follow-up request>"');
+          this.log('  • Start a new session: /new');
           this.log('  • Exit shell: /exit');
         } else {
           this.log(chalk.yellow('No response yet. Run /status or send your next input when ready.'));
@@ -166,7 +168,9 @@ export default class Shell extends Command {
           renderMessagePanel(title, outcome.response.message, color, (line) => this.log(line));
           this.log('Next steps:');
           this.log('  • Continue in this shell: type your next message');
+          this.log('  • Attach a document: /attach "<file-path>"');
           this.log('  • Explicit follow-up: /follow-up "<follow-up request>"');
+          this.log('  • Start a new session: /new');
           this.log('  • Exit shell: /exit');
         } else if (this.isMidDebatePhase(outcome.phase)) {
           await this.watchDebateProgress(outcome.sessionId);
@@ -178,6 +182,15 @@ export default class Shell extends Command {
         return;
       case 'status':
         this.log(`Session ${outcome.sessionId} | status=${outcome.status} | phase=${outcome.phase}`);
+        return;
+      case 'attachment':
+        this.log(chalk.green(`✓ Attached ${outcome.fileName} to session ${outcome.sessionId}`));
+        this.log(chalk.dim(`Type: ${outcome.contentType} | Size: ${formatBytes(outcome.sizeBytes)}`));
+        if (outcome.hasExtractedText) {
+          this.log(chalk.dim('Document text extracted and added to agent context.'));
+        } else {
+          this.log(chalk.dim('No text extraction available; file metadata/link still added to context.'));
+        }
         return;
       case 'artifact':
         if (outcome.raw) {
@@ -519,8 +532,10 @@ export default class Shell extends Command {
           this.log(chalk.bold('END FINAL OUTPUT'));
           this.log('');
           this.log('Next steps:');
-          this.log('  • Ask follow-up questions: agon follow-up "<follow-up request>"');
-          this.log('  • View again: agon show verdict --refresh');
+          this.log('  • Ask follow-up questions: /follow-up "<follow-up request>"');
+          this.log('  • Attach a document: /attach "<file-path>"');
+          this.log('  • Start a new session: /new');
+          this.log('  • View again: /refresh verdict');
           this.log('  • Exit shell: /exit');
           return;
         }
@@ -598,13 +613,36 @@ function getSpinnerText(parsed: ReturnType<typeof parseShellInput>): string | nu
       return 'Saving parameter...';
     case 'session':
       return 'Switching session...';
+    case 'resume':
+      return 'Resuming session...';
+    case 'show-sessions':
+      return 'Loading sessions...';
     case 'status':
       return 'Fetching status...';
     case 'show':
+    case 'refresh':
       return 'Fetching artifact...';
+    case 'attach':
+      return 'Uploading attachment...';
     case 'follow-up':
       return 'Submitting follow-up...';
   }
+}
+
+function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes < 1024) {
+    return `${Math.max(0, Math.round(bytes))} B`;
+  }
+
+  const units = ['KB', 'MB', 'GB'];
+  let value = bytes / 1024;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+
+  return `${value.toFixed(1)} ${units[unitIndex]}`;
 }
 
 export function isExitInput(inputText: string): boolean {

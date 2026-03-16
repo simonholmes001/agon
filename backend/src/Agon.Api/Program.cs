@@ -8,13 +8,16 @@ using Agon.Domain.Engines;
 using Agon.Domain.Sessions;
 using Agon.Infrastructure.Agents;
 using Agon.Infrastructure.Persistence.PostgreSQL;
+using Agon.Infrastructure.Persistence.AzureBlob;
 using Agon.Infrastructure.Persistence.Redis;
 using Agon.Infrastructure.Persistence.Repositories;
 using Agon.Infrastructure.SignalR;
 using Anthropic;
 using Google.GenAI;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.AI;
+using Microsoft.IdentityModel.Tokens;
 using Mscc.GenerativeAI.Microsoft;
 using OpenAI;
 using StackExchange.Redis;
@@ -58,6 +61,7 @@ else
 // ── Configuration ───────────────────────────────────────────────────────
 var llmConfig = builder.Configuration.GetSection(LlmConfiguration.SectionName).Get<LlmConfiguration>() ?? new();
 var agonConfig = builder.Configuration.GetSection(AgonConfiguration.SectionName).Get<AgonConfiguration>() ?? new();
+var authEnabled = builder.Configuration.GetValue<bool>("Authentication:Enabled");
 
 // Replace ${ENV_VAR} placeholders with actual environment variables
 llmConfig.OpenAI.ApiKey = ReplaceEnvVars(llmConfig.OpenAI.ApiKey);
@@ -72,6 +76,45 @@ Console.WriteLine($"[Startup] DeepSeek API key configured: {!string.IsNullOrEmpt
 
 builder.Services.AddSingleton(llmConfig);
 builder.Services.AddSingleton(agonConfig);
+
+if (authEnabled)
+{
+    var tenantId = builder.Configuration["Authentication:AzureAd:TenantId"] ?? string.Empty;
+    var authority = builder.Configuration["Authentication:AzureAd:Authority"] ?? string.Empty;
+    var audience = builder.Configuration["Authentication:AzureAd:Audience"] ?? string.Empty;
+    var clientId = builder.Configuration["Authentication:AzureAd:ClientId"] ?? string.Empty;
+
+    if (string.IsNullOrWhiteSpace(authority) && !string.IsNullOrWhiteSpace(tenantId))
+    {
+        authority = $"https://login.microsoftonline.com/{tenantId}/v2.0";
+    }
+
+    if (string.IsNullOrWhiteSpace(audience))
+    {
+        audience = clientId;
+    }
+
+    if (string.IsNullOrWhiteSpace(authority) || string.IsNullOrWhiteSpace(audience))
+    {
+        throw new InvalidOperationException(
+            "Authentication is enabled but Azure AD JWT settings are incomplete. Configure Authentication:AzureAd:Authority and Authentication:AzureAd:Audience (or ClientId).");
+    }
+
+    builder.Services
+        .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+        .AddJwtBearer(options =>
+        {
+            options.Authority = authority;
+            options.TokenValidationParameters = new TokenValidationParameters
+            {
+                ValidateIssuer = true,
+                ValidateAudience = true,
+                ValidAudiences = new[] { audience, clientId }.Where(value => !string.IsNullOrWhiteSpace(value))
+            };
+        });
+
+    builder.Services.AddAuthorization();
+}
 
 // ── Controllers and OpenAPI ─────────────────────────────────────────────
 builder.Services.AddControllers()
@@ -96,6 +139,17 @@ if (!string.IsNullOrEmpty(postgresConnectionString))
     builder.Services.AddScoped<ISessionRepository, SessionRepository>();
     builder.Services.AddScoped<ITruthMapRepository, TruthMapRepository>();
     builder.Services.AddScoped<IAgentMessageRepository, AgentMessageRepository>();
+    builder.Services.AddScoped<IAttachmentRepository, AttachmentRepository>();
+}
+
+// ── Blob Storage: Session Attachments ───────────────────────────────────
+var blobConnectionString = builder.Configuration.GetConnectionString("BlobStorage");
+var attachmentContainerName = builder.Configuration["Storage:AttachmentContainer"] ?? "session-attachments";
+
+if (!string.IsNullOrWhiteSpace(blobConnectionString))
+{
+    builder.Services.AddSingleton<IAttachmentStorageService>(_ =>
+        new AzureBlobAttachmentStorageService(blobConnectionString, attachmentContainerName));
 }
 
 // ── Database: Redis ─────────────────────────────────────────────────────
@@ -120,6 +174,7 @@ builder.Services.AddScoped<ISessionService>(sp => new SessionService(
     sp.GetRequiredService<ISessionRepository>(),
     sp.GetRequiredService<ITruthMapRepository>(),
     sp.GetRequiredService<ISnapshotStore>(),
+    sp.GetService<IAttachmentRepository>(),
     sp.GetService<IEventBroadcaster>(),
     sp.GetService<Lazy<IOrchestrator>>()));
 builder.Services.AddScoped<ConversationHistoryService>();
@@ -323,7 +378,11 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
-app.UseAuthorization();
+if (authEnabled)
+{
+    app.UseAuthentication();
+    app.UseAuthorization();
+}
 
 // ── Map Endpoints ───────────────────────────────────────────────────────
 app.MapGet("/health", () => Results.Ok(new { status = "Healthy" }));
