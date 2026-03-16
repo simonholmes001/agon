@@ -46,24 +46,6 @@ export interface CreateSessionRequest {
   researchEnabled?: boolean;
 }
 
-export interface ClarificationQuestion {
-  id: string;
-  text: string;
-  order: number;
-}
-
-export interface ClarificationResponse {
-  questions: ClarificationQuestion[];
-  isComplete: boolean;
-}
-
-export interface SubmitAnswersRequest {
-  answers: Array<{
-    questionId: string;
-    answer: string;
-  }>;
-}
-
 export interface Artifact {
   type: ArtifactType;
   content: string;

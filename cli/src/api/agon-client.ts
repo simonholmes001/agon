@@ -13,8 +13,6 @@ import { AgonError, ErrorCode } from '../utils/error-handler.js';
 import type { 
   CreateSessionRequest, 
   SessionResponse, 
-  ClarificationResponse,
-  SubmitAnswersRequest,
   Artifact,
   ArtifactType,
   Message,
@@ -130,30 +128,6 @@ export class AgonAPIClient {
     this.logger.debug('Starting session', { sessionId });
     await this.client.post(`/sessions/${sessionId}/start`);
     this.logger.debug('Session started successfully', { sessionId });
-  }
-
-  /**
-   * Get clarification questions for a session
-   */
-  async getClarification(sessionId: string): Promise<ClarificationResponse> {
-    const response = await this.client.get<ClarificationResponse>(
-      `/sessions/${sessionId}/clarification`
-    );
-    return response.data;
-  }
-
-  /**
-   * Submit clarification answers
-   */
-  async submitAnswers(
-    sessionId: string, 
-    request: SubmitAnswersRequest
-  ): Promise<SessionResponse> {
-    const response = await this.client.post<SessionResponse>(
-      `/sessions/${sessionId}/messages`,
-      request
-    );
-    return response.data;
   }
 
   /**

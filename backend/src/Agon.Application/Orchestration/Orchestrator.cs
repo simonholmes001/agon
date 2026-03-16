@@ -5,6 +5,7 @@ using Agon.Domain.Engines;
 using Agon.Domain.Sessions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using System.Text.RegularExpressions;
 
 namespace Agon.Application.Orchestration;
 
@@ -20,6 +21,10 @@ namespace Agon.Application.Orchestration;
 /// </summary>
 public sealed class Orchestrator : IOrchestrator
 {
+    private static readonly Regex ModeratorStatusRegex = new(
+        @"^\s*(?:status|clarification_status)\s*[:=]\s*(READY|NEEDS_INFO)\b",
+        RegexOptions.Multiline | RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
     private readonly IAgentRunner _agentRunner;
     private readonly ISessionService _sessionService;
     private readonly IServiceScopeFactory _scopeFactory;
@@ -64,63 +69,57 @@ public sealed class Orchestrator : IOrchestrator
             "Session {SessionId}: Running Moderator for clarification", state.SessionId);
 
         var response = await _agentRunner.RunModeratorAsync(state, cancellationToken);
-
-        // Check if Moderator asked questions (heuristic: contains "?" in the message)
-        var askedQuestions = response.Message.Contains('?');
-
-        // Check if Moderator signaled READY
-        var signaledReady = response.Message.Contains("READY", StringComparison.OrdinalIgnoreCase);
-
-        // READY takes priority if: (a) no questions asked, OR (b) READY signalled AND
-        // this is not the first round — the LLM often includes rhetorical "?" in a
-        // summary paragraph even when genuinely ready. On round 0 we always require
-        // an explicit Q&A cycle before accepting READY.
+        var decision = ParseModeratorDecision(response.Message);
         var isFirstRound = state.ClarificationRoundCount == 0;
-        var honourReady = signaledReady && (!askedQuestions || !isFirstRound);
+        var hasUserClarificationMessages = state.UserMessages.Count > 0;
+        var shouldForceClarificationRound =
+            isFirstRound
+            && !hasUserClarificationMessages
+            && decision.Status == ModeratorDecisionStatus.Ready;
 
-        if (honourReady && !askedQuestions)
+        if (decision.Status == ModeratorDecisionStatus.Ready && !shouldForceClarificationRound)
         {
             _logger?.LogInformation(
-                "Session {SessionId}: Moderator signaled READY → transitioning to ANALYSIS_ROUND",
+                "Session {SessionId}: Moderator signaled READY via structured status (round {Round})",
+                state.SessionId,
+                state.ClarificationRoundCount);
+
+            var brief = ExtractDebateBrief(state.TruthMap);
+            await SignalClarificationCompleteAsync(state, brief, cancellationToken);
+            return;
+        }
+
+        if (decision.Status == ModeratorDecisionStatus.Unknown)
+        {
+            _logger?.LogWarning(
+                "Session {SessionId}: Moderator response missing structured STATUS marker. Falling back to clarification flow.",
+                state.SessionId);
+        }
+
+        if (shouldForceClarificationRound)
+        {
+            _logger?.LogInformation(
+                "Session {SessionId}: Ignoring premature READY on first clarification round.",
+                state.SessionId);
+        }
+
+        // Moderator requested more information (or response was unstructured).
+        state.ClarificationRoundCount++;
+        await _sessionService.RecordRoundSnapshotAsync(state, cancellationToken);
+
+        _logger?.LogInformation(
+            "Session {SessionId}: Moderator requested more clarification (round {Round})",
+            state.SessionId,
+            state.ClarificationRoundCount);
+
+        if (state.ClarificationRoundCount >= _policy.MaxClarificationRounds)
+        {
+            _logger?.LogWarning(
+                "Session {SessionId}: Max clarification rounds reached - proceeding with partial brief",
                 state.SessionId);
 
-            // Extract Debate Brief from the Truth Map (updated by agent runner)
-            var brief = ExtractDebateBrief(state.TruthMap);
-            await SignalClarificationCompleteAsync(state, brief, cancellationToken);
-        }
-        else if (honourReady && askedQuestions)
-        {
-            // Moderator signalled READY but included rhetorical questions in its summary.
-            // After round 0 we trust the READY signal — it has already seen user answers.
-            _logger?.LogInformation(
-                "Session {SessionId}: Moderator signaled READY with rhetorical questions — honouring READY (round {Round})",
-                state.SessionId,
-                state.ClarificationRoundCount);
-
-            var brief = ExtractDebateBrief(state.TruthMap);
-            await SignalClarificationCompleteAsync(state, brief, cancellationToken);
-        }
-        else
-        {
-            // Moderator asked genuine questions — increment clarification round count
-            state.ClarificationRoundCount++;
-            await _sessionService.RecordRoundSnapshotAsync(state, cancellationToken);
-
-            _logger?.LogInformation(
-                "Session {SessionId}: Moderator asked clarification questions (round {Round})",
-                state.SessionId,
-                state.ClarificationRoundCount);
-
-            // Check if max clarification rounds reached
-            if (state.ClarificationRoundCount >= _policy.MaxClarificationRounds)
-            {
-                _logger?.LogWarning(
-                    "Session {SessionId}: Max clarification rounds reached - proceeding with partial brief",
-                    state.SessionId);
-
-                var partialBrief = ExtractDebateBrief(state.TruthMap);
-                await SignalClarificationTimedOutAsync(state, partialBrief, cancellationToken);
-            }
+            var partialBrief = ExtractDebateBrief(state.TruthMap);
+            await SignalClarificationTimedOutAsync(state, partialBrief, cancellationToken);
         }
     }
 
@@ -172,6 +171,43 @@ public sealed class Orchestrator : IOrchestrator
             OpenQuestions: openQuestions
         );
     }
+
+    private static ModeratorDecision ParseModeratorDecision(string message)
+    {
+        if (string.IsNullOrWhiteSpace(message))
+        {
+            return new ModeratorDecision(ModeratorDecisionStatus.Unknown);
+        }
+
+        var statusMatch = ModeratorStatusRegex.Match(message);
+        if (statusMatch.Success)
+        {
+            var rawStatus = statusMatch.Groups[1].Value.Trim().ToUpperInvariant();
+            return rawStatus switch
+            {
+                "READY" => new ModeratorDecision(ModeratorDecisionStatus.Ready),
+                "NEEDS_INFO" => new ModeratorDecision(ModeratorDecisionStatus.NeedsInfo),
+                _ => new ModeratorDecision(ModeratorDecisionStatus.Unknown)
+            };
+        }
+
+        // Backward-compatible fallback for legacy prompts while rollout converges.
+        if (message.Contains("READY", StringComparison.OrdinalIgnoreCase))
+        {
+            return new ModeratorDecision(ModeratorDecisionStatus.Ready);
+        }
+
+        return new ModeratorDecision(ModeratorDecisionStatus.Unknown);
+    }
+
+    private enum ModeratorDecisionStatus
+    {
+        Unknown,
+        NeedsInfo,
+        Ready
+    }
+
+    private sealed record ModeratorDecision(ModeratorDecisionStatus Status);
 
     /// <summary>
     /// Called when the Moderator signals READY at the end of the Clarification phase.

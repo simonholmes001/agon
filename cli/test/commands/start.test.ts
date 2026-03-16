@@ -27,8 +27,10 @@ describe('start command', () => {
     // Setup API client mock
     mockApiClient = {
       createSession: vi.fn(),
-      getClarification: vi.fn(),
-      submitAnswers: vi.fn()
+      startSession: vi.fn(),
+      getSession: vi.fn(),
+      getMessages: vi.fn(),
+      submitMessage: vi.fn()
     };
     
     // Setup session manager mock
@@ -214,52 +216,25 @@ describe('start command', () => {
   });
 
   describe('clarification handling', () => {
-    it('should fetch clarification questions after session creation', async () => {
+    it('uses /messages flow for clarification responses', async () => {
       // Arrange
-      const mockSession: SessionResponse = {
-        id: 'test-session-id',
+      const sessionId = 'test-session-id';
+      mockApiClient.submitMessage.mockResolvedValue({
+        id: sessionId,
         status: 'active',
         phase: 'CLARIFICATION',
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()
-      };
-      
-      const mockClarification = {
-        questions: [
-          { id: 'q1', text: 'Who is the target customer?' },
-          { id: 'q2', text: 'What is the primary pain point?' }
-        ],
-        round: 1,
-        maxRounds: 2
-      };
-      
-      mockApiClient.createSession.mockResolvedValue(mockSession);
-      mockApiClient.getClarification.mockResolvedValue(mockClarification);
+      });
 
       // Act
-      await mockApiClient.getClarification('test-session-id');
+      await mockApiClient.submitMessage(sessionId, 'My clarification response');
 
       // Assert
-      expect(mockApiClient.getClarification).toHaveBeenCalledWith('test-session-id');
-    });
-
-    it('should skip clarification in non-interactive mode', async () => {
-      // Arrange
-      const mockSession: SessionResponse = {
-        id: 'test-session-id',
-        status: 'active',
-        phase: 'CLARIFICATION',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      };
-      
-      mockApiClient.createSession.mockResolvedValue(mockSession);
-
-      // Act - In non-interactive mode, we don't call getClarification
-      // This is a behavioral test for the command implementation
-
-      // Assert
-      expect(mockApiClient.getClarification).not.toHaveBeenCalled();
+      expect(mockApiClient.submitMessage).toHaveBeenCalledWith(
+        sessionId,
+        'My clarification response'
+      );
     });
   });
 

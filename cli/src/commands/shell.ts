@@ -455,6 +455,13 @@ export default class Shell extends Command {
 
     const seenMessageKeys = new Set<string>();
     let lastPhase = '';
+    let lastStatus = '';
+    const watchStartedAt = Date.now();
+    let lastProgressAt = watchStartedAt;
+    let consecutiveFailures = 0;
+    const maxWatchDurationMs = getWatchDurationMsFromEnv('AGON_WATCH_MAX_MINUTES', 25);
+    const maxIdleDurationMs = getWatchDurationMsFromEnv('AGON_WATCH_MAX_IDLE_MINUTES', 8);
+    const maxConsecutiveFailures = 5;
     let shimmerBase = 'Agents are analyzing your idea...';
     let shimmerTick = 0;
     const progressSpinner = ora({
@@ -471,10 +478,33 @@ export default class Shell extends Command {
 
     try {
       while (true) {
-        const [session, messages] = await Promise.all([
-          this.apiClient.getSession(sessionId),
-          this.apiClient.getMessages(sessionId)
-        ]);
+        if (Date.now() - watchStartedAt > maxWatchDurationMs) {
+          progressSpinner.stop();
+          this.log(chalk.yellow('Watch timed out before completion.'));
+          this.log(chalk.dim('Run /status and /refresh verdict to continue.'));
+          return;
+        }
+
+        let session;
+        let messages;
+        try {
+          [session, messages] = await Promise.all([
+            this.apiClient.getSession(sessionId),
+            this.apiClient.getMessages(sessionId)
+          ]);
+          consecutiveFailures = 0;
+        } catch (error) {
+          consecutiveFailures += 1;
+          if (consecutiveFailures >= maxConsecutiveFailures) {
+            progressSpinner.stop();
+            const message = error instanceof Error ? error.message : String(error);
+            this.log(chalk.red(`Stopped watching after repeated fetch failures: ${message}`));
+            this.log(chalk.dim('Run /status and retry once connectivity is stable.'));
+            return;
+          }
+          await new Promise(resolve => setTimeout(resolve, 1500 * consecutiveFailures));
+          continue;
+        }
 
         await this.sessionManager.saveSession(session);
         shimmerBase = `Agents are analyzing... (${this.formatPhaseForDisplay(session.phase)})`;
@@ -498,6 +528,7 @@ export default class Shell extends Command {
           const key = `${msg.agentId}:${msg.round}:${msg.createdAt}:${msg.message.length}`;
           if (seenMessageKeys.has(key)) continue;
           seenMessageKeys.add(key);
+          lastProgressAt = Date.now();
 
           stopSpinnerForOutput();
           this.log('━'.repeat(60));
@@ -512,9 +543,14 @@ export default class Shell extends Command {
           this.log(chalk.dim(`⏱️  Current phase: ${this.formatPhaseForDisplay(session.phase)}`));
           this.log('');
           lastPhase = session.phase;
+          lastProgressAt = Date.now();
         }
 
         const normalizedStatus = normalizeStatus(session.status);
+        if (normalizedStatus !== lastStatus) {
+          lastStatus = normalizedStatus;
+          lastProgressAt = Date.now();
+        }
         if (normalizedStatus === 'complete' || normalizedStatus === 'complete_with_gaps') {
           stopSpinnerForOutput();
           this.log(chalk.green('✓ Debate complete. Fetching final verdict...'));
@@ -546,6 +582,13 @@ export default class Shell extends Command {
           return;
         }
 
+        if (Date.now() - lastProgressAt > maxIdleDurationMs) {
+          stopSpinnerForOutput();
+          this.log(chalk.yellow('No debate progress detected for a while. Stopping live watch.'));
+          this.log(chalk.dim('Run /status and /refresh verdict to continue.'));
+          return;
+        }
+
         if (pausedForOutput) {
           progressSpinner.start();
         }
@@ -557,6 +600,20 @@ export default class Shell extends Command {
       progressSpinner.stop();
     }
   }
+}
+
+function getWatchDurationMsFromEnv(envKey: string, fallbackMinutes: number): number {
+  const raw = process.env[envKey];
+  if (!raw) {
+    return fallbackMinutes * 60_000;
+  }
+
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return fallbackMinutes * 60_000;
+  }
+
+  return parsed * 60_000;
 }
 
 function isWordCharacter(char: string): boolean {

@@ -81,15 +81,10 @@ public sealed class AgentRunner : IAgentRunner
             state.SessionId,
             state.ClarificationRoundCount,
             response.TokensUsed);
-
-        // Log and persist the Moderator's message
+        
+        // Persist moderator message for CLI retrieval.
         if (!string.IsNullOrWhiteSpace(response.Message))
         {
-            _logger?.LogInformation(
-                "Moderator message: {Message}",
-                response.Message.Length > 500 ? response.Message.Substring(0, 500) + "..." : response.Message);
-            
-            // Store message in conversation history for CLI retrieval
             await _conversationHistory.StoreMessageAsync(
                 state.SessionId,
                 "moderator",
@@ -253,7 +248,7 @@ public sealed class AgentRunner : IAgentRunner
         if (synthesizer is null)
             throw new InvalidOperationException("Synthesizer agent is not registered.");
 
-        var context = AgentContext.ForAnalysis(
+        var context = AgentContext.ForSynthesis(
             state.SessionId,
             state.TruthMap,
             state.FrictionLevel,

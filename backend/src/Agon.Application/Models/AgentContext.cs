@@ -92,6 +92,26 @@ public sealed record AgentContext(
             [],
             attachments ?? []);
 
+    public static AgentContext ForSynthesis(
+        Guid sessionId,
+        TruthMapModel truthMap,
+        int frictionLevel,
+        int roundNumber,
+        bool researchToolsEnabled = false,
+        IReadOnlyList<SessionAttachment>? attachments = null) =>
+        new(
+            sessionId,
+            truthMap,
+            frictionLevel,
+            SessionPhase.Synthesis,
+            roundNumber,
+            [],
+            [],
+            null,
+            researchToolsEnabled,
+            [],
+            attachments ?? []);
+
     public static AgentContext ForClarification(
         Guid sessionId,
         TruthMapModel truthMap,

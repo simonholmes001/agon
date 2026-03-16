@@ -701,12 +701,6 @@ public class SessionsController : ControllerBase
             return DeterministicGuidFromString(claimValue);
         }
 
-        if (Request.Headers.TryGetValue("X-Agon-User-Id", out var headerValue)
-            && Guid.TryParse(headerValue.ToString(), out var headerGuid))
-        {
-            return headerGuid;
-        }
-
         return Guid.Empty;
     }
 
@@ -721,6 +715,11 @@ public class SessionsController : ControllerBase
     private bool IsOwnedByCurrentUser(Application.Models.SessionState state)
     {
         var userId = ResolveCurrentUserId();
+        if (User.Identity?.IsAuthenticated == true && userId == Guid.Empty)
+        {
+            return false;
+        }
+
         return userId == Guid.Empty || state.UserId == userId;
     }
 }

@@ -16,6 +16,7 @@ using Agon.Infrastructure.Attachments;
 using Anthropic;
 using Google.GenAI;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.AI;
 using Microsoft.IdentityModel.Tokens;
@@ -32,13 +33,11 @@ var builder = WebApplication.CreateBuilder(args);
 var contentRoot = builder.Environment.ContentRootPath;
 var projectRoot = Directory.GetParent(contentRoot)?.Parent?.Parent?.FullName ?? "";
 var envFilePath = Path.Combine(projectRoot, ".env");
-
-Console.WriteLine($"[Startup] Looking for .env file at: {envFilePath}");
-Console.WriteLine($"[Startup] .env file exists: {File.Exists(envFilePath)}");
+var envFileExists = File.Exists(envFilePath);
+var envKeysLoaded = 0;
 
 if (File.Exists(envFilePath))
 {
-    var loadedKeys = new List<string>();
     foreach (var line in File.ReadAllLines(envFilePath))
     {
         if (string.IsNullOrWhiteSpace(line) || line.StartsWith("#")) continue;
@@ -49,14 +48,9 @@ if (File.Exists(envFilePath))
             var key = parts[0];
             var value = parts[1].Trim('"'); // Remove surrounding quotes
             Environment.SetEnvironmentVariable(key, value);
-            loadedKeys.Add(key);
+            envKeysLoaded++;
         }
     }
-    Console.WriteLine($"[Startup] Loaded {loadedKeys.Count} keys from .env: {string.Join(", ", loadedKeys)}");
-}
-else
-{
-    Console.WriteLine($"[Startup] WARNING: .env file not found at {envFilePath}");
 }
 
 // ── Configuration ───────────────────────────────────────────────────────
@@ -66,6 +60,7 @@ var attachmentProcessingConfig = builder.Configuration
     .GetSection(AttachmentProcessingConfiguration.SectionName)
     .Get<AttachmentProcessingConfiguration>() ?? new();
 var authEnabled = builder.Configuration.GetValue<bool>("Authentication:Enabled");
+var allowedCorsOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? [];
 
 // Replace ${ENV_VAR} placeholders with actual environment variables
 llmConfig.OpenAI.ApiKey = ReplaceEnvVars(llmConfig.OpenAI.ApiKey);
@@ -74,12 +69,6 @@ llmConfig.Google.ApiKey = ReplaceEnvVars(llmConfig.Google.ApiKey);
 llmConfig.DeepSeek.ApiKey = ReplaceEnvVars(llmConfig.DeepSeek.ApiKey);
 attachmentProcessingConfig.DocumentIntelligence.Endpoint = ReplaceEnvVars(attachmentProcessingConfig.DocumentIntelligence.Endpoint);
 attachmentProcessingConfig.DocumentIntelligence.ApiKey = ReplaceEnvVars(attachmentProcessingConfig.DocumentIntelligence.ApiKey);
-
-Console.WriteLine($"[Startup] OpenAI API key configured: {!string.IsNullOrEmpty(llmConfig.OpenAI.ApiKey)}");
-Console.WriteLine($"[Startup] Anthropic API key configured: {!string.IsNullOrEmpty(llmConfig.Anthropic.ApiKey)}");
-Console.WriteLine($"[Startup] Google API key configured: {!string.IsNullOrEmpty(llmConfig.Google.ApiKey)}");
-Console.WriteLine($"[Startup] DeepSeek API key configured: {!string.IsNullOrEmpty(llmConfig.DeepSeek.ApiKey)}");
-Console.WriteLine($"[Startup] Document Intelligence endpoint configured: {!string.IsNullOrWhiteSpace(attachmentProcessingConfig.DocumentIntelligence.Endpoint)}");
 
 builder.Services.AddSingleton(llmConfig);
 builder.Services.AddSingleton(agonConfig);
@@ -141,6 +130,7 @@ if (authEnabled)
         .AddJwtBearer(options =>
         {
             options.Authority = authority;
+            options.RequireHttpsMetadata = !builder.Environment.IsDevelopment();
             options.TokenValidationParameters = new TokenValidationParameters
             {
                 ValidateIssuer = true,
@@ -149,7 +139,12 @@ if (authEnabled)
             };
         });
 
-    builder.Services.AddAuthorization();
+    builder.Services.AddAuthorization(options =>
+    {
+        options.FallbackPolicy = new AuthorizationPolicyBuilder()
+            .RequireAuthenticatedUser()
+            .Build();
+    });
 }
 
 // ── Controllers and OpenAPI ─────────────────────────────────────────────
@@ -160,6 +155,23 @@ builder.Services.AddControllers()
         options.JsonSerializerOptions.PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase;
     });
 builder.Services.AddOpenApi();
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("AgonCors", policy =>
+    {
+        if (allowedCorsOrigins.Length > 0)
+        {
+            policy.WithOrigins(allowedCorsOrigins)
+                .AllowAnyHeader()
+                .AllowAnyMethod();
+            return;
+        }
+
+        policy.AllowAnyHeader()
+            .AllowAnyMethod()
+            .AllowAnyOrigin();
+    });
+});
 
 // ── SignalR for Real-Time Events ────────────────────────────────────────
 builder.Services.AddSignalR();
@@ -413,7 +425,25 @@ if (app.Environment.IsDevelopment())
     app.MapOpenApi();
 }
 
+app.Logger.LogInformation(
+    "Startup summary: EnvFileExists={EnvFileExists}, EnvKeysLoaded={EnvKeysLoaded}, AuthEnabled={AuthEnabled}, CorsOriginCount={CorsOriginCount}, OpenAIConfigured={OpenAIConfigured}, AnthropicConfigured={AnthropicConfigured}, GoogleConfigured={GoogleConfigured}, DeepSeekConfigured={DeepSeekConfigured}, DocumentIntelligenceEndpointConfigured={DocumentIntelligenceEndpointConfigured}",
+    envFileExists,
+    envKeysLoaded,
+    authEnabled,
+    allowedCorsOrigins.Length,
+    !string.IsNullOrEmpty(llmConfig.OpenAI.ApiKey),
+    !string.IsNullOrEmpty(llmConfig.Anthropic.ApiKey),
+    !string.IsNullOrEmpty(llmConfig.Google.ApiKey),
+    !string.IsNullOrEmpty(llmConfig.DeepSeek.ApiKey),
+    !string.IsNullOrWhiteSpace(attachmentProcessingConfig.DocumentIntelligence.Endpoint));
+
+if (allowedCorsOrigins.Length == 0)
+{
+    app.Logger.LogWarning("No CORS origins configured. AllowAnyOrigin policy is active.");
+}
+
 app.UseHttpsRedirection();
+app.UseCors("AgonCors");
 if (authEnabled)
 {
     app.UseAuthentication();
@@ -421,9 +451,17 @@ if (authEnabled)
 }
 
 // ── Map Endpoints ───────────────────────────────────────────────────────
-app.MapGet("/health", () => Results.Ok(new { status = "Healthy" }));
-app.MapControllers();
-app.MapHub<DebateHub>("/hubs/debate");
+app.MapGet("/health", () => Results.Ok(new { status = "Healthy" })).AllowAnonymous();
+var controllers = app.MapControllers();
+if (authEnabled)
+{
+    controllers.RequireAuthorization();
+}
+var debateHub = app.MapHub<DebateHub>("/hubs/debate");
+if (authEnabled)
+{
+    debateHub.RequireAuthorization();
+}
 
 app.Run();
 
