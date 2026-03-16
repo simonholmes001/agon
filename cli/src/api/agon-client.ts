@@ -35,13 +35,15 @@ export class AgonAPIClient {
     this.logger = new Logger('AgonAPIClient');
     this.packageName = packageName;
     this.cliVersion = cliVersion;
+    const authToken = process.env.AGON_AUTH_TOKEN?.trim() || process.env.AGON_BEARER_TOKEN?.trim();
     this.client = axios.create({
       baseURL,
       timeout: 30000, // 30 seconds
       headers: {
         'Content-Type': 'application/json',
         'X-Agon-CLI-Version': this.cliVersion,
-        'User-Agent': `${this.packageName}/${this.cliVersion}`
+        'User-Agent': `${this.packageName}/${this.cliVersion}`,
+        ...(authToken ? { Authorization: `Bearer ${authToken}` } : {})
       }
     });
 

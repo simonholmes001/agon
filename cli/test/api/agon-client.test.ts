@@ -27,6 +27,8 @@ describe('AgonAPIClient', () => {
 
   beforeEach(() => {
     vi.resetAllMocks();
+    delete process.env.AGON_AUTH_TOKEN;
+    delete process.env.AGON_BEARER_TOKEN;
 
     mockAxios = {
       get: vi.fn(),
@@ -225,6 +227,19 @@ describe('AgonAPIClient', () => {
           headers: expect.objectContaining({
             'X-Agon-CLI-Version': '0.1.3',
             'User-Agent': '@agon_agents/cli/0.1.3'
+          })
+        })
+      );
+    });
+
+    it('should include bearer token header when AGON_AUTH_TOKEN is set', async () => {
+      process.env.AGON_AUTH_TOKEN = 'test-token';
+      new AgonAPIClient('http://localhost:5000', '@agon_agents/cli', '0.1.3');
+
+      expect(axios.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          headers: expect.objectContaining({
+            Authorization: 'Bearer test-token'
           })
         })
       );
