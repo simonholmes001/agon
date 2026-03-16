@@ -12,6 +12,7 @@ using Agon.Infrastructure.Persistence.AzureBlob;
 using Agon.Infrastructure.Persistence.Redis;
 using Agon.Infrastructure.Persistence.Repositories;
 using Agon.Infrastructure.SignalR;
+using Agon.Infrastructure.Attachments;
 using Anthropic;
 using Google.GenAI;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -61,6 +62,9 @@ else
 // ── Configuration ───────────────────────────────────────────────────────
 var llmConfig = builder.Configuration.GetSection(LlmConfiguration.SectionName).Get<LlmConfiguration>() ?? new();
 var agonConfig = builder.Configuration.GetSection(AgonConfiguration.SectionName).Get<AgonConfiguration>() ?? new();
+var attachmentProcessingConfig = builder.Configuration
+    .GetSection(AttachmentProcessingConfiguration.SectionName)
+    .Get<AttachmentProcessingConfiguration>() ?? new();
 var authEnabled = builder.Configuration.GetValue<bool>("Authentication:Enabled");
 
 // Replace ${ENV_VAR} placeholders with actual environment variables
@@ -68,14 +72,46 @@ llmConfig.OpenAI.ApiKey = ReplaceEnvVars(llmConfig.OpenAI.ApiKey);
 llmConfig.Anthropic.ApiKey = ReplaceEnvVars(llmConfig.Anthropic.ApiKey);
 llmConfig.Google.ApiKey = ReplaceEnvVars(llmConfig.Google.ApiKey);
 llmConfig.DeepSeek.ApiKey = ReplaceEnvVars(llmConfig.DeepSeek.ApiKey);
+attachmentProcessingConfig.DocumentIntelligence.Endpoint = ReplaceEnvVars(attachmentProcessingConfig.DocumentIntelligence.Endpoint);
+attachmentProcessingConfig.DocumentIntelligence.ApiKey = ReplaceEnvVars(attachmentProcessingConfig.DocumentIntelligence.ApiKey);
 
 Console.WriteLine($"[Startup] OpenAI API key configured: {!string.IsNullOrEmpty(llmConfig.OpenAI.ApiKey)}");
 Console.WriteLine($"[Startup] Anthropic API key configured: {!string.IsNullOrEmpty(llmConfig.Anthropic.ApiKey)}");
 Console.WriteLine($"[Startup] Google API key configured: {!string.IsNullOrEmpty(llmConfig.Google.ApiKey)}");
 Console.WriteLine($"[Startup] DeepSeek API key configured: {!string.IsNullOrEmpty(llmConfig.DeepSeek.ApiKey)}");
+Console.WriteLine($"[Startup] Document Intelligence endpoint configured: {!string.IsNullOrWhiteSpace(attachmentProcessingConfig.DocumentIntelligence.Endpoint)}");
 
 builder.Services.AddSingleton(llmConfig);
 builder.Services.AddSingleton(agonConfig);
+builder.Services.AddSingleton(new AttachmentExtractionOptions
+{
+    MaxExtractedTextChars = attachmentProcessingConfig.MaxExtractedTextChars,
+    DocumentIntelligence = new DocumentIntelligenceExtractionOptions
+    {
+        Enabled = attachmentProcessingConfig.DocumentIntelligence.Enabled,
+        Endpoint = attachmentProcessingConfig.DocumentIntelligence.Endpoint,
+        ModelId = attachmentProcessingConfig.DocumentIntelligence.ModelId,
+        ApiVersion = attachmentProcessingConfig.DocumentIntelligence.ApiVersion,
+        UseManagedIdentity = attachmentProcessingConfig.DocumentIntelligence.UseManagedIdentity,
+        ApiKey = attachmentProcessingConfig.DocumentIntelligence.ApiKey,
+        PollIntervalMs = attachmentProcessingConfig.DocumentIntelligence.PollIntervalMs,
+        MaxPollAttempts = attachmentProcessingConfig.DocumentIntelligence.MaxPollAttempts
+    },
+    OpenAiVision = new OpenAiVisionExtractionOptions
+    {
+        Enabled = attachmentProcessingConfig.OpenAiVision.Enabled,
+        ApiKey = llmConfig.OpenAI.ApiKey,
+        Model = attachmentProcessingConfig.OpenAiVision.Model,
+        MaxTokens = attachmentProcessingConfig.OpenAiVision.MaxTokens,
+        Detail = attachmentProcessingConfig.OpenAiVision.Detail,
+        MaxImageBytes = attachmentProcessingConfig.OpenAiVision.MaxImageBytes
+    }
+});
+builder.Services.AddHttpClient("attachment-extraction", client =>
+{
+    client.Timeout = TimeSpan.FromMinutes(3);
+});
+builder.Services.AddScoped<IAttachmentTextExtractor, AttachmentTextExtractor>();
 
 if (authEnabled)
 {

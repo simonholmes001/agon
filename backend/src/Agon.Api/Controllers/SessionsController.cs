@@ -20,43 +20,23 @@ public class SessionsController : ControllerBase
 {
     private const long MaxAttachmentSizeBytes = 25 * 1024 * 1024; // 25 MB
     private const int AttachmentPreviewChars = 500;
-    private const int MaxExtractedTextChars = 12000;
-
-    private static readonly HashSet<string> TextContentTypes = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "application/json",
-        "application/xml",
-        "application/x-yaml",
-        "application/yaml",
-        "text/csv",
-        "application/csv",
-        "application/x-www-form-urlencoded",
-        "application/javascript",
-        "application/x-javascript",
-        "application/typescript",
-        "application/sql"
-    };
-
-    private static readonly HashSet<string> TextExtensions = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ".txt", ".md", ".markdown", ".json", ".yaml", ".yml", ".csv", ".xml", ".html", ".htm",
-        ".log", ".ini", ".cfg", ".conf", ".toml", ".sql", ".ts", ".js", ".tsx", ".jsx",
-        ".cs", ".py", ".java", ".go", ".rb", ".php", ".ps1", ".sh", ".bat", ".env"
-    };
 
     private readonly ISessionService _sessionService;
     private readonly IAttachmentStorageService? _attachmentStorage;
+    private readonly IAttachmentTextExtractor _attachmentTextExtractor;
     private readonly ConversationHistoryService _conversationHistory;
     private readonly ILogger<SessionsController> _logger;
 
     public SessionsController(
         ISessionService sessionService,
         IAttachmentStorageService? attachmentStorage,
+        IAttachmentTextExtractor attachmentTextExtractor,
         ConversationHistoryService conversationHistory,
         ILogger<SessionsController> logger)
     {
         _sessionService = sessionService;
         _attachmentStorage = attachmentStorage;
+        _attachmentTextExtractor = attachmentTextExtractor;
         _conversationHistory = conversationHistory;
         _logger = logger;
     }
@@ -426,7 +406,11 @@ public class SessionsController : ControllerBase
             contentType,
             cancellationToken);
 
-        var extractedText = TryExtractText(fileBytes, safeFileName, contentType);
+        var extractedText = await _attachmentTextExtractor.ExtractAsync(
+            fileBytes,
+            safeFileName,
+            contentType,
+            cancellationToken);
 
         var attachment = new SessionAttachment(
             AttachmentId: Guid.NewGuid(),
@@ -698,56 +682,6 @@ public class SessionsController : ControllerBase
             ".webp" => "image/webp",
             _ => "application/octet-stream"
         };
-    }
-
-    private static string? TryExtractText(byte[] bytes, string fileName, string contentType)
-    {
-        if (bytes.Length == 0 || !IsTextLike(fileName, contentType))
-        {
-            return null;
-        }
-
-        string extracted;
-        try
-        {
-            extracted = Encoding.UTF8.GetString(bytes);
-        }
-        catch
-        {
-            return null;
-        }
-
-        extracted = extracted.Replace("\r\n", "\n").Replace('\r', '\n');
-        extracted = Regex.Replace(extracted, @"[\u0000-\u0008\u000B\u000C\u000E-\u001F]", " ");
-        extracted = extracted.Trim();
-
-        if (string.IsNullOrWhiteSpace(extracted))
-        {
-            return null;
-        }
-
-        if (extracted.Length > MaxExtractedTextChars)
-        {
-            extracted = extracted[..MaxExtractedTextChars];
-        }
-
-        return extracted;
-    }
-
-    private static bool IsTextLike(string fileName, string contentType)
-    {
-        if (!string.IsNullOrWhiteSpace(contentType))
-        {
-            var normalized = contentType.Split(';')[0].Trim();
-            if (normalized.StartsWith("text/", StringComparison.OrdinalIgnoreCase)
-                || TextContentTypes.Contains(normalized))
-            {
-                return true;
-            }
-        }
-
-        var extension = Path.GetExtension(fileName);
-        return !string.IsNullOrWhiteSpace(extension) && TextExtensions.Contains(extension);
     }
 
     private Guid ResolveCurrentUserId()

@@ -37,6 +37,9 @@ param keyVaultPrivateDnsZoneId string
 @description('Private DNS zone ID for Redis private endpoint.')
 param redisPrivateDnsZoneId string
 
+@description('Private DNS zone ID for Cognitive Services private endpoint.')
+param cognitiveServicesPrivateDnsZoneId string
+
 @secure()
 param openAiApiKey string
 
@@ -58,6 +61,7 @@ var tags = {
 var keyVaultName = 'kv-${replace(namePrefix, '-', '')}-${take(uniqueString(resourceGroup().id), 6)}'
 var postgresServerName = 'psql-${namePrefix}-${take(uniqueString(resourceGroup().id), 6)}'
 var redisName = 'redis-${namePrefix}-${take(uniqueString(resourceGroup().id), 6)}'
+var documentIntelligenceName = 'docint-${namePrefix}-${take(uniqueString(resourceGroup().id), 6)}'
 var hasOpenAiKey = !empty(openAiApiKey)
 var hasAnthropicKey = !empty(anthropicApiKey)
 var hasGoogleKey = !empty(googleApiKey)
@@ -168,18 +172,33 @@ resource redis 'Microsoft.Cache/Redis@2022-06-01' = {
   name: redisName
   location: location
   tags: tags
+  sku: {
+    name: 'Basic'
+    family: 'C'
+    capacity: 0
+  }
   properties: {
-    sku: {
-      name: 'Basic'
-      family: 'C'
-      capacity: 0
-    }
     publicNetworkAccess: 'Disabled'
     minimumTlsVersion: '1.2'
     enableNonSslPort: false
     redisConfiguration: {
       'maxmemory-policy': 'allkeys-lru'
     }
+  }
+}
+
+resource documentIntelligence 'Microsoft.CognitiveServices/accounts@2023-05-01' = {
+  name: documentIntelligenceName
+  location: location
+  tags: tags
+  kind: 'FormRecognizer'
+  sku: {
+    name: 'S0'
+  }
+  properties: {
+    customSubDomainName: documentIntelligenceName
+    publicNetworkAccess: 'Disabled'
+    disableLocalAuth: true
   }
 }
 
@@ -205,6 +224,28 @@ resource redisPrivateEndpoint 'Microsoft.Network/privateEndpoints@2023-11-01' = 
   }
 }
 
+resource documentIntelligencePrivateEndpoint 'Microsoft.Network/privateEndpoints@2023-11-01' = {
+  name: 'pep-${documentIntelligence.name}'
+  location: location
+  tags: tags
+  properties: {
+    subnet: {
+      id: privateEndpointSubnetId
+    }
+    privateLinkServiceConnections: [
+      {
+        name: 'documentIntelligenceConnection'
+        properties: {
+          privateLinkServiceId: documentIntelligence.id
+          groupIds: [
+            'account'
+          ]
+        }
+      }
+    ]
+  }
+}
+
 resource redisPrivateDnsZoneGroup 'Microsoft.Network/privateEndpoints/privateDnsZoneGroups@2023-11-01' = {
   parent: redisPrivateEndpoint
   name: 'default'
@@ -214,6 +255,21 @@ resource redisPrivateDnsZoneGroup 'Microsoft.Network/privateEndpoints/privateDns
         name: 'redis-zone'
         properties: {
           privateDnsZoneId: redisPrivateDnsZoneId
+        }
+      }
+    ]
+  }
+}
+
+resource documentIntelligencePrivateDnsZoneGroup 'Microsoft.Network/privateEndpoints/privateDnsZoneGroups@2023-11-01' = {
+  parent: documentIntelligencePrivateEndpoint
+  name: 'default'
+  properties: {
+    privateDnsZoneConfigs: [
+      {
+        name: 'cognitive-zone'
+        properties: {
+          privateDnsZoneId: cognitiveServicesPrivateDnsZoneId
         }
       }
     ]
@@ -272,6 +328,9 @@ output keyVaultName string = keyVault.name
 output keyVaultId string = keyVault.id
 output postgresqlServerName string = postgres.name
 output redisCacheName string = redis.name
+output documentIntelligenceAccountName string = documentIntelligence.name
+output documentIntelligenceId string = documentIntelligence.id
+output documentIntelligenceEndpoint string = 'https://${documentIntelligence.name}.cognitiveservices.azure.com'
 output postgresConnectionSecretUri string = postgresConnectionSecret.properties.secretUri
 output redisConnectionSecretUri string = redisConnectionSecret.properties.secretUri
 output openAiSecretUri string = hasOpenAiKey ? openAiSecret!.properties.secretUri : ''

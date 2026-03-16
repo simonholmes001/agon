@@ -74,6 +74,12 @@ param googleSecretUri string
 @description('Key Vault secret URI for DeepSeek API key.')
 param deepSeekSecretUri string
 
+@description('Document Intelligence endpoint for attachment extraction.')
+param documentIntelligenceEndpoint string = ''
+
+@description('Document Intelligence model ID used by backend attachment extraction.')
+param documentIntelligenceModelId string = 'prebuilt-layout'
+
 var tags = {
   environment: environment
   workload: workloadName
@@ -188,6 +194,22 @@ resource appService 'Microsoft.Web/sites@2023-12-01' = {
         {
           name: 'DEEPSEEK_KEY'
           value: empty(deepSeekSecretUri) ? '' : '@Microsoft.KeyVault(SecretUri=${deepSeekSecretUri})'
+        }
+        {
+          name: 'AttachmentProcessing__DocumentIntelligence__Enabled'
+          value: empty(documentIntelligenceEndpoint) ? 'false' : 'true'
+        }
+        {
+          name: 'AttachmentProcessing__DocumentIntelligence__Endpoint'
+          value: documentIntelligenceEndpoint
+        }
+        {
+          name: 'AttachmentProcessing__DocumentIntelligence__ModelId'
+          value: documentIntelligenceModelId
+        }
+        {
+          name: 'AttachmentProcessing__DocumentIntelligence__UseManagedIdentity'
+          value: 'true'
         }
         {
           name: 'Authentication__Enabled'

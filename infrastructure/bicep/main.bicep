@@ -71,6 +71,9 @@ param appGatewayWafMode string = 'Detection'
 @maxValue(86400)
 param appGatewayRequestTimeoutSeconds int = 120
 
+@description('Document Intelligence model used for attachment extraction.')
+param documentIntelligenceModelId string = 'prebuilt-layout'
+
 @description('Enable JWT bearer authentication in the backend API.')
 param authEnabled bool = false
 
@@ -149,6 +152,7 @@ module data './modules/data-dev.bicep' = {
     postgresPrivateDnsZoneId: network.outputs.postgresPrivateDnsZoneId
     keyVaultPrivateDnsZoneId: network.outputs.keyVaultPrivateDnsZoneId
     redisPrivateDnsZoneId: network.outputs.redisPrivateDnsZoneId
+    cognitiveServicesPrivateDnsZoneId: network.outputs.cognitiveServicesPrivateDnsZoneId
     openAiApiKey: openAiApiKey
     anthropicApiKey: anthropicApiKey
     googleApiKey: googleApiKey
@@ -182,6 +186,8 @@ module appEdge './modules/app-edge-dev.bicep' = {
     anthropicSecretUri: data.outputs.anthropicSecretUri
     googleSecretUri: data.outputs.googleSecretUri
     deepSeekSecretUri: data.outputs.deepSeekSecretUri
+    documentIntelligenceEndpoint: data.outputs.documentIntelligenceEndpoint
+    documentIntelligenceModelId: documentIntelligenceModelId
   }
 }
 
@@ -190,6 +196,16 @@ module keyVaultAccess './modules/keyvault-access-dev.bicep' = {
   scope: rgData
   params: {
     keyVaultName: data.outputs.keyVaultName
+    principalId: appEdge.outputs.appPrincipalId
+    principalDisplayNameSeed: appServiceName
+  }
+}
+
+module documentIntelligenceAccess './modules/document-intelligence-access-dev.bicep' = {
+  name: 'document-intelligence-access-dev'
+  scope: rgData
+  params: {
+    documentIntelligenceAccountName: data.outputs.documentIntelligenceAccountName
     principalId: appEdge.outputs.appPrincipalId
     principalDisplayNameSeed: appServiceName
   }
@@ -204,3 +220,4 @@ output appGatewayPublicIpAddress string = appEdge.outputs.appGatewayPublicIpAddr
 output keyVaultName string = data.outputs.keyVaultName
 output postgresqlServerName string = data.outputs.postgresqlServerName
 output redisCacheName string = data.outputs.redisCacheName
+output documentIntelligenceAccountName string = data.outputs.documentIntelligenceAccountName

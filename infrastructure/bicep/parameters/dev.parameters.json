@@ -35,6 +35,9 @@
     "appGatewayRequestTimeoutSeconds": {
       "value": 120
     },
+    "documentIntelligenceModelId": {
+      "value": "prebuilt-layout"
+    },
     "authEnabled": {
       "value": false
     },
