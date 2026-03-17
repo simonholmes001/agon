@@ -40,6 +40,7 @@ Naming follows Azure CAF guidance:
 - Prefix: `agon-dev-frc` (or your approved prefix)
 - Alert email: `<your-alert-email>`
 - `appGatewaySubnetPrefix`: `10.42.4.0/24` (default in dev)
+- `appGatewayResourceSuffix`: `basic` (default in this branch, creates parallel edge resource names)
 - `appGatewaySkuName`: `Basic` (default in this branch)
 - `appGatewaySkuTier`: `Basic` (default in this branch)
 

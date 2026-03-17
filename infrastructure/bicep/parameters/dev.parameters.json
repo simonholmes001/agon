@@ -30,7 +30,7 @@
       "value": "10.42.4.0/24"
     },
     "appGatewayResourceSuffix": {
-      "value": ""
+      "value": "basic"
     },
     "appGatewaySkuName": {
       "value": "Basic"
