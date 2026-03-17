@@ -65,11 +65,20 @@ namespace Agon.Infrastructure.Migrations
                         .HasColumnName("id");
 
                     b.Property<int>("ClarificationRoundCount")
-                        .HasColumnType("integer");
+                        .HasColumnType("integer")
+                        .HasColumnName("ClarificationRoundCount");
+
+                    b.Property<bool>("ClarificationIncomplete")
+                        .HasColumnType("boolean")
+                        .HasColumnName("clarification_incomplete");
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
+
+                    b.Property<int>("CurrentRound")
+                        .HasColumnType("integer")
+                        .HasColumnName("current_round");
 
                     b.Property<Guid?>("ForkSnapshotId")
                         .HasColumnType("uuid")
@@ -98,6 +107,14 @@ namespace Agon.Infrastructure.Migrations
                         .HasColumnType("text")
                         .HasColumnName("status");
 
+                    b.Property<int>("TargetedLoopCount")
+                        .HasColumnType("integer")
+                        .HasColumnName("targeted_loop_count");
+
+                    b.Property<int>("TokensUsed")
+                        .HasColumnType("integer")
+                        .HasColumnName("tokens_used");
+
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("updated_at");
@@ -113,6 +130,69 @@ namespace Agon.Infrastructure.Migrations
                     b.HasIndex("UserId");
 
                     b.ToTable("sessions", (string)null);
+                });
+
+            modelBuilder.Entity("Agon.Infrastructure.Persistence.PostgreSQL.SessionAttachmentEntity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("AccessUrl")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("access_url");
+
+                    b.Property<string>("BlobName")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("blob_name");
+
+                    b.Property<string>("BlobUri")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("blob_uri");
+
+                    b.Property<string>("ContentType")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("content_type");
+
+                    b.Property<string>("ExtractedText")
+                        .HasColumnType("text")
+                        .HasColumnName("extracted_text");
+
+                    b.Property<string>("FileName")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("file_name");
+
+                    b.Property<Guid>("SessionId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("session_id");
+
+                    b.Property<long>("SizeBytes")
+                        .HasColumnType("bigint")
+                        .HasColumnName("size_bytes");
+
+                    b.Property<DateTime>("UploadedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("uploaded_at");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SessionId");
+
+                    b.HasIndex("SessionId", "UploadedAt");
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("session_attachments", (string)null);
                 });
 
             modelBuilder.Entity("Agon.Infrastructure.Persistence.PostgreSQL.TruthMapEntity", b =>
