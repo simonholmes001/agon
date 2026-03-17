@@ -6,7 +6,8 @@ using Microsoft.EntityFrameworkCore.Migrations;
 namespace Agon.Infrastructure.Migrations
 {
     /// <inheritdoc />
-    [ExcludeFromCodeCoverage]public partial class AddAgentMessagesTable : Migration
+    [ExcludeFromCodeCoverage]
+    public partial class AddAgentMessagesTable : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)

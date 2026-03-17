@@ -9,7 +9,8 @@ namespace Agon.Infrastructure.Migrations;
 /// <inheritdoc />
 [DbContext(typeof(AgonDbContext))]
 [Migration("20260316150000_AddSessionAttachments")]
-[ExcludeFromCodeCoverage]public partial class AddSessionAttachments : Migration
+[ExcludeFromCodeCoverage]
+    public partial class AddSessionAttachments : Migration
 {
     /// <inheritdoc />
     protected override void Up(MigrationBuilder migrationBuilder)

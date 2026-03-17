@@ -7,7 +7,8 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Agon.Infrastructure.Migrations
 {
     /// <inheritdoc />
-    [ExcludeFromCodeCoverage]public partial class InitialCreate : Migration
+    [ExcludeFromCodeCoverage]
+    public partial class InitialCreate : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)

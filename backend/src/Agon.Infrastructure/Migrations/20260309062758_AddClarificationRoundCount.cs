@@ -5,7 +5,8 @@ using System.Diagnostics.CodeAnalysis;
 namespace Agon.Infrastructure.Migrations
 {
     /// <inheritdoc />
-    [ExcludeFromCodeCoverage]public partial class AddClarificationRoundCount : Migration
+    [ExcludeFromCodeCoverage]
+    public partial class AddClarificationRoundCount : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
