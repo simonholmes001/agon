@@ -225,6 +225,7 @@ module postgresAccess './modules/postgres-access-dev.bicep' = {
   scope: rgData
   params: {
     postgresqlServerName: data.outputs.postgresqlServerName
+    principalObjectId: appEdge.outputs.appPrincipalId
     principalName: appServiceName
     tenantId: tenantId
   }
