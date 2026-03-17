@@ -190,9 +190,14 @@ After launching `agon`, use these in-shell commands:
 ```bash
 /help
 /new
-# then type your idea directly (plain text)
+/show-sessions
+/resume [session-id]
+/session <session-id>
+/status [session-id]
 /status
 /show verdict
+/refresh verdict
+/attach "./docs/product-brief.pdf"
 /follow-up "<your request>"
 /exit
 ```
@@ -200,7 +205,9 @@ After launching `agon`, use these in-shell commands:
 Notes:
 - `agon --version` prints the installed CLI version and exits.
 - `agon --help` shows launcher help.
+- `agon --self-update` updates the global CLI install (run from terminal, not inside the interactive shell).
 - By default, Agon CLI connects to the hosted backend endpoint (no manual `apiUrl` setup required for end users).
+- If startup shows an update prompt, exit shell first (`/exit`) then run `agon --self-update`.
 - On startup, Agon checks npm and alerts when a newer stable version is available.
 
 ### Web Application (In Development)
@@ -214,6 +221,14 @@ Native iOS app for on-the-go strategy analysis. Coming soon.
 ### Local Deployment (Developer Runbook)
 
 For local end-to-end testing, run the data services first, then the backend API, then your chosen client interface.
+
+#### 0) Build locally (repo root)
+
+```bash
+cd /Users/simonholmes/Projects/Applications/Agon
+dotnet build backend/Agon.sln
+npm --prefix cli run build
+```
 
 #### 1) Start required local data services (PostgreSQL + Redis)
 
@@ -244,12 +259,26 @@ AGON_API_URL=http://localhost:5000 npm exec -- agon
 
 #### 3) Run a local client
 
-CLI (primary interface today):
+CLI (primary interface today, using local source build):
 
 ```bash
-cd cli
+cd /Users/simonholmes/Projects/Applications/Agon
+npm --prefix cli run build
+AGON_API_URL=http://localhost:5000 node cli/bin/run.js
+```
+
+CLI (alternative, npm-exec from local package):
+
+```bash
+cd /Users/simonholmes/Projects/Applications/Agon/cli
 npm install
-npm exec -- agon
+AGON_API_URL=http://localhost:5000 npm exec -- agon
+```
+
+Optional auth token for secured API (JWT bearer):
+
+```bash
+AGON_AUTH_TOKEN="<jwt-token>" AGON_API_URL=http://localhost:5000 node cli/bin/run.js
 ```
 
 Web frontend (WIP):
@@ -267,6 +296,14 @@ Frontend default URL: `http://localhost:3000`
 ```bash
 cd backend
 docker compose down
+```
+
+#### 5) Run local tests (repo root)
+
+```bash
+cd /Users/simonholmes/Projects/Applications/Agon
+DOTNET_CLI_HOME=/tmp dotnet test backend/Agon.sln --verbosity minimal
+npm --prefix cli test
 ```
 
 ---
