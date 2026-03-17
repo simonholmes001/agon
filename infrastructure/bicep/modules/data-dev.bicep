@@ -172,12 +172,12 @@ resource redis 'Microsoft.Cache/Redis@2024-11-01' = {
   name: redisName
   location: location
   tags: tags
-  sku: {
-    name: 'Basic'
-    family: 'C'
-    capacity: 0
-  }
   properties: {
+    sku: {
+      name: 'Basic'
+      family: 'C'
+      capacity: 0
+    }
     publicNetworkAccess: 'Disabled'
     disableAccessKeyAuthentication: true
     minimumTlsVersion: '1.2'
