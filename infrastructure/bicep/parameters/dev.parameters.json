@@ -29,6 +29,9 @@
     "appGatewaySubnetPrefix": {
       "value": "10.42.4.0/24"
     },
+    "appGatewayV1SubnetPrefix": {
+      "value": "10.42.5.0/24"
+    },
     "appGatewayResourceSuffix": {
       "value": "basic"
     },
