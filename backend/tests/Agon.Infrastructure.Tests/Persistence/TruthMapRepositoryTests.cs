@@ -202,6 +202,53 @@ namespace Agon.Infrastructure.Tests.Persistence;
     }
 
     [Fact]
+    public async Task ApplyPatchAsync_WithOpenQuestionAsString_NormalizesAndPersists()
+    {
+        // Arrange
+        var sessionId = Guid.NewGuid();
+        var patch = new TruthMapPatch(
+            [new PatchOperation(PatchOp.Add, "/open_questions/0", "What data should we collect first?")],
+            new PatchMeta("moderator", 1, "Add open question as scalar", sessionId)
+        );
+
+        // Act
+        var updated = await _repository.ApplyPatchAsync(sessionId, patch);
+
+        // Assert
+        updated.OpenQuestions.Should().HaveCount(1);
+        updated.OpenQuestions[0].Text.Should().Be("What data should we collect first?");
+        updated.OpenQuestions[0].RaisedBy.Should().Be("moderator");
+        updated.OpenQuestions[0].Blocking.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task ApplyPatchAsync_WithOpenQuestionAlternativeFields_NormalizesAndPersists()
+    {
+        // Arrange
+        var sessionId = Guid.NewGuid();
+        var patch = new TruthMapPatch(
+            [
+                new PatchOperation(PatchOp.Add, "/open_questions/0", new
+                {
+                    question = "Who is the first launch cohort?",
+                    is_blocking = "true",
+                    agent = "moderator"
+                })
+            ],
+            new PatchMeta("moderator", 1, "Add open question with non-canonical fields", sessionId)
+        );
+
+        // Act
+        var updated = await _repository.ApplyPatchAsync(sessionId, patch);
+
+        // Assert
+        updated.OpenQuestions.Should().HaveCount(1);
+        updated.OpenQuestions[0].Text.Should().Be("Who is the first launch cohort?");
+        updated.OpenQuestions[0].RaisedBy.Should().Be("moderator");
+        updated.OpenQuestions[0].Blocking.Should().BeTrue();
+    }
+
+    [Fact]
     public async Task GetImpactSetAsync_ReturnsTransitiveDependents()
     {
         // Arrange
