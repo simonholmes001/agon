@@ -1,5 +1,12 @@
 # @agon_agents/cli
 
+## 0.1.9
+
+### Patch Changes
+
+- Harden CLI runtime behavior by removing dead clarification API methods and adding live-watch failsafes (max duration, idle timeout, and retry failure stop) to avoid indefinite hangs.
+- Add shell `/attach <file-path>` support for session documents, update slash-command help/next-step guidance, and improve shell/API consistency for refresh and follow-up flows.
+
 ## 0.1.8
 
 ### Patch Changes
