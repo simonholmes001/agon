@@ -262,7 +262,7 @@ var redirectConfigurations = enableHttpsListener
       }
     ]
   : []
-var httpRedirectRuleProperties = union({
+var httpRedirectRuleProperties = {
   ruleType: 'Basic'
   httpListener: {
     id: resourceId('Microsoft.Network/applicationGateways/httpListeners', appGatewayName, httpListenerName)
@@ -270,10 +270,9 @@ var httpRedirectRuleProperties = union({
   redirectConfiguration: {
     id: resourceId('Microsoft.Network/applicationGateways/redirectConfigurations', appGatewayName, httpToHttpsRedirectName)
   }
-}, isV2Sku ? {
   priority: 90
-} : {})
-var httpsRequestRoutingRuleProperties = union({
+}
+var httpsRequestRoutingRuleProperties = {
   ruleType: 'Basic'
   httpListener: {
     id: resourceId('Microsoft.Network/applicationGateways/httpListeners', appGatewayName, httpsListenerName)
@@ -284,10 +283,9 @@ var httpsRequestRoutingRuleProperties = union({
   backendHttpSettings: {
     id: resourceId('Microsoft.Network/applicationGateways/backendHttpSettingsCollection', appGatewayName, backendHttpSettingsName)
   }
-}, isV2Sku ? {
   priority: 100
-} : {})
-var defaultRequestRoutingRuleProperties = union({
+}
+var defaultRequestRoutingRuleProperties = {
   ruleType: 'Basic'
   httpListener: {
     id: resourceId('Microsoft.Network/applicationGateways/httpListeners', appGatewayName, httpListenerName)
@@ -298,9 +296,8 @@ var defaultRequestRoutingRuleProperties = union({
   backendHttpSettings: {
     id: resourceId('Microsoft.Network/applicationGateways/backendHttpSettingsCollection', appGatewayName, backendHttpSettingsName)
   }
-}, isV2Sku ? {
   priority: 100
-} : {})
+}
 var requestRoutingRules = enableHttpsListener
   ? [
       {
