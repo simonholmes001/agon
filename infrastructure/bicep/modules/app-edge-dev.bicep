@@ -42,7 +42,7 @@ param appGatewaySkuName string = 'Basic'
 ])
 param appGatewaySkuTier string = 'Basic'
 
-@description('Application Gateway instance count for legacy v1 SKUs. Ignored for Basic/Standard_v2/WAF_v2.')
+@description('Application Gateway instance count for v1 SKUs (Basic/Standard/WAF family). Ignored for Standard_v2/WAF_v2.')
 @minValue(1)
 @maxValue(32)
 param appGatewayInstanceCount int = 1
@@ -138,7 +138,6 @@ var actionGroupName = 'ag-${namePrefix}-ops'
 
 var appGatewayResourceSuffixSegment = empty(appGatewayResourceSuffix) ? '' : '-${appGatewayResourceSuffix}'
 var appGatewayName = 'agw-${namePrefix}${appGatewayResourceSuffixSegment}'
-var appGatewayPublicIpName = 'pip-${namePrefix}-agw${appGatewayResourceSuffixSegment}'
 var frontendIpConfigName = 'feip-public'
 var frontendHttpPortName = 'feport-80'
 var frontendHttpsPortName = 'feport-443'
@@ -154,9 +153,11 @@ var httpToHttpsRedirectName = 'redirect-http-to-https'
 var appGatewaySslCertificateName = 'agw-cert'
 var enableHttpsListener = !empty(appGatewaySslCertificatePfxBase64) && !empty(appGatewaySslCertificatePassword)
 var isV2Sku = endsWith(toLower(appGatewaySkuTier), '_v2')
-var isModernSku = toLower(appGatewaySkuTier) == 'basic' || isV2Sku
 var isWafSku = startsWith(toLower(appGatewaySkuTier), 'waf')
-var isLegacyV1Sku = !isModernSku
+var isLegacyV1Sku = !isV2Sku
+var appGatewayPublicIpName = isV2Sku
+  ? 'pip-${namePrefix}-agw${appGatewayResourceSuffixSegment}'
+  : 'pip-${namePrefix}-agw-v1${appGatewayResourceSuffixSegment}'
 var appGatewaySku = isLegacyV1Sku
   ? {
       name: appGatewaySkuName
@@ -167,8 +168,8 @@ var appGatewaySku = isLegacyV1Sku
       name: appGatewaySkuName
       tier: appGatewaySkuTier
     }
-var appGatewayPublicIpSkuName = isModernSku ? 'Standard' : 'Basic'
-var appGatewayPublicIpAllocationMethod = isModernSku ? 'Static' : 'Dynamic'
+var appGatewayPublicIpSkuName = isV2Sku ? 'Standard' : 'Basic'
+var appGatewayPublicIpAllocationMethod = isV2Sku ? 'Static' : 'Dynamic'
 var frontendPorts = enableHttpsListener
   ? [
       {
