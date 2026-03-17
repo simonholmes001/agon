@@ -192,6 +192,8 @@ public class TruthMapRepository : ITruthMapRepository
             ApplyOperation(root, operation);
         }
 
+        NormalizeOpenQuestions(root);
+
         var patched = root.Deserialize<TruthMapModel>(_jsonOptions)
             ?? throw new InvalidOperationException("Failed to deserialize patched Truth Map.");
 
@@ -200,6 +202,106 @@ public class TruthMapRepository : ITruthMapRepository
             Version = truthMap.Version + 1,
             Round = Math.Max(truthMap.Round, patch.Meta.Round)
         };
+    }
+
+    /// <summary>
+    /// Agent patch payloads can represent open questions as strings or with alternate field names.
+    /// Normalize to the strict OpenQuestion shape expected by the TruthMap model.
+    /// </summary>
+    private static void NormalizeOpenQuestions(JsonObject root)
+    {
+        if (root["open_questions"] is not JsonArray questions)
+        {
+            return;
+        }
+
+        for (var i = 0; i < questions.Count; i++)
+        {
+            var entry = questions[i];
+            if (entry is null)
+            {
+                continue;
+            }
+
+            if (entry is JsonValue scalarValue && scalarValue.TryGetValue<string>(out var textValue))
+            {
+                questions[i] = BuildNormalizedOpenQuestion(
+                    id: null,
+                    text: textValue,
+                    blocking: false,
+                    raisedBy: null);
+                continue;
+            }
+
+            if (entry is not JsonObject questionObject)
+            {
+                continue;
+            }
+
+            var id = ReadString(questionObject, "id");
+            var text = ReadString(questionObject, "text")
+                ?? ReadString(questionObject, "question")
+                ?? ReadString(questionObject, "prompt");
+            var blocking = ReadBool(questionObject, "blocking")
+                ?? ReadBool(questionObject, "is_blocking")
+                ?? false;
+            var raisedBy = ReadString(questionObject, "raised_by")
+                ?? ReadString(questionObject, "raisedBy")
+                ?? ReadString(questionObject, "agent")
+                ?? ReadString(questionObject, "proposed_by");
+
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                // Keep existing object untouched if it has no usable textual value.
+                continue;
+            }
+
+            questions[i] = BuildNormalizedOpenQuestion(id, text, blocking, raisedBy);
+        }
+    }
+
+    private static JsonObject BuildNormalizedOpenQuestion(string? id, string text, bool blocking, string? raisedBy) =>
+        new()
+        {
+            ["id"] = string.IsNullOrWhiteSpace(id) ? $"oq-{Guid.NewGuid():N}" : id,
+            ["text"] = text,
+            ["blocking"] = blocking,
+            ["raised_by"] = string.IsNullOrWhiteSpace(raisedBy) ? "moderator" : raisedBy
+        };
+
+    private static string? ReadString(JsonObject source, string key)
+    {
+        if (!source.TryGetPropertyValue(key, out var node) || node is null)
+        {
+            return null;
+        }
+
+        return node is JsonValue value && value.TryGetValue<string>(out var stringValue)
+            ? stringValue
+            : null;
+    }
+
+    private static bool? ReadBool(JsonObject source, string key)
+    {
+        if (!source.TryGetPropertyValue(key, out var node) || node is null)
+        {
+            return null;
+        }
+
+        if (node is JsonValue value)
+        {
+            if (value.TryGetValue<bool>(out var boolValue))
+            {
+                return boolValue;
+            }
+
+            if (value.TryGetValue<string>(out var stringValue) && bool.TryParse(stringValue, out var parsed))
+            {
+                return parsed;
+            }
+        }
+
+        return null;
     }
 
     private static void ApplyOperation(JsonObject root, PatchOperation operation)
