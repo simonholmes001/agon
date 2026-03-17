@@ -46,24 +46,6 @@ export interface CreateSessionRequest {
   researchEnabled?: boolean;
 }
 
-export interface ClarificationQuestion {
-  id: string;
-  text: string;
-  order: number;
-}
-
-export interface ClarificationResponse {
-  questions: ClarificationQuestion[];
-  isComplete: boolean;
-}
-
-export interface SubmitAnswersRequest {
-  answers: Array<{
-    questionId: string;
-    answer: string;
-  }>;
-}
-
 export interface Artifact {
   type: ArtifactType;
   content: string;
@@ -95,4 +77,16 @@ export interface Message {
 
 export interface SubmitMessageRequest {
   content: string;
+}
+
+export interface SessionAttachment {
+  id: string;
+  sessionId: string;
+  fileName: string;
+  contentType: string;
+  sizeBytes: number;
+  accessUrl: string;
+  uploadedAt: string;
+  hasExtractedText: boolean;
+  extractedTextPreview?: string;
 }

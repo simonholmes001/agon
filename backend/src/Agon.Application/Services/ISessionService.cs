@@ -28,6 +28,18 @@ public interface ISessionService
 
     Task<SessionState?> GetAsync(Guid sessionId, CancellationToken cancellationToken = default);
 
+    Task<IReadOnlyList<SessionState>> ListByUserAsync(
+        Guid userId,
+        CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<SessionAttachment>> ListAttachmentsAsync(
+        Guid sessionId,
+        CancellationToken cancellationToken = default);
+
+    Task<SessionAttachment> SaveAttachmentAsync(
+        SessionAttachment attachment,
+        CancellationToken cancellationToken = default);
+
     /// <summary>
     /// Begins the clarification phase for a session.
     /// </summary>

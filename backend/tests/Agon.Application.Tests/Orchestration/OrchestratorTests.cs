@@ -704,7 +704,7 @@ public class OrchestratorTests
 
         var moderatorResponse = new AgentResponse(
             AgentId.Moderator,
-            "READY - All clarification complete. The brief is now clear.",
+            "STATUS: READY\nAll clarification complete. The brief is now clear.",
             patch,
             100,
             false,
@@ -719,6 +719,7 @@ public class OrchestratorTests
             sessionService: sessionService);
         
         var state = BuildState(SessionPhase.Clarification);
+        state.ClarificationRoundCount = 1;
 
         // Act
         await orchestrator.RunModeratorAsync(state, CancellationToken.None);
@@ -762,6 +763,38 @@ public class OrchestratorTests
         state.ClarificationRoundCount.Should().Be(1);
         await sessionService.Received(1).RecordRoundSnapshotAsync(
             state,
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task RunModeratorAsync_ReadyOnFirstRoundWithoutUserMessages_ShouldNotAdvance()
+    {
+        var runner = Substitute.For<IAgentRunner>();
+        var moderatorResponse = new AgentResponse(
+            AgentId.Moderator,
+            "STATUS: READY\nProceed immediately.",
+            null,
+            80,
+            false,
+            null);
+
+        runner.RunModeratorAsync(Arg.Any<SessionState>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(moderatorResponse));
+
+        var sessionService = StubSessionService();
+        var orchestrator = BuildOrchestrator(
+            runner: runner,
+            sessionService: sessionService);
+
+        var state = BuildState(SessionPhase.Clarification);
+        state.ClarificationRoundCount = 0;
+
+        await orchestrator.RunModeratorAsync(state, CancellationToken.None);
+
+        state.ClarificationRoundCount.Should().Be(1);
+        await sessionService.DidNotReceive().AdvancePhaseAsync(
+            state,
+            SessionPhase.AnalysisRound,
             Arg.Any<CancellationToken>());
     }
 
@@ -839,7 +872,7 @@ public class OrchestratorTests
         // Arrange
         var moderatorResponse = new AgentResponse(
             AgentId: AgentId.Moderator,
-            Message: "READY",
+            Message: "STATUS: READY\nReady to proceed.",
             Patch: null,
             TokensUsed: 100,
             TimedOut: false,
@@ -852,6 +885,7 @@ public class OrchestratorTests
         var sessionService = StubSessionService();
         var orchestrator = BuildOrchestrator(runner: runner, sessionService: sessionService);
         var state = BuildState(SessionPhase.Clarification);
+        state.ClarificationRoundCount = 1;
         
         state.UserMessages.Add(new UserMessage(
             "Test message",

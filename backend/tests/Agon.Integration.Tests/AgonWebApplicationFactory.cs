@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using Agon.Application.Interfaces;
 using Agon.Domain.Snapshots;
+using Agon.Infrastructure.Persistence.Repositories;
 using Agon.Infrastructure.Persistence.PostgreSQL;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -68,8 +69,10 @@ public class AgonWebApplicationFactory : WebApplicationFactory<Program>
             // Remove first to avoid duplicates, then add
             services.RemoveAll<ISessionRepository>();
             services.RemoveAll<ITruthMapRepository>();
+            services.RemoveAll<IAgentMessageRepository>();
             services.AddScoped<ISessionRepository, SessionRepository>();
             services.AddScoped<ITruthMapRepository, TruthMapRepository>();
+            services.AddScoped<IAgentMessageRepository, AgentMessageRepository>();
 
             // Remove Redis dependencies if they were registered
             services.RemoveAll<StackExchange.Redis.IConnectionMultiplexer>();

@@ -28,11 +28,16 @@ public sealed class SessionRepository : ISessionRepository
         var entity = new SessionEntity
         {
             Id = sessionState.SessionId,
-            UserId = Guid.Empty, // TODO: Get from auth context when auth is implemented
+            UserId = sessionState.UserId,
             Mode = GetSessionMode(sessionState).ToString(),
             FrictionLevel = sessionState.FrictionLevel,
             Status = sessionState.Status.ToString(),
             Phase = sessionState.Phase.ToString(),
+            CurrentRound = sessionState.CurrentRound,
+            TokensUsed = sessionState.TokensUsed,
+            TargetedLoopCount = sessionState.TargetedLoopCount,
+            ClarificationIncomplete = sessionState.ClarificationIncomplete,
+            ClarificationRoundCount = sessionState.ClarificationRoundCount,
             ForkedFrom = null, // TODO: Add to SessionState when fork support is added
             ForkSnapshotId = null, // TODO: Add to SessionState when fork support is added
             CreatedAt = sessionState.CreatedAt.UtcDateTime,
@@ -66,25 +71,7 @@ public sealed class SessionRepository : ISessionRepository
             truthMap = TruthMapModel.Empty(sessionId);
         }
         
-        var sessionState = SessionState.Create(
-            sessionId,
-            frictionLevel: entity.FrictionLevel,
-            researchToolsEnabled: DetermineResearchToolsEnabled(entity.Mode),
-            initialTruthMap: truthMap
-        );
-
-        // Update mutable properties
-        sessionState.Phase = Enum.Parse<SessionPhase>(entity.Phase);
-        sessionState.Status = Enum.Parse<SessionStatus>(entity.Status);
-        sessionState.CurrentRound = 0; // TODO: Store in entity if needed
-        sessionState.TokensUsed = 0; // TODO: Store in entity if needed
-        sessionState.TargetedLoopCount = 0; // TODO: Store in entity if needed
-        sessionState.ClarificationRoundCount = entity.ClarificationRoundCount;
-        sessionState.ClarificationIncomplete = false; // TODO: Store in entity if needed
-        sessionState.CreatedAt = DateTime.SpecifyKind(entity.CreatedAt, DateTimeKind.Utc);
-        sessionState.UpdatedAt = DateTime.SpecifyKind(entity.UpdatedAt, DateTimeKind.Utc);
-
-        return sessionState;
+        return ToSessionState(entity, truthMap);
     }
 
     public async Task UpdateAsync(
@@ -103,6 +90,10 @@ public sealed class SessionRepository : ISessionRepository
         // Update mutable fields
         entity.Phase = sessionState.Phase.ToString();
         entity.Status = sessionState.Status.ToString();
+        entity.CurrentRound = sessionState.CurrentRound;
+        entity.TokensUsed = sessionState.TokensUsed;
+        entity.TargetedLoopCount = sessionState.TargetedLoopCount;
+        entity.ClarificationIncomplete = sessionState.ClarificationIncomplete;
         entity.ClarificationRoundCount = sessionState.ClarificationRoundCount;
         entity.UpdatedAt = DateTime.UtcNow;
         sessionState.UpdatedAt = DateTime.SpecifyKind(entity.UpdatedAt, DateTimeKind.Utc);
@@ -127,20 +118,7 @@ public sealed class SessionRepository : ISessionRepository
         foreach (var entity in entities)
         {
             var truthMap = TruthMapModel.Empty(entity.Id);
-            
-            var sessionState = SessionState.Create(
-                entity.Id,
-                frictionLevel: entity.FrictionLevel,
-                researchToolsEnabled: DetermineResearchToolsEnabled(entity.Mode),
-                initialTruthMap: truthMap
-            );
-
-            sessionState.Phase = Enum.Parse<SessionPhase>(entity.Phase);
-            sessionState.Status = Enum.Parse<SessionStatus>(entity.Status);
-            sessionState.CreatedAt = DateTime.SpecifyKind(entity.CreatedAt, DateTimeKind.Utc);
-            sessionState.UpdatedAt = DateTime.SpecifyKind(entity.UpdatedAt, DateTimeKind.Utc);
-
-            sessionStates.Add(sessionState);
+            sessionStates.Add(ToSessionState(entity, truthMap));
         }
 
         return sessionStates;
@@ -159,5 +137,29 @@ public sealed class SessionRepository : ISessionRepository
     {
         // Research tools typically enabled in Deep mode
         return mode == SessionMode.Deep.ToString();
+    }
+
+    private static SessionState ToSessionState(SessionEntity entity, TruthMapModel truthMap)
+    {
+        var sessionState = SessionState.Create(
+            entity.Id,
+            entity.UserId,
+            idea: string.Empty,
+            frictionLevel: entity.FrictionLevel,
+            researchToolsEnabled: DetermineResearchToolsEnabled(entity.Mode),
+            initialTruthMap: truthMap
+        );
+
+        sessionState.Phase = Enum.Parse<SessionPhase>(entity.Phase);
+        sessionState.Status = Enum.Parse<SessionStatus>(entity.Status);
+        sessionState.CurrentRound = entity.CurrentRound;
+        sessionState.TokensUsed = entity.TokensUsed;
+        sessionState.TargetedLoopCount = entity.TargetedLoopCount;
+        sessionState.ClarificationRoundCount = entity.ClarificationRoundCount;
+        sessionState.ClarificationIncomplete = entity.ClarificationIncomplete;
+        sessionState.CreatedAt = DateTime.SpecifyKind(entity.CreatedAt, DateTimeKind.Utc);
+        sessionState.UpdatedAt = DateTime.SpecifyKind(entity.UpdatedAt, DateTimeKind.Utc);
+
+        return sessionState;
     }
 }

@@ -17,11 +17,16 @@ export type ParsedShellInput =
     }
   | {
       type: 'slash';
-      command: 'help' | 'params' | 'new';
+      command: 'help' | 'params' | 'new' | 'show-sessions';
     }
   | {
       type: 'slash';
-      command: 'session' | 'status';
+      command: 'attach';
+      path: string;
+    }
+  | {
+      type: 'slash';
+      command: 'session' | 'status' | 'resume';
       sessionId?: string;
     }
   | {
@@ -36,6 +41,11 @@ export type ParsedShellInput =
       artifactType: ArtifactType;
       refresh: boolean;
       raw: boolean;
+    }
+  | {
+      type: 'slash';
+      command: 'refresh';
+      artifactType?: ArtifactType;
     }
   | {
       type: 'slash';

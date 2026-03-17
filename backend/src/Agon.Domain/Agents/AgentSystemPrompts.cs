@@ -67,6 +67,10 @@ PATCH RULES:
 
 OUTPUT FORMAT:
 ## MESSAGE
+[First line MUST be exactly one of:
+- STATUS: NEEDS_INFO
+- STATUS: READY]
+
 [Human-readable Markdown analysis — shown to the user]
 
 ## PATCH

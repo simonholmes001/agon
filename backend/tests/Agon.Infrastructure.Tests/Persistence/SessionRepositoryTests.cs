@@ -146,7 +146,32 @@ public class SessionRepositoryTests : IDisposable
         var entity = await _dbContext.Sessions.FirstOrDefaultAsync(s => s.Id == sessionId);
         entity.Should().NotBeNull();
         entity!.Phase.Should().Be(SessionPhase.AnalysisRound.ToString());
+        entity.CurrentRound.Should().Be(1);
+        entity.TokensUsed.Should().Be(1500);
         entity.UpdatedAt.Should().BeCloseTo(DateTime.UtcNow, TimeSpan.FromSeconds(2));
+    }
+
+    [Fact]
+    public async Task CreateAsync_WithUserContext_PersistsUserId()
+    {
+        var sessionId = Guid.NewGuid();
+        var userId = Guid.NewGuid();
+        var truthMap = TruthMapModel.Empty(sessionId);
+
+        var sessionState = SessionState.Create(
+            sessionId,
+            userId,
+            "My idea",
+            frictionLevel: 60,
+            researchToolsEnabled: false,
+            initialTruthMap: truthMap
+        );
+
+        await _repository.CreateAsync(sessionState);
+
+        var entity = await _dbContext.Sessions.FirstOrDefaultAsync(s => s.Id == sessionId);
+        entity.Should().NotBeNull();
+        entity!.UserId.Should().Be(userId);
     }
 
     [Fact]

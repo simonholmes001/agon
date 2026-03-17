@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Agon.Domain.Sessions;
@@ -137,6 +138,34 @@ public class SessionsControllerIntegrationTests : IClassFixture<AgonWebApplicati
     }
 
     [Fact]
+    public async Task GET_Sessions_Should_List_User_Sessions()
+    {
+        var request1 = new
+        {
+            idea = "Session one",
+            frictionLevel = 40
+        };
+        var request2 = new
+        {
+            idea = "Session two",
+            frictionLevel = 60
+        };
+
+        var response1 = await _client.PostAsJsonAsync("/sessions", request1);
+        var response2 = await _client.PostAsJsonAsync("/sessions", request2);
+        response1.StatusCode.Should().Be(HttpStatusCode.Created);
+        response2.StatusCode.Should().Be(HttpStatusCode.Created);
+
+        var listResponse = await _client.GetAsync("/sessions");
+
+        listResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        var content = await listResponse.Content.ReadAsStringAsync();
+        using var doc = JsonDocument.Parse(content);
+        doc.RootElement.ValueKind.Should().Be(JsonValueKind.Array);
+        doc.RootElement.GetArrayLength().Should().BeGreaterThanOrEqualTo(2);
+    }
+
+    [Fact]
     public async Task GET_Sessions_TruthMap_Should_Return_Empty_TruthMap_For_New_Session()
     {
         // Arrange - Create a session first
@@ -219,6 +248,30 @@ public class SessionsControllerIntegrationTests : IClassFixture<AgonWebApplicati
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+    }
+
+    [Fact]
+    public async Task POST_Sessions_Attachments_Should_Return_503_When_Storage_Not_Configured()
+    {
+        var createRequest = new
+        {
+            idea = "Test idea for attachments endpoint",
+            frictionLevel = 50
+        };
+
+        var createResponse = await _client.PostAsJsonAsync("/sessions", createRequest);
+        var createContent = await createResponse.Content.ReadAsStringAsync();
+        using var createDoc = JsonDocument.Parse(createContent);
+        var sessionId = createDoc.RootElement.GetProperty("id").GetGuid();
+
+        using var multipart = new MultipartFormDataContent();
+        var fileContent = new ByteArrayContent(System.Text.Encoding.UTF8.GetBytes("sample doc content"));
+        fileContent.Headers.ContentType = MediaTypeHeaderValue.Parse("text/plain");
+        multipart.Add(fileContent, "file", "sample.txt");
+
+        var response = await _client.PostAsync($"/sessions/{sessionId}/attachments", multipart);
+
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
     }
 
     [Fact]

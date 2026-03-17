@@ -27,6 +27,23 @@ param appGatewayWafMode string = 'Detection'
 @maxValue(86400)
 param appGatewayRequestTimeoutSeconds int = 120
 
+@description('Enable JWT bearer authentication in backend API runtime settings.')
+param authEnabled bool = false
+
+@description('JWT authority URL for token validation.')
+param jwtAuthority string = ''
+
+@description('JWT audience expected by the API.')
+param jwtAudience string = ''
+
+@description('PFX certificate for Application Gateway HTTPS listener (base64-encoded).')
+@secure()
+param appGatewaySslCertificatePfxBase64 string = ''
+
+@description('Password for Application Gateway HTTPS listener certificate.')
+@secure()
+param appGatewaySslCertificatePassword string = ''
+
 @description('App Service VNet integration subnet resource ID.')
 param appSubnetId string
 
@@ -39,11 +56,11 @@ param privateEndpointSubnetId string
 @description('Private DNS zone resource ID for App Service private endpoint resolution.')
 param appServicePrivateDnsZoneId string
 
-@description('Key Vault secret URI for PostgreSQL connection string.')
-param postgresConnectionSecretUri string
+@description('PostgreSQL server name (without DNS suffix).')
+param postgresServerName string
 
-@description('Key Vault secret URI for Redis connection string.')
-param redisConnectionSecretUri string
+@description('Redis host name.')
+param redisHostName string
 
 @description('Key Vault secret URI for OpenAI API key.')
 param openAiSecretUri string
@@ -56,6 +73,12 @@ param googleSecretUri string
 
 @description('Key Vault secret URI for DeepSeek API key.')
 param deepSeekSecretUri string
+
+@description('Document Intelligence endpoint for attachment extraction.')
+param documentIntelligenceEndpoint string = ''
+
+@description('Document Intelligence model ID used by backend attachment extraction.')
+param documentIntelligenceModelId string = 'prebuilt-layout'
 
 var tags = {
   environment: environment
@@ -74,12 +97,162 @@ var actionGroupName = 'ag-${namePrefix}-ops'
 var appGatewayName = 'agw-${namePrefix}'
 var appGatewayPublicIpName = 'pip-${namePrefix}-agw'
 var frontendIpConfigName = 'feip-public'
-var frontendPortName = 'feport-80'
+var frontendHttpPortName = 'feport-80'
+var frontendHttpsPortName = 'feport-443'
 var backendPoolName = 'be-appservice'
 var backendHttpSettingsName = 'be-https'
 var probeName = 'probe-health'
 var httpListenerName = 'listener-http'
+var httpsListenerName = 'listener-https'
 var requestRoutingRuleName = 'rule-default'
+var httpsRequestRoutingRuleName = 'rule-https-default'
+var httpRedirectRuleName = 'rule-http-redirect'
+var httpToHttpsRedirectName = 'redirect-http-to-https'
+var appGatewaySslCertificateName = 'agw-cert'
+var enableHttpsListener = !empty(appGatewaySslCertificatePfxBase64) && !empty(appGatewaySslCertificatePassword)
+var frontendPorts = enableHttpsListener
+  ? [
+      {
+        name: frontendHttpPortName
+        properties: {
+          port: 80
+        }
+      }
+      {
+        name: frontendHttpsPortName
+        properties: {
+          port: 443
+        }
+      }
+    ]
+  : [
+      {
+        name: frontendHttpPortName
+        properties: {
+          port: 80
+        }
+      }
+    ]
+var sslCertificates = enableHttpsListener
+  ? [
+      {
+        name: appGatewaySslCertificateName
+        properties: {
+          data: appGatewaySslCertificatePfxBase64
+          password: appGatewaySslCertificatePassword
+        }
+      }
+    ]
+  : []
+var httpListeners = enableHttpsListener
+  ? [
+      {
+        name: httpListenerName
+        properties: {
+          frontendIPConfiguration: {
+            id: resourceId('Microsoft.Network/applicationGateways/frontendIPConfigurations', appGatewayName, frontendIpConfigName)
+          }
+          frontendPort: {
+            id: resourceId('Microsoft.Network/applicationGateways/frontendPorts', appGatewayName, frontendHttpPortName)
+          }
+          protocol: 'Http'
+        }
+      }
+      {
+        name: httpsListenerName
+        properties: {
+          frontendIPConfiguration: {
+            id: resourceId('Microsoft.Network/applicationGateways/frontendIPConfigurations', appGatewayName, frontendIpConfigName)
+          }
+          frontendPort: {
+            id: resourceId('Microsoft.Network/applicationGateways/frontendPorts', appGatewayName, frontendHttpsPortName)
+          }
+          protocol: 'Https'
+          sslCertificate: {
+            id: resourceId('Microsoft.Network/applicationGateways/sslCertificates', appGatewayName, appGatewaySslCertificateName)
+          }
+        }
+      }
+    ]
+  : [
+      {
+        name: httpListenerName
+        properties: {
+          frontendIPConfiguration: {
+            id: resourceId('Microsoft.Network/applicationGateways/frontendIPConfigurations', appGatewayName, frontendIpConfigName)
+          }
+          frontendPort: {
+            id: resourceId('Microsoft.Network/applicationGateways/frontendPorts', appGatewayName, frontendHttpPortName)
+          }
+          protocol: 'Http'
+        }
+      }
+    ]
+var redirectConfigurations = enableHttpsListener
+  ? [
+      {
+        name: httpToHttpsRedirectName
+        properties: {
+          redirectType: 'Permanent'
+          targetListener: {
+            id: resourceId('Microsoft.Network/applicationGateways/httpListeners', appGatewayName, httpsListenerName)
+          }
+          includePath: true
+          includeQueryString: true
+        }
+      }
+    ]
+  : []
+var requestRoutingRules = enableHttpsListener
+  ? [
+      {
+        name: httpRedirectRuleName
+        properties: {
+          ruleType: 'Basic'
+          priority: 90
+          httpListener: {
+            id: resourceId('Microsoft.Network/applicationGateways/httpListeners', appGatewayName, httpListenerName)
+          }
+          redirectConfiguration: {
+            id: resourceId('Microsoft.Network/applicationGateways/redirectConfigurations', appGatewayName, httpToHttpsRedirectName)
+          }
+        }
+      }
+      {
+        name: httpsRequestRoutingRuleName
+        properties: {
+          ruleType: 'Basic'
+          priority: 100
+          httpListener: {
+            id: resourceId('Microsoft.Network/applicationGateways/httpListeners', appGatewayName, httpsListenerName)
+          }
+          backendAddressPool: {
+            id: resourceId('Microsoft.Network/applicationGateways/backendAddressPools', appGatewayName, backendPoolName)
+          }
+          backendHttpSettings: {
+            id: resourceId('Microsoft.Network/applicationGateways/backendHttpSettingsCollection', appGatewayName, backendHttpSettingsName)
+          }
+        }
+      }
+    ]
+  : [
+      {
+        name: requestRoutingRuleName
+        properties: {
+          ruleType: 'Basic'
+          priority: 100
+          httpListener: {
+            id: resourceId('Microsoft.Network/applicationGateways/httpListeners', appGatewayName, httpListenerName)
+          }
+          backendAddressPool: {
+            id: resourceId('Microsoft.Network/applicationGateways/backendAddressPools', appGatewayName, backendPoolName)
+          }
+          backendHttpSettings: {
+            id: resourceId('Microsoft.Network/applicationGateways/backendHttpSettingsCollection', appGatewayName, backendHttpSettingsName)
+          }
+        }
+      }
+    ]
 
 resource logAnalytics 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
   name: logAnalyticsName
@@ -142,12 +315,36 @@ resource appService 'Microsoft.Web/sites@2023-12-01' = {
           value: appInsights.properties.ConnectionString
         }
         {
-          name: 'ConnectionStrings__PostgreSQL'
-          value: '@Microsoft.KeyVault(SecretUri=${postgresConnectionSecretUri})'
+          name: 'Database__PostgreSql__UseManagedIdentity'
+          value: 'true'
         }
         {
-          name: 'ConnectionStrings__Redis'
-          value: '@Microsoft.KeyVault(SecretUri=${redisConnectionSecretUri})'
+          name: 'Database__PostgreSql__Host'
+          value: '${postgresServerName}.postgres.database.azure.com'
+        }
+        {
+          name: 'Database__PostgreSql__Port'
+          value: '5432'
+        }
+        {
+          name: 'Database__PostgreSql__Database'
+          value: 'agon'
+        }
+        {
+          name: 'Database__PostgreSql__Username'
+          value: appServiceName
+        }
+        {
+          name: 'Redis__UseManagedIdentity'
+          value: 'true'
+        }
+        {
+          name: 'Redis__Host'
+          value: redisHostName
+        }
+        {
+          name: 'Redis__Port'
+          value: '6380'
         }
         {
           name: 'OPENAI_KEY'
@@ -164,6 +361,34 @@ resource appService 'Microsoft.Web/sites@2023-12-01' = {
         {
           name: 'DEEPSEEK_KEY'
           value: empty(deepSeekSecretUri) ? '' : '@Microsoft.KeyVault(SecretUri=${deepSeekSecretUri})'
+        }
+        {
+          name: 'AttachmentProcessing__DocumentIntelligence__Enabled'
+          value: empty(documentIntelligenceEndpoint) ? 'false' : 'true'
+        }
+        {
+          name: 'AttachmentProcessing__DocumentIntelligence__Endpoint'
+          value: documentIntelligenceEndpoint
+        }
+        {
+          name: 'AttachmentProcessing__DocumentIntelligence__ModelId'
+          value: documentIntelligenceModelId
+        }
+        {
+          name: 'AttachmentProcessing__DocumentIntelligence__UseManagedIdentity'
+          value: 'true'
+        }
+        {
+          name: 'Authentication__Enabled'
+          value: authEnabled ? 'true' : 'false'
+        }
+        {
+          name: 'Authentication__AzureAd__Authority'
+          value: jwtAuthority
+        }
+        {
+          name: 'Authentication__AzureAd__Audience'
+          value: jwtAudience
         }
       ]
     }
@@ -253,14 +478,7 @@ resource appGateway 'Microsoft.Network/applicationGateways@2023-09-01' = {
         }
       }
     ]
-    frontendPorts: [
-      {
-        name: frontendPortName
-        properties: {
-          port: 80
-        }
-      }
-    ]
+    frontendPorts: frontendPorts
     backendAddressPools: [
       {
         name: backendPoolName
@@ -306,38 +524,10 @@ resource appGateway 'Microsoft.Network/applicationGateways@2023-09-01' = {
         }
       }
     ]
-    httpListeners: [
-      {
-        name: httpListenerName
-        properties: {
-          frontendIPConfiguration: {
-            id: resourceId('Microsoft.Network/applicationGateways/frontendIPConfigurations', appGatewayName, frontendIpConfigName)
-          }
-          frontendPort: {
-            id: resourceId('Microsoft.Network/applicationGateways/frontendPorts', appGatewayName, frontendPortName)
-          }
-          protocol: 'Http'
-        }
-      }
-    ]
-    requestRoutingRules: [
-      {
-        name: requestRoutingRuleName
-        properties: {
-          ruleType: 'Basic'
-          priority: 100
-          httpListener: {
-            id: resourceId('Microsoft.Network/applicationGateways/httpListeners', appGatewayName, httpListenerName)
-          }
-          backendAddressPool: {
-            id: resourceId('Microsoft.Network/applicationGateways/backendAddressPools', appGatewayName, backendPoolName)
-          }
-          backendHttpSettings: {
-            id: resourceId('Microsoft.Network/applicationGateways/backendHttpSettingsCollection', appGatewayName, backendHttpSettingsName)
-          }
-        }
-      }
-    ]
+    sslCertificates: sslCertificates
+    httpListeners: httpListeners
+    redirectConfigurations: redirectConfigurations
+    requestRoutingRules: requestRoutingRules
     webApplicationFirewallConfiguration: {
       enabled: true
       firewallMode: appGatewayWafMode

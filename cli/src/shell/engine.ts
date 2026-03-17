@@ -15,6 +15,8 @@ interface ShellControllerLike {
   setParam(key: 'apiUrl' | 'defaultFriction' | 'researchEnabled' | 'logLevel', value: string): Promise<void>;
   clearShellSessionSelection(): Promise<void>;
   selectSession(sessionId: string): Promise<SessionResponse>;
+  resumeSession(sessionId?: string): Promise<SessionResponse>;
+  listSessions(): Promise<SessionResponse[]>;
   getStatus(sessionId?: string): Promise<SessionResponse>;
   getArtifact(
     type: 'verdict' | 'plan' | 'prd' | 'risks' | 'assumptions' | 'architecture' | 'copilot',
@@ -23,6 +25,15 @@ interface ShellControllerLike {
   submitFollowUp(content: string): Promise<{
     session: SessionResponse;
     responseMessage?: { agentId?: string; message: string };
+  }>;
+  attachDocument(path: string, explicitSessionId?: string): Promise<{
+    sessionId: string;
+    attachment: {
+      fileName: string;
+      contentType: string;
+      sizeBytes: number;
+      hasExtractedText: boolean;
+    };
   }>;
   startIdea(idea: string): Promise<{
     session: SessionResponse;
@@ -49,6 +60,14 @@ export type ShellEngineOutcome =
       response?: { agentId?: string; message: string };
     }
   | { kind: 'status'; status: string; phase: string; sessionId: string }
+  | {
+      kind: 'attachment';
+      sessionId: string;
+      fileName: string;
+      contentType: string;
+      sizeBytes: number;
+      hasExtractedText: boolean;
+    }
   | { kind: 'artifact'; content: string; raw: boolean; sessionId: string };
 
 export class ShellEngine {
@@ -120,9 +139,13 @@ export class ShellEngine {
         this.print('  /params                       Show current shell parameters and active session');
         this.print('  /set <key> <value>            Persist config key (apiUrl|defaultFriction|researchEnabled|logLevel)');
         this.print('  /new                          Reset shell to awaiting-idea mode');
+        this.print('  /show-sessions                List your sessions');
+        this.print('  /resume [session-id]          Resume latest session (or specific session)');
         this.print('  /session <session-id>         Switch active session');
         this.print('  /status [session-id]          Fetch session status/phase');
         this.print('  /show <artifact> [flags]      Show artifact (e.g. verdict, prd)');
+        this.print('  /refresh [artifact]           Refresh latest artifact (default: verdict)');
+        this.print('  /attach <file-path>           Attach a document/image to the active session');
         this.print('  /follow-up <message>          Send explicit follow-up message');
         this.print('  /exit                         Exit shell (also: /quit)');
         this.print('Examples:');
@@ -130,6 +153,7 @@ export class ShellEngine {
         this.print('  /set researchEnabled false');
         this.print('  /set logLevel warn');
         this.print('  /set apiUrl http://localhost:5000');
+        this.print('  /attach ./docs/product-brief.md');
         return { kind: 'noop' };
       case 'params': {
         const snapshot = await this.controller.getParamsSnapshot();
@@ -150,6 +174,28 @@ export class ShellEngine {
         await this.controller.clearShellSessionSelection();
         this.print('Ready for a new idea.');
         return { kind: 'noop' };
+      case 'show-sessions': {
+        const sessions = await this.controller.listSessions();
+        if (sessions.length === 0) {
+          this.print('No sessions found.');
+          return { kind: 'noop' };
+        }
+
+        this.print('Sessions:');
+        for (const [index, session] of sessions.entries()) {
+          this.print(
+            `  ${index + 1}. ${session.id}  status=${session.status}  phase=${session.phase}  updated=${session.updatedAt}`
+          );
+        }
+
+        this.print('Use /resume <session-id> to switch session.');
+        return { kind: 'noop' };
+      }
+      case 'resume': {
+        const session = await this.controller.resumeSession(parsed.sessionId);
+        this.print(`Using session ${session.id}.`);
+        return { kind: 'noop' };
+      }
       case 'session': {
         const session = await this.controller.selectSession(parsed.sessionId ?? '');
         this.print(`Using session ${session.id}.`);
@@ -175,6 +221,30 @@ export class ShellEngine {
           content: artifact.content,
           raw: artifact.raw,
           sessionId: artifact.sessionId
+        };
+      }
+      case 'refresh': {
+        const artifact = await this.controller.getArtifact(parsed.artifactType ?? 'verdict', {
+          refresh: true,
+          raw: false,
+          sessionId: undefined
+        });
+        return {
+          kind: 'artifact',
+          content: artifact.content,
+          raw: artifact.raw,
+          sessionId: artifact.sessionId
+        };
+      }
+      case 'attach': {
+        const result = await this.controller.attachDocument(parsed.path);
+        return {
+          kind: 'attachment',
+          sessionId: result.sessionId,
+          fileName: result.attachment.fileName,
+          contentType: result.attachment.contentType,
+          sizeBytes: result.attachment.sizeBytes,
+          hasExtractedText: result.attachment.hasExtractedText
         };
       }
       case 'follow-up': {

@@ -8,14 +8,22 @@ using Agon.Domain.Engines;
 using Agon.Domain.Sessions;
 using Agon.Infrastructure.Agents;
 using Agon.Infrastructure.Persistence.PostgreSQL;
+using Agon.Infrastructure.Persistence.AzureBlob;
 using Agon.Infrastructure.Persistence.Redis;
 using Agon.Infrastructure.Persistence.Repositories;
 using Agon.Infrastructure.SignalR;
+using Agon.Infrastructure.Attachments;
 using Anthropic;
+using Azure.Core;
+using Azure.Identity;
 using Google.GenAI;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.AI;
+using Microsoft.IdentityModel.Tokens;
 using Mscc.GenerativeAI.Microsoft;
+using Npgsql;
 using OpenAI;
 using StackExchange.Redis;
 
@@ -28,13 +36,11 @@ var builder = WebApplication.CreateBuilder(args);
 var contentRoot = builder.Environment.ContentRootPath;
 var projectRoot = Directory.GetParent(contentRoot)?.Parent?.Parent?.FullName ?? "";
 var envFilePath = Path.Combine(projectRoot, ".env");
-
-Console.WriteLine($"[Startup] Looking for .env file at: {envFilePath}");
-Console.WriteLine($"[Startup] .env file exists: {File.Exists(envFilePath)}");
+var envFileExists = File.Exists(envFilePath);
+var envKeysLoaded = 0;
 
 if (File.Exists(envFilePath))
 {
-    var loadedKeys = new List<string>();
     foreach (var line in File.ReadAllLines(envFilePath))
     {
         if (string.IsNullOrWhiteSpace(line) || line.StartsWith("#")) continue;
@@ -45,33 +51,104 @@ if (File.Exists(envFilePath))
             var key = parts[0];
             var value = parts[1].Trim('"'); // Remove surrounding quotes
             Environment.SetEnvironmentVariable(key, value);
-            loadedKeys.Add(key);
+            envKeysLoaded++;
         }
     }
-    Console.WriteLine($"[Startup] Loaded {loadedKeys.Count} keys from .env: {string.Join(", ", loadedKeys)}");
-}
-else
-{
-    Console.WriteLine($"[Startup] WARNING: .env file not found at {envFilePath}");
 }
 
 // ── Configuration ───────────────────────────────────────────────────────
 var llmConfig = builder.Configuration.GetSection(LlmConfiguration.SectionName).Get<LlmConfiguration>() ?? new();
 var agonConfig = builder.Configuration.GetSection(AgonConfiguration.SectionName).Get<AgonConfiguration>() ?? new();
+var attachmentProcessingConfig = builder.Configuration
+    .GetSection(AttachmentProcessingConfiguration.SectionName)
+    .Get<AttachmentProcessingConfiguration>() ?? new();
+var authEnabled = builder.Configuration.GetValue<bool>("Authentication:Enabled");
+var allowedCorsOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? [];
 
 // Replace ${ENV_VAR} placeholders with actual environment variables
 llmConfig.OpenAI.ApiKey = ReplaceEnvVars(llmConfig.OpenAI.ApiKey);
 llmConfig.Anthropic.ApiKey = ReplaceEnvVars(llmConfig.Anthropic.ApiKey);
 llmConfig.Google.ApiKey = ReplaceEnvVars(llmConfig.Google.ApiKey);
 llmConfig.DeepSeek.ApiKey = ReplaceEnvVars(llmConfig.DeepSeek.ApiKey);
-
-Console.WriteLine($"[Startup] OpenAI API key configured: {!string.IsNullOrEmpty(llmConfig.OpenAI.ApiKey)}");
-Console.WriteLine($"[Startup] Anthropic API key configured: {!string.IsNullOrEmpty(llmConfig.Anthropic.ApiKey)}");
-Console.WriteLine($"[Startup] Google API key configured: {!string.IsNullOrEmpty(llmConfig.Google.ApiKey)}");
-Console.WriteLine($"[Startup] DeepSeek API key configured: {!string.IsNullOrEmpty(llmConfig.DeepSeek.ApiKey)}");
+attachmentProcessingConfig.DocumentIntelligence.Endpoint = ReplaceEnvVars(attachmentProcessingConfig.DocumentIntelligence.Endpoint);
+attachmentProcessingConfig.DocumentIntelligence.ApiKey = ReplaceEnvVars(attachmentProcessingConfig.DocumentIntelligence.ApiKey);
 
 builder.Services.AddSingleton(llmConfig);
 builder.Services.AddSingleton(agonConfig);
+builder.Services.AddSingleton(new AttachmentExtractionOptions
+{
+    MaxExtractedTextChars = attachmentProcessingConfig.MaxExtractedTextChars,
+    DocumentIntelligence = new DocumentIntelligenceExtractionOptions
+    {
+        Enabled = attachmentProcessingConfig.DocumentIntelligence.Enabled,
+        Endpoint = attachmentProcessingConfig.DocumentIntelligence.Endpoint,
+        ModelId = attachmentProcessingConfig.DocumentIntelligence.ModelId,
+        ApiVersion = attachmentProcessingConfig.DocumentIntelligence.ApiVersion,
+        UseManagedIdentity = attachmentProcessingConfig.DocumentIntelligence.UseManagedIdentity,
+        ApiKey = attachmentProcessingConfig.DocumentIntelligence.ApiKey,
+        PollIntervalMs = attachmentProcessingConfig.DocumentIntelligence.PollIntervalMs,
+        MaxPollAttempts = attachmentProcessingConfig.DocumentIntelligence.MaxPollAttempts
+    },
+    OpenAiVision = new OpenAiVisionExtractionOptions
+    {
+        Enabled = attachmentProcessingConfig.OpenAiVision.Enabled,
+        ApiKey = llmConfig.OpenAI.ApiKey,
+        Model = attachmentProcessingConfig.OpenAiVision.Model,
+        MaxTokens = attachmentProcessingConfig.OpenAiVision.MaxTokens,
+        Detail = attachmentProcessingConfig.OpenAiVision.Detail,
+        MaxImageBytes = attachmentProcessingConfig.OpenAiVision.MaxImageBytes
+    }
+});
+builder.Services.AddHttpClient("attachment-extraction", client =>
+{
+    client.Timeout = TimeSpan.FromMinutes(3);
+});
+builder.Services.AddScoped<IAttachmentTextExtractor, AttachmentTextExtractor>();
+
+if (authEnabled)
+{
+    var tenantId = builder.Configuration["Authentication:AzureAd:TenantId"] ?? string.Empty;
+    var authority = builder.Configuration["Authentication:AzureAd:Authority"] ?? string.Empty;
+    var audience = builder.Configuration["Authentication:AzureAd:Audience"] ?? string.Empty;
+    var clientId = builder.Configuration["Authentication:AzureAd:ClientId"] ?? string.Empty;
+
+    if (string.IsNullOrWhiteSpace(authority) && !string.IsNullOrWhiteSpace(tenantId))
+    {
+        authority = $"https://login.microsoftonline.com/{tenantId}/v2.0";
+    }
+
+    if (string.IsNullOrWhiteSpace(audience))
+    {
+        audience = clientId;
+    }
+
+    if (string.IsNullOrWhiteSpace(authority) || string.IsNullOrWhiteSpace(audience))
+    {
+        throw new InvalidOperationException(
+            "Authentication is enabled but Azure AD JWT settings are incomplete. Configure Authentication:AzureAd:Authority and Authentication:AzureAd:Audience (or ClientId).");
+    }
+
+    builder.Services
+        .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+        .AddJwtBearer(options =>
+        {
+            options.Authority = authority;
+            options.RequireHttpsMetadata = !builder.Environment.IsDevelopment();
+            options.TokenValidationParameters = new TokenValidationParameters
+            {
+                ValidateIssuer = true,
+                ValidateAudience = true,
+                ValidAudiences = new[] { audience, clientId }.Where(value => !string.IsNullOrWhiteSpace(value))
+            };
+        });
+
+    builder.Services.AddAuthorization(options =>
+    {
+        options.FallbackPolicy = new AuthorizationPolicyBuilder()
+            .RequireAuthenticatedUser()
+            .Build();
+    });
+}
 
 // ── Controllers and OpenAPI ─────────────────────────────────────────────
 builder.Services.AddControllers()
@@ -81,32 +158,91 @@ builder.Services.AddControllers()
         options.JsonSerializerOptions.PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase;
     });
 builder.Services.AddOpenApi();
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("AgonCors", policy =>
+    {
+        if (allowedCorsOrigins.Length > 0)
+        {
+            policy.WithOrigins(allowedCorsOrigins)
+                .AllowAnyHeader()
+                .AllowAnyMethod();
+            return;
+        }
+
+        policy.AllowAnyHeader()
+            .AllowAnyMethod()
+            .AllowAnyOrigin();
+    });
+});
 
 // ── SignalR for Real-Time Events ────────────────────────────────────────
 builder.Services.AddSignalR();
 
 // ── Database: PostgreSQL ────────────────────────────────────────────────
 var postgresConnectionString = builder.Configuration.GetConnectionString("PostgreSQL");
-if (!string.IsNullOrEmpty(postgresConnectionString))
+var usePostgresManagedIdentity = builder.Configuration.GetValue<bool>("Database:PostgreSql:UseManagedIdentity");
+if (usePostgresManagedIdentity)
+{
+    var postgresManagedIdentityConnectionString = BuildPostgresManagedIdentityConnectionString(builder.Configuration);
+    if (string.IsNullOrWhiteSpace(postgresManagedIdentityConnectionString))
+    {
+        throw new InvalidOperationException(
+            "Database:PostgreSql:UseManagedIdentity is enabled but PostgreSQL host/database/username settings are incomplete.");
+    }
+
+    builder.Services.AddSingleton(_ => CreatePostgresManagedIdentityDataSource(postgresManagedIdentityConnectionString));
+    builder.Services.AddDbContext<AgonDbContext>((sp, options) =>
+        options.UseNpgsql(sp.GetRequiredService<NpgsqlDataSource>()));
+
+    RegisterPersistenceServices(builder.Services);
+}
+else if (!string.IsNullOrEmpty(postgresConnectionString))
 {
     builder.Services.AddDbContext<AgonDbContext>(options =>
         options.UseNpgsql(postgresConnectionString));
-    
-    // ── Infrastructure: Repositories ────────────────────────────────────────
-    builder.Services.AddScoped<ISessionRepository, SessionRepository>();
-    builder.Services.AddScoped<ITruthMapRepository, TruthMapRepository>();
-    builder.Services.AddScoped<IAgentMessageRepository, AgentMessageRepository>();
+
+    RegisterPersistenceServices(builder.Services);
+}
+
+// ── Blob Storage: Session Attachments ───────────────────────────────────
+var blobConnectionString = ReplaceEnvVars(builder.Configuration.GetConnectionString("BlobStorage") ?? string.Empty);
+var attachmentContainerName = builder.Configuration["Storage:AttachmentContainer"] ?? "session-attachments";
+
+if (IsConfiguredValue(blobConnectionString))
+{
+    builder.Services.AddSingleton<IAttachmentStorageService>(_ =>
+        new AzureBlobAttachmentStorageService(blobConnectionString, attachmentContainerName));
 }
 
 // ── Database: Redis ─────────────────────────────────────────────────────
 var redisConnectionString = builder.Configuration.GetConnectionString("Redis") ?? "localhost:6379";
+var useRedisManagedIdentity = builder.Configuration.GetValue<bool>("Redis:UseManagedIdentity");
 if (!builder.Environment.IsEnvironment("Testing"))
 {
-    builder.Services.AddSingleton<IConnectionMultiplexer>(sp =>
-        ConnectionMultiplexer.Connect(redisConnectionString));
+    if (useRedisManagedIdentity)
+    {
+        var redisHost = builder.Configuration["Redis:Host"];
+        var redisPort = builder.Configuration.GetValue<int?>("Redis:Port") ?? 6380;
+
+        if (string.IsNullOrWhiteSpace(redisHost))
+        {
+            throw new InvalidOperationException(
+                "Redis:UseManagedIdentity is enabled but Redis:Host is missing.");
+        }
+
+        builder.Services.AddSingleton<IConnectionMultiplexer>(_ =>
+            CreateRedisManagedIdentityConnection(redisHost, redisPort));
+    }
+    else
+    {
+        builder.Services.AddSingleton<IConnectionMultiplexer>(_ =>
+            ConnectionMultiplexer.Connect(redisConnectionString));
+    }
+
     builder.Services.AddScoped<IDatabase>(sp =>
         sp.GetRequiredService<IConnectionMultiplexer>().GetDatabase());
-    
+
     builder.Services.AddScoped<ISnapshotStore, RedisSnapshotStore>();
 }
 
@@ -120,6 +256,7 @@ builder.Services.AddScoped<ISessionService>(sp => new SessionService(
     sp.GetRequiredService<ISessionRepository>(),
     sp.GetRequiredService<ITruthMapRepository>(),
     sp.GetRequiredService<ISnapshotStore>(),
+    sp.GetService<IAttachmentRepository>(),
     sp.GetService<IEventBroadcaster>(),
     sp.GetService<Lazy<IOrchestrator>>()));
 builder.Services.AddScoped<ConversationHistoryService>();
@@ -322,13 +459,43 @@ if (app.Environment.IsDevelopment())
     app.MapOpenApi();
 }
 
+app.Logger.LogInformation(
+    "Startup summary: EnvFileExists={EnvFileExists}, EnvKeysLoaded={EnvKeysLoaded}, AuthEnabled={AuthEnabled}, CorsOriginCount={CorsOriginCount}, OpenAIConfigured={OpenAIConfigured}, AnthropicConfigured={AnthropicConfigured}, GoogleConfigured={GoogleConfigured}, DeepSeekConfigured={DeepSeekConfigured}, DocumentIntelligenceEndpointConfigured={DocumentIntelligenceEndpointConfigured}",
+    envFileExists,
+    envKeysLoaded,
+    authEnabled,
+    allowedCorsOrigins.Length,
+    !string.IsNullOrEmpty(llmConfig.OpenAI.ApiKey),
+    !string.IsNullOrEmpty(llmConfig.Anthropic.ApiKey),
+    !string.IsNullOrEmpty(llmConfig.Google.ApiKey),
+    !string.IsNullOrEmpty(llmConfig.DeepSeek.ApiKey),
+    !string.IsNullOrWhiteSpace(attachmentProcessingConfig.DocumentIntelligence.Endpoint));
+
+if (allowedCorsOrigins.Length == 0)
+{
+    app.Logger.LogWarning("No CORS origins configured. AllowAnyOrigin policy is active.");
+}
+
 app.UseHttpsRedirection();
-app.UseAuthorization();
+app.UseCors("AgonCors");
+if (authEnabled)
+{
+    app.UseAuthentication();
+    app.UseAuthorization();
+}
 
 // ── Map Endpoints ───────────────────────────────────────────────────────
-app.MapGet("/health", () => Results.Ok(new { status = "Healthy" }));
-app.MapControllers();
-app.MapHub<DebateHub>("/hubs/debate");
+app.MapGet("/health", () => Results.Ok(new { status = "Healthy" })).AllowAnonymous();
+var controllers = app.MapControllers();
+if (authEnabled)
+{
+    controllers.RequireAuthorization();
+}
+var debateHub = app.MapHub<DebateHub>("/hubs/debate");
+if (authEnabled)
+{
+    debateHub.RequireAuthorization();
+}
 
 app.Run();
 
@@ -345,6 +512,92 @@ static string ReplaceEnvVars(string value)
         var envVarName = match.Groups[1].Value;
         return Environment.GetEnvironmentVariable(envVarName) ?? match.Value;
     });
+}
+
+static bool IsConfiguredValue(string? value)
+{
+    if (string.IsNullOrWhiteSpace(value))
+    {
+        return false;
+    }
+
+    var trimmed = value.Trim();
+    return !(trimmed.StartsWith("${", StringComparison.Ordinal) && trimmed.EndsWith("}", StringComparison.Ordinal));
+}
+
+static void RegisterPersistenceServices(IServiceCollection services)
+{
+    services.AddScoped<ISessionRepository, SessionRepository>();
+    services.AddScoped<ITruthMapRepository, TruthMapRepository>();
+    services.AddScoped<IAgentMessageRepository, AgentMessageRepository>();
+    services.AddScoped<IAttachmentRepository, AttachmentRepository>();
+}
+
+static string BuildPostgresManagedIdentityConnectionString(IConfiguration configuration)
+{
+    var host = configuration["Database:PostgreSql:Host"];
+    var database = configuration["Database:PostgreSql:Database"] ?? "agon";
+    var username = configuration["Database:PostgreSql:Username"];
+    var port = configuration.GetValue<int?>("Database:PostgreSql:Port") ?? 5432;
+
+    if (string.IsNullOrWhiteSpace(host) || string.IsNullOrWhiteSpace(database) || string.IsNullOrWhiteSpace(username))
+    {
+        return string.Empty;
+    }
+
+    var builder = new NpgsqlConnectionStringBuilder
+    {
+        Host = host,
+        Port = port,
+        Database = database,
+        Username = username,
+        SslMode = SslMode.Require,
+        IncludeErrorDetail = true
+    };
+
+    return builder.ConnectionString;
+}
+
+static NpgsqlDataSource CreatePostgresManagedIdentityDataSource(string connectionString)
+{
+    var credential = new DefaultAzureCredential(new DefaultAzureCredentialOptions
+    {
+        ExcludeInteractiveBrowserCredential = true
+    });
+    var tokenRequestContext = new TokenRequestContext(new[]
+    {
+        "https://ossrdbms-aad.database.windows.net/.default"
+    });
+
+    var dataSourceBuilder = new NpgsqlDataSourceBuilder(connectionString);
+    dataSourceBuilder.UsePeriodicPasswordProvider(
+        async (_, cancellationToken) =>
+        {
+            var token = await credential.GetTokenAsync(tokenRequestContext, cancellationToken);
+            return token.Token;
+        },
+        TimeSpan.FromMinutes(50),
+        TimeSpan.FromSeconds(30));
+
+    return dataSourceBuilder.Build();
+}
+
+static IConnectionMultiplexer CreateRedisManagedIdentityConnection(string host, int port)
+{
+    var options = new ConfigurationOptions
+    {
+        Ssl = true,
+        AbortOnConnectFail = false
+    };
+    options.EndPoints.Add(host, port);
+
+    var credential = new DefaultAzureCredential(new DefaultAzureCredentialOptions
+    {
+        ExcludeInteractiveBrowserCredential = true
+    });
+
+    options.ConfigureForAzureWithTokenCredentialAsync(credential).GetAwaiter().GetResult();
+    return ConnectionMultiplexer.Connect(options);
 }
 
 // Make Program class accessible to integration tests

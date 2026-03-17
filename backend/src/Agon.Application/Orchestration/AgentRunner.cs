@@ -63,7 +63,8 @@ public sealed class AgentRunner : IAgentRunner
             state.FrictionLevel,
             state.ClarificationRoundCount,
             state.UserMessages,
-            false); // Research tools not used during clarification
+            false, // Research tools not used during clarification
+            state.Attachments);
 
         var response = await RunWithTimeoutAsync(moderator, context, cancellationToken);
 
@@ -80,15 +81,10 @@ public sealed class AgentRunner : IAgentRunner
             state.SessionId,
             state.ClarificationRoundCount,
             response.TokensUsed);
-
-        // Log and persist the Moderator's message
+        
+        // Persist moderator message for CLI retrieval.
         if (!string.IsNullOrWhiteSpace(response.Message))
         {
-            _logger?.LogInformation(
-                "Moderator message: {Message}",
-                response.Message.Length > 500 ? response.Message.Substring(0, 500) + "..." : response.Message);
-            
-            // Store message in conversation history for CLI retrieval
             await _conversationHistory.StoreMessageAsync(
                 state.SessionId,
                 "moderator",
@@ -124,7 +120,8 @@ public sealed class AgentRunner : IAgentRunner
             state.CurrentRound,
             state.UserMessages,
             priorContext,
-            state.ResearchToolsEnabled);
+            state.ResearchToolsEnabled,
+            state.Attachments);
 
         var response = await RunWithTimeoutAsync(assistant, context, cancellationToken);
         AccumulateTokens(state, [response]);
@@ -168,7 +165,8 @@ public sealed class AgentRunner : IAgentRunner
                 state.TruthMap,
                 state.FrictionLevel,
                 state.CurrentRound,
-                state.ResearchToolsEnabled))
+                state.ResearchToolsEnabled,
+                state.Attachments))
             .ToList();
 
         var responses = await DispatchParallelAsync(councilAgents, contexts, cancellationToken);
@@ -214,7 +212,8 @@ public sealed class AgentRunner : IAgentRunner
                 state.FrictionLevel,
                 state.CurrentRound,
                 targets,
-                state.ResearchToolsEnabled);
+                state.ResearchToolsEnabled,
+                state.Attachments);
         }).ToList();
 
         var responses = await DispatchParallelAsync(councilAgents, contexts, cancellationToken);
@@ -249,12 +248,13 @@ public sealed class AgentRunner : IAgentRunner
         if (synthesizer is null)
             throw new InvalidOperationException("Synthesizer agent is not registered.");
 
-        var context = AgentContext.ForAnalysis(
+        var context = AgentContext.ForSynthesis(
             state.SessionId,
             state.TruthMap,
             state.FrictionLevel,
             state.CurrentRound,
-            state.ResearchToolsEnabled);
+            state.ResearchToolsEnabled,
+            state.Attachments);
 
         var response = await RunWithTimeoutAsync(synthesizer, context, cancellationToken);
 
@@ -297,7 +297,8 @@ public sealed class AgentRunner : IAgentRunner
                 state.FrictionLevel,
                 state.CurrentRound,
                 microDirective,
-                state.ResearchToolsEnabled))
+                state.ResearchToolsEnabled,
+                state.Attachments))
             .ToList();
 
         var responses = await DispatchParallelAsync(targeted, contexts, cancellationToken);

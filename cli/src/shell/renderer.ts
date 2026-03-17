@@ -225,6 +225,8 @@ export function renderStatusLine(print: (line: string) => void): void {
     chalk.dim('Use ')
       + chalk.cyan('/new')
       + chalk.dim(' for a new idea, ')
+      + chalk.cyan('/attach')
+      + chalk.dim(' to add a document, ')
       + chalk.cyan('/params')
       + chalk.dim(' to view params, ')
       + chalk.cyan('/set')

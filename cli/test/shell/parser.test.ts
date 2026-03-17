@@ -59,6 +59,13 @@ describe('shell parser', () => {
     });
   });
 
+  it('parses /show-sessions', () => {
+    expect(parseShellInput('/show-sessions')).toEqual({
+      type: 'slash',
+      command: 'show-sessions'
+    });
+  });
+
   it('parses /session <id>', () => {
     expect(parseShellInput('/session abc-123')).toEqual({
       type: 'slash',
@@ -71,6 +78,27 @@ describe('shell parser', () => {
     expect(parseShellInput('/session')).toEqual({
       type: 'error',
       message: 'Usage: /session <session-id>'
+    });
+  });
+
+  it('parses /resume with optional session id', () => {
+    expect(parseShellInput('/resume')).toEqual({
+      type: 'slash',
+      command: 'resume',
+      sessionId: undefined
+    });
+
+    expect(parseShellInput('/resume abc-123')).toEqual({
+      type: 'slash',
+      command: 'resume',
+      sessionId: 'abc-123'
+    });
+  });
+
+  it('returns deterministic error for malformed /resume', () => {
+    expect(parseShellInput('/resume a b')).toEqual({
+      type: 'error',
+      message: 'Usage: /resume [session-id]'
     });
   });
 
@@ -104,11 +132,53 @@ describe('shell parser', () => {
     });
   });
 
+  it('parses /refresh with optional artifact', () => {
+    expect(parseShellInput('/refresh')).toEqual({
+      type: 'slash',
+      command: 'refresh',
+      artifactType: undefined
+    });
+
+    expect(parseShellInput('/refresh prd')).toEqual({
+      type: 'slash',
+      command: 'refresh',
+      artifactType: 'prd'
+    });
+  });
+
+  it('returns deterministic error for malformed /refresh', () => {
+    expect(parseShellInput('/refresh unknown')).toEqual({
+      type: 'error',
+      message: 'Usage: /refresh [verdict|plan|prd|risks|assumptions|architecture|copilot]'
+    });
+  });
+
   it('parses /follow-up message', () => {
     expect(parseShellInput('/follow-up Please revise the PRD')).toEqual({
       type: 'slash',
       command: 'follow-up',
       message: 'Please revise the PRD'
+    });
+  });
+
+  it('parses /attach with quoted and unquoted paths', () => {
+    expect(parseShellInput('/attach ./docs/spec.md')).toEqual({
+      type: 'slash',
+      command: 'attach',
+      path: './docs/spec.md'
+    });
+
+    expect(parseShellInput('/attach "./docs/product brief.pdf"')).toEqual({
+      type: 'slash',
+      command: 'attach',
+      path: './docs/product brief.pdf'
+    });
+  });
+
+  it('returns deterministic error for malformed /attach', () => {
+    expect(parseShellInput('/attach')).toEqual({
+      type: 'error',
+      message: 'Usage: /attach <file-path>'
     });
   });
 

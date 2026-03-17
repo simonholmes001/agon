@@ -16,6 +16,7 @@ public sealed class SessionService : ISessionService
     private readonly ISessionRepository _sessionRepo;
     private readonly ITruthMapRepository _truthMapRepo;
     private readonly ISnapshotStore _snapshotStore;
+    private readonly IAttachmentRepository? _attachmentRepo;
     private readonly IEventBroadcaster? _broadcaster;
     private readonly Lazy<IOrchestrator>? _lazyOrchestrator;
 
@@ -23,12 +24,14 @@ public sealed class SessionService : ISessionService
         ISessionRepository sessionRepo,
         ITruthMapRepository truthMapRepo,
         ISnapshotStore snapshotStore,
+        IAttachmentRepository? attachmentRepo = null,
         IEventBroadcaster? broadcaster = null,
         Lazy<IOrchestrator>? orchestrator = null)
     {
         _sessionRepo = sessionRepo;
         _truthMapRepo = truthMapRepo;
         _snapshotStore = snapshotStore;
+        _attachmentRepo = attachmentRepo;
         _broadcaster = broadcaster;
         _lazyOrchestrator = orchestrator;
     }
@@ -78,7 +81,45 @@ public sealed class SessionService : ISessionService
 
     public async Task<SessionState?> GetAsync(Guid sessionId, CancellationToken cancellationToken = default)
     {
-        return await _sessionRepo.GetAsync(sessionId, cancellationToken);
+        var state = await _sessionRepo.GetAsync(sessionId, cancellationToken);
+        if (state is null)
+        {
+            return null;
+        }
+
+        await HydrateAttachmentsAsync(state, cancellationToken);
+        return state;
+    }
+
+    public async Task<IReadOnlyList<SessionState>> ListByUserAsync(
+        Guid userId,
+        CancellationToken cancellationToken = default)
+    {
+        return await _sessionRepo.ListByUserAsync(userId, cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<SessionAttachment>> ListAttachmentsAsync(
+        Guid sessionId,
+        CancellationToken cancellationToken = default)
+    {
+        if (_attachmentRepo is null)
+        {
+            return Array.Empty<SessionAttachment>();
+        }
+
+        return await _attachmentRepo.ListBySessionAsync(sessionId, cancellationToken);
+    }
+
+    public async Task<SessionAttachment> SaveAttachmentAsync(
+        SessionAttachment attachment,
+        CancellationToken cancellationToken = default)
+    {
+        if (_attachmentRepo is null)
+        {
+            throw new InvalidOperationException("Attachment repository is not configured.");
+        }
+
+        return await _attachmentRepo.CreateAsync(attachment, cancellationToken);
     }
 
     public async Task StartClarificationAsync(
@@ -91,6 +132,8 @@ public sealed class SessionService : ISessionService
         {
             throw new InvalidOperationException($"Session {sessionId} not found");
         }
+
+        await HydrateAttachmentsAsync(state, cancellationToken);
 
         if (state.Phase != SessionPhase.Intake)
         {
@@ -130,6 +173,8 @@ public sealed class SessionService : ISessionService
         {
             throw new InvalidOperationException($"Session {sessionId} not found");
         }
+
+        await HydrateAttachmentsAsync(state, cancellationToken);
 
         var isClarificationFlow = state.Phase == SessionPhase.Clarification;
         var isPostDeliveryFlow = state.Phase is SessionPhase.Deliver
@@ -199,5 +244,17 @@ public sealed class SessionService : ISessionService
         CancellationToken cancellationToken = default)
     {
         return await _snapshotStore.ListBySessionAsync(sessionId, cancellationToken);
+    }
+
+    private async Task HydrateAttachmentsAsync(SessionState state, CancellationToken cancellationToken)
+    {
+        if (_attachmentRepo is null)
+        {
+            return;
+        }
+
+        var attachments = await _attachmentRepo.ListBySessionAsync(state.SessionId, cancellationToken);
+        state.Attachments.Clear();
+        state.Attachments.AddRange(attachments);
     }
 }

@@ -71,6 +71,26 @@ param appGatewayWafMode string = 'Detection'
 @maxValue(86400)
 param appGatewayRequestTimeoutSeconds int = 120
 
+@description('Document Intelligence model used for attachment extraction.')
+param documentIntelligenceModelId string = 'prebuilt-layout'
+
+@description('Enable JWT bearer authentication in the backend API.')
+param authEnabled bool = false
+
+@description('JWT authority URL for Microsoft Entra validation.')
+param jwtAuthority string = ''
+
+@description('JWT audience expected by the backend API.')
+param jwtAudience string = ''
+
+@description('PFX certificate for Application Gateway HTTPS listener (base64-encoded).')
+@secure()
+param appGatewaySslCertificatePfxBase64 string = ''
+
+@description('Password for Application Gateway HTTPS listener certificate.')
+@secure()
+param appGatewaySslCertificatePassword string = ''
+
 var commonTags = {
   environment: environment
   workload: workloadName
@@ -132,6 +152,7 @@ module data './modules/data-dev.bicep' = {
     postgresPrivateDnsZoneId: network.outputs.postgresPrivateDnsZoneId
     keyVaultPrivateDnsZoneId: network.outputs.keyVaultPrivateDnsZoneId
     redisPrivateDnsZoneId: network.outputs.redisPrivateDnsZoneId
+    cognitiveServicesPrivateDnsZoneId: network.outputs.cognitiveServicesPrivateDnsZoneId
     openAiApiKey: openAiApiKey
     anthropicApiKey: anthropicApiKey
     googleApiKey: googleApiKey
@@ -150,16 +171,23 @@ module appEdge './modules/app-edge-dev.bicep' = {
     alertEmail: alertEmail
     appGatewayWafMode: appGatewayWafMode
     appGatewayRequestTimeoutSeconds: appGatewayRequestTimeoutSeconds
+    authEnabled: authEnabled
+    jwtAuthority: jwtAuthority
+    jwtAudience: jwtAudience
+    appGatewaySslCertificatePfxBase64: appGatewaySslCertificatePfxBase64
+    appGatewaySslCertificatePassword: appGatewaySslCertificatePassword
     appSubnetId: network.outputs.appSubnetId
     appGatewaySubnetId: network.outputs.appGatewaySubnetId
     privateEndpointSubnetId: network.outputs.privateEndpointSubnetId
     appServicePrivateDnsZoneId: network.outputs.appServicePrivateDnsZoneId
-    postgresConnectionSecretUri: data.outputs.postgresConnectionSecretUri
-    redisConnectionSecretUri: data.outputs.redisConnectionSecretUri
+    postgresServerName: data.outputs.postgresqlServerName
+    redisHostName: data.outputs.redisHostName
     openAiSecretUri: data.outputs.openAiSecretUri
     anthropicSecretUri: data.outputs.anthropicSecretUri
     googleSecretUri: data.outputs.googleSecretUri
     deepSeekSecretUri: data.outputs.deepSeekSecretUri
+    documentIntelligenceEndpoint: data.outputs.documentIntelligenceEndpoint
+    documentIntelligenceModelId: documentIntelligenceModelId
   }
 }
 
@@ -173,6 +201,36 @@ module keyVaultAccess './modules/keyvault-access-dev.bicep' = {
   }
 }
 
+module documentIntelligenceAccess './modules/document-intelligence-access-dev.bicep' = {
+  name: 'document-intelligence-access-dev'
+  scope: rgData
+  params: {
+    documentIntelligenceAccountName: data.outputs.documentIntelligenceAccountName
+    principalId: appEdge.outputs.appPrincipalId
+    principalDisplayNameSeed: appServiceName
+  }
+}
+
+module redisAccess './modules/redis-access-dev.bicep' = {
+  name: 'redis-access-dev'
+  scope: rgData
+  params: {
+    redisCacheName: data.outputs.redisCacheName
+    principalId: appEdge.outputs.appPrincipalId
+  }
+}
+
+module postgresAccess './modules/postgres-access-dev.bicep' = {
+  name: 'postgres-access-dev'
+  scope: rgData
+  params: {
+    postgresqlServerName: data.outputs.postgresqlServerName
+    principalObjectId: appEdge.outputs.appPrincipalId
+    principalName: appServiceName
+    tenantId: tenantId
+  }
+}
+
 output networkResourceGroup string = rgNet.name
 output appResourceGroup string = rgApp.name
 output dataResourceGroup string = rgData.name
@@ -182,3 +240,4 @@ output appGatewayPublicIpAddress string = appEdge.outputs.appGatewayPublicIpAddr
 output keyVaultName string = data.outputs.keyVaultName
 output postgresqlServerName string = data.outputs.postgresqlServerName
 output redisCacheName string = data.outputs.redisCacheName
+output documentIntelligenceAccountName string = data.outputs.documentIntelligenceAccountName

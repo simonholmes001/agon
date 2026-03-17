@@ -1,7 +1,10 @@
 using Agon.Application.Interfaces;
+using Agon.Domain.Engines;
 using Agon.Domain.TruthMap;
 using Microsoft.EntityFrameworkCore;
 using System.Text.Json;
+using System.Text.Json.Nodes;
+using System.Text.Json.Serialization;
 using TruthMapModel = Agon.Domain.TruthMap.TruthMap;
 
 namespace Agon.Infrastructure.Persistence.PostgreSQL;
@@ -24,6 +27,7 @@ public class TruthMapRepository : ITruthMapRepository
             PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
             WriteIndented = false
         };
+        _jsonOptions.Converters.Add(new JsonStringEnumConverter());
     }
 
     public async Task<TruthMapModel?> GetAsync(Guid sessionId, CancellationToken cancellationToken = default)
@@ -142,10 +146,7 @@ public class TruthMapRepository : ITruthMapRepository
             return new HashSet<string>();
         }
 
-        // Traverse derived_from graph to find all downstream entities
-        // This is a placeholder - full implementation would recursively traverse the graph
-        // For now, return empty set
-        return new HashSet<string>();
+        return ChangeImpactCalculator.GetImpactSet(entityId, truthMap);
     }
 
     public async Task<IReadOnlyList<TruthMapPatch>> GetPatchHistoryAsync(
@@ -179,13 +180,175 @@ public class TruthMapRepository : ITruthMapRepository
     }
 
     /// <summary>
-    /// Apply patch operations to Truth Map (simplified implementation - production would use PatchValidator).
+    /// Apply patch operations to Truth Map using JSON Pointer patch semantics.
     /// </summary>
-    private static TruthMapModel ApplyPatchOperations(TruthMapModel truthMap, TruthMapPatch _)
+    private TruthMapModel ApplyPatchOperations(TruthMapModel truthMap, TruthMapPatch patch)
     {
-        // For now, return the same Truth Map
-        // Full implementation would apply each PatchOperation using JSON Pointer paths
-        // This is sufficient for tests to verify persistence layer behavior
-        return truthMap;
+        var root = JsonSerializer.SerializeToNode(truthMap, _jsonOptions) as JsonObject
+            ?? throw new InvalidOperationException("Failed to serialize Truth Map for patch application.");
+
+        foreach (var operation in patch.Ops)
+        {
+            ApplyOperation(root, operation);
+        }
+
+        var patched = root.Deserialize<TruthMapModel>(_jsonOptions)
+            ?? throw new InvalidOperationException("Failed to deserialize patched Truth Map.");
+
+        return patched with
+        {
+            Version = truthMap.Version + 1,
+            Round = Math.Max(truthMap.Round, patch.Meta.Round)
+        };
+    }
+
+    private static void ApplyOperation(JsonObject root, PatchOperation operation)
+    {
+        var segments = ParsePath(operation.Path);
+        if (segments.Count == 0)
+        {
+            throw new InvalidOperationException("Patch path cannot target the root object directly.");
+        }
+
+        var parent = NavigateToParent(root, segments);
+        var target = segments[^1];
+        var valueNode = operation.Value is null
+            ? null
+            : JsonSerializer.SerializeToNode(operation.Value);
+
+        switch (operation.Op)
+        {
+            case PatchOp.Add:
+                ApplyAdd(parent, target, valueNode);
+                break;
+            case PatchOp.Replace:
+                ApplyReplace(parent, target, valueNode);
+                break;
+            case PatchOp.Remove:
+                ApplyRemove(parent, target);
+                break;
+            default:
+                throw new InvalidOperationException($"Unsupported patch operation: {operation.Op}");
+        }
+    }
+
+    private static void ApplyAdd(JsonNode parent, string target, JsonNode? valueNode)
+    {
+        if (valueNode is null)
+        {
+            throw new InvalidOperationException("Add operation requires a non-null value.");
+        }
+
+        switch (parent)
+        {
+            case JsonObject parentObject:
+                parentObject[target] = valueNode.DeepClone();
+                break;
+            case JsonArray parentArray:
+                if (target == "-")
+                {
+                    parentArray.Add(valueNode.DeepClone());
+                    break;
+                }
+
+                var addIndex = ParseArrayIndex(target, parentArray.Count, allowAppend: true);
+                parentArray.Insert(addIndex, valueNode.DeepClone());
+                break;
+            default:
+                throw new InvalidOperationException($"Unsupported parent node for add operation: {parent.GetType().Name}");
+        }
+    }
+
+    private static void ApplyReplace(JsonNode parent, string target, JsonNode? valueNode)
+    {
+        if (valueNode is null)
+        {
+            throw new InvalidOperationException("Replace operation requires a non-null value.");
+        }
+
+        switch (parent)
+        {
+            case JsonObject parentObject:
+                parentObject[target] = valueNode.DeepClone();
+                break;
+            case JsonArray parentArray:
+                var replaceIndex = ParseArrayIndex(target, parentArray.Count, allowAppend: false);
+                parentArray[replaceIndex] = valueNode.DeepClone();
+                break;
+            default:
+                throw new InvalidOperationException($"Unsupported parent node for replace operation: {parent.GetType().Name}");
+        }
+    }
+
+    private static void ApplyRemove(JsonNode parent, string target)
+    {
+        switch (parent)
+        {
+            case JsonObject parentObject:
+                if (!parentObject.Remove(target))
+                {
+                    throw new InvalidOperationException($"Cannot remove property '{target}' because it does not exist.");
+                }
+                break;
+            case JsonArray parentArray:
+                var removeIndex = ParseArrayIndex(target, parentArray.Count, allowAppend: false);
+                parentArray.RemoveAt(removeIndex);
+                break;
+            default:
+                throw new InvalidOperationException($"Unsupported parent node for remove operation: {parent.GetType().Name}");
+        }
+    }
+
+    private static JsonNode NavigateToParent(JsonObject root, IReadOnlyList<string> segments)
+    {
+        JsonNode current = root;
+
+        for (var i = 0; i < segments.Count - 1; i++)
+        {
+            var token = segments[i];
+
+            current = current switch
+            {
+                JsonObject currentObject => currentObject[token]
+                    ?? throw new InvalidOperationException($"Path segment '{token}' does not exist."),
+                JsonArray currentArray => currentArray[ParseArrayIndex(token, currentArray.Count, allowAppend: false)]
+                    ?? throw new InvalidOperationException($"Path segment '{token}' resolved to null."),
+                _ => throw new InvalidOperationException($"Path segment '{token}' cannot be traversed on {current.GetType().Name}.")
+            };
+        }
+
+        return current;
+    }
+
+    private static List<string> ParsePath(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path) || !path.StartsWith('/'))
+        {
+            throw new InvalidOperationException($"Invalid patch path '{path}'.");
+        }
+
+        return path
+            .Split('/', StringSplitOptions.RemoveEmptyEntries)
+            .Select(DecodePointerToken)
+            .ToList();
+    }
+
+    private static string DecodePointerToken(string token) =>
+        token.Replace("~1", "/").Replace("~0", "~");
+
+    private static int ParseArrayIndex(string token, int count, bool allowAppend)
+    {
+        if (!int.TryParse(token, out var index))
+        {
+            throw new InvalidOperationException($"Invalid array index token '{token}'.");
+        }
+
+        var max = allowAppend ? count : count - 1;
+        if (index < 0 || index > max)
+        {
+            throw new InvalidOperationException($"Array index '{index}' is out of range.");
+        }
+
+        return index;
     }
 }

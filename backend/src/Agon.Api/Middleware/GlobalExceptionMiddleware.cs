@@ -70,19 +70,14 @@ public sealed class GlobalExceptionMiddleware
             Title = title,
             Status = (int)statusCode,
             Instance = context.Request.Path,
-            Detail = _environment.IsDevelopment() 
-                ? exception.Message 
-                : "An error occurred while processing your request."
+            Detail = "An error occurred while processing your request."
         };
 
         // Add correlation ID for debugging
         problemDetails.Extensions["correlationId"] = correlationId;
-
-        // In development, include stack trace
         if (_environment.IsDevelopment())
         {
             problemDetails.Extensions["exception"] = exception.GetType().Name;
-            problemDetails.Extensions["stackTrace"] = exception.StackTrace;
         }
 
         await context.Response.WriteAsJsonAsync(problemDetails);
