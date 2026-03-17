@@ -89,7 +89,7 @@ param appGatewaySkuName string = 'Basic'
 ])
 param appGatewaySkuTier string = 'Basic'
 
-@description('Application Gateway instance count for legacy v1 SKUs. Ignored for Basic/Standard_v2/WAF_v2.')
+@description('Application Gateway instance count for v1 SKUs (Basic/Standard/WAF family). Ignored for Standard_v2/WAF_v2.')
 @minValue(1)
 @maxValue(32)
 param appGatewayInstanceCount int = 1
