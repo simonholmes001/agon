@@ -4,7 +4,7 @@ This document is the source of truth for the `dev` backend infrastructure deploy
 
 ## Target Architecture (Dev)
 
-- Public edge: Azure Application Gateway (WAF_v2, Detection mode in dev)
+- Public edge: Azure Application Gateway (SKU is parameterized; default in this branch is `Basic` tier for cost reduction)
 - App tier: Azure App Service (Linux) in a dedicated app resource group
 - Data tier: Azure Database for PostgreSQL Flexible Server + Azure Cache for Redis + Key Vault
 - Network tier: dedicated VNet/subnets/private DNS zones (including App Service private link DNS)
@@ -17,7 +17,7 @@ This document is the source of truth for the `dev` backend infrastructure deploy
 Deployment is **subscription-scope** and creates three resource groups:
 
 - `rg-agon-dev-frc-net`: VNet, subnets, private DNS zones
-- `rg-agon-dev-frc-app`: App Service, Application Gateway WAF, monitoring + alerts
+- `rg-agon-dev-frc-app`: App Service, Application Gateway, monitoring + alerts
 - `rg-agon-dev-frc-data`: PostgreSQL, Redis, Key Vault (+ private endpoints)
 
 This split follows Azure operational best practice: isolate lifecycle and access by domain (network/app/data), not by single mega-RG.
@@ -40,6 +40,9 @@ Naming follows Azure CAF guidance:
 - Prefix: `agon-dev-frc` (or your approved prefix)
 - Alert email: `<your-alert-email>`
 - `appGatewaySubnetPrefix`: `10.42.4.0/24` (default in dev)
+- `appGatewayResourceSuffix`: `basic` (default in this branch, creates parallel edge resource names)
+- `appGatewaySkuName`: `Basic` (default in this branch)
+- `appGatewaySkuTier`: `Basic` (default in this branch)
 
 ## One-Time Azure Identity Setup (OIDC)
 
@@ -171,6 +174,9 @@ Then rerun deployment from `main`.
    - `rg-agon-dev-frc-app`
    - `rg-agon-dev-frc-data`
 
+For the WAF_v2-to-Basic cost-optimization migration workflow, use:
+- `infrastructure/runbooks/app-gateway-wafv2-to-basic-migration.md`
+
 ## Common Errors
 
 ### `AADSTS700213` (no matching federated identity)
@@ -192,14 +198,13 @@ Add `User Access Administrator` (or `Owner`) in addition to `Contributor`.
 
 ### API calls succeed initially, then return `403` on follow-up text
 
-Likely WAF false-positive blocking request bodies in Prevention mode.
+If you run a WAF tier (`WAF`/`WAF_v2`), this is likely a false-positive block on request bodies in Prevention mode.
 
-For dev, keep Application Gateway WAF in `Detection` mode (`appGatewayWafMode = Detection`) so legitimate prompt text is not blocked.
-Use Prevention only after tuning exclusions/custom rules for your real traffic patterns.
+For dev WAF usage, keep `appGatewayWafMode = Detection` until exclusions/custom rules are tuned for your traffic patterns.
 
 ## Security Posture (Dev Baseline)
 
-- Internet ingress through Application Gateway WAF only
+- Internet ingress through Application Gateway only
 - App Service public network access disabled
 - App Service reachable privately via Private Endpoint from Application Gateway subnet
 - Key Vault/Redis/PostgreSQL on private networking paths
