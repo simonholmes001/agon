@@ -152,10 +152,11 @@ var httpRedirectRuleName = 'rule-http-redirect'
 var httpToHttpsRedirectName = 'redirect-http-to-https'
 var appGatewaySslCertificateName = 'agw-cert'
 var enableHttpsListener = !empty(appGatewaySslCertificatePfxBase64) && !empty(appGatewaySslCertificatePassword)
-var isV2Sku = endsWith(toLower(appGatewaySkuTier), '_v2')
+var normalizedAppGatewaySkuTier = toLower(appGatewaySkuTier)
+var isModernAppGatewaySku = normalizedAppGatewaySkuTier == 'basic' || endsWith(normalizedAppGatewaySkuTier, '_v2')
 var isWafSku = startsWith(toLower(appGatewaySkuTier), 'waf')
-var isLegacyV1Sku = !isV2Sku
-var appGatewayPublicIpName = isV2Sku
+var isLegacyV1Sku = !isModernAppGatewaySku
+var appGatewayPublicIpName = isModernAppGatewaySku
   ? 'pip-${namePrefix}-agw${appGatewayResourceSuffixSegment}'
   : 'pip-${namePrefix}-agw-v1${appGatewayResourceSuffixSegment}'
 var appGatewaySku = isLegacyV1Sku
@@ -168,8 +169,8 @@ var appGatewaySku = isLegacyV1Sku
       name: appGatewaySkuName
       tier: appGatewaySkuTier
     }
-var appGatewayPublicIpSkuName = isV2Sku ? 'Standard' : 'Basic'
-var appGatewayPublicIpAllocationMethod = isV2Sku ? 'Static' : 'Dynamic'
+var appGatewayPublicIpSkuName = isModernAppGatewaySku ? 'Standard' : 'Basic'
+var appGatewayPublicIpAllocationMethod = isModernAppGatewaySku ? 'Static' : 'Dynamic'
 var frontendPorts = enableHttpsListener
   ? [
       {
@@ -568,7 +569,7 @@ var appGatewayBaseProperties = {
   redirectConfigurations: redirectConfigurations
   requestRoutingRules: requestRoutingRules
 }
-var appGatewayAutoscaleProperties = isV2Sku
+var appGatewayAutoscaleProperties = endsWith(normalizedAppGatewaySkuTier, '_v2')
   ? {
       autoscaleConfiguration: {
         minCapacity: appGatewayAutoscaleMinCapacity
