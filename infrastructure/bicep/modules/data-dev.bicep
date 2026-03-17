@@ -168,7 +168,7 @@ resource postgresDb 'Microsoft.DBforPostgreSQL/flexibleServers/databases@2022-12
   }
 }
 
-resource redis 'Microsoft.Cache/Redis@2022-06-01' = {
+resource redis 'Microsoft.Cache/Redis@2024-11-01' = {
   name: redisName
   location: location
   tags: tags
@@ -179,9 +179,11 @@ resource redis 'Microsoft.Cache/Redis@2022-06-01' = {
   }
   properties: {
     publicNetworkAccess: 'Disabled'
+    disableAccessKeyAuthentication: true
     minimumTlsVersion: '1.2'
     enableNonSslPort: false
     redisConfiguration: {
+      'aad-enabled': 'true'
       'maxmemory-policy': 'allkeys-lru'
     }
   }
@@ -276,22 +278,6 @@ resource documentIntelligencePrivateDnsZoneGroup 'Microsoft.Network/privateEndpo
   }
 }
 
-resource postgresConnectionSecret 'Microsoft.KeyVault/vaults/secrets@2023-02-01' = {
-  parent: keyVault
-  name: 'connectionstrings-postgresql'
-  properties: {
-    value: 'Host=${postgres.name}.postgres.database.azure.com;Port=5432;Database=agon;Username=${postgresAdminLogin};Password=${postgresAdminPassword};SSL Mode=Require;Trust Server Certificate=false;Include Error Detail=true'
-  }
-}
-
-resource redisConnectionSecret 'Microsoft.KeyVault/vaults/secrets@2023-02-01' = {
-  parent: keyVault
-  name: 'connectionstrings-redis'
-  properties: {
-    value: '${redis.name}.redis.cache.windows.net:6380,password=${redis.listKeys().primaryKey},ssl=True,abortConnect=False'
-  }
-}
-
 resource openAiSecret 'Microsoft.KeyVault/vaults/secrets@2023-02-01' = if (hasOpenAiKey) {
   parent: keyVault
   name: 'openai-key'
@@ -328,11 +314,10 @@ output keyVaultName string = keyVault.name
 output keyVaultId string = keyVault.id
 output postgresqlServerName string = postgres.name
 output redisCacheName string = redis.name
+output redisHostName string = redis.properties.hostName
 output documentIntelligenceAccountName string = documentIntelligence.name
 output documentIntelligenceId string = documentIntelligence.id
 output documentIntelligenceEndpoint string = 'https://${documentIntelligence.name}.cognitiveservices.azure.com'
-output postgresConnectionSecretUri string = postgresConnectionSecret.properties.secretUri
-output redisConnectionSecretUri string = redisConnectionSecret.properties.secretUri
 output openAiSecretUri string = hasOpenAiKey ? openAiSecret!.properties.secretUri : ''
 output anthropicSecretUri string = hasAnthropicKey ? anthropicSecret!.properties.secretUri : ''
 output googleSecretUri string = hasGoogleKey ? googleSecret!.properties.secretUri : ''

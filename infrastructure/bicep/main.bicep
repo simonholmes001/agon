@@ -180,8 +180,8 @@ module appEdge './modules/app-edge-dev.bicep' = {
     appGatewaySubnetId: network.outputs.appGatewaySubnetId
     privateEndpointSubnetId: network.outputs.privateEndpointSubnetId
     appServicePrivateDnsZoneId: network.outputs.appServicePrivateDnsZoneId
-    postgresConnectionSecretUri: data.outputs.postgresConnectionSecretUri
-    redisConnectionSecretUri: data.outputs.redisConnectionSecretUri
+    postgresServerName: data.outputs.postgresqlServerName
+    redisHostName: data.outputs.redisHostName
     openAiSecretUri: data.outputs.openAiSecretUri
     anthropicSecretUri: data.outputs.anthropicSecretUri
     googleSecretUri: data.outputs.googleSecretUri
@@ -208,6 +208,25 @@ module documentIntelligenceAccess './modules/document-intelligence-access-dev.bi
     documentIntelligenceAccountName: data.outputs.documentIntelligenceAccountName
     principalId: appEdge.outputs.appPrincipalId
     principalDisplayNameSeed: appServiceName
+  }
+}
+
+module redisAccess './modules/redis-access-dev.bicep' = {
+  name: 'redis-access-dev'
+  scope: rgData
+  params: {
+    redisCacheName: data.outputs.redisCacheName
+    principalId: appEdge.outputs.appPrincipalId
+  }
+}
+
+module postgresAccess './modules/postgres-access-dev.bicep' = {
+  name: 'postgres-access-dev'
+  scope: rgData
+  params: {
+    postgresqlServerName: data.outputs.postgresqlServerName
+    principalName: appServiceName
+    tenantId: tenantId
   }
 }
 

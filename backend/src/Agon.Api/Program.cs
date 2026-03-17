@@ -14,6 +14,8 @@ using Agon.Infrastructure.Persistence.Repositories;
 using Agon.Infrastructure.SignalR;
 using Agon.Infrastructure.Attachments;
 using Anthropic;
+using Azure.Core;
+using Azure.Identity;
 using Google.GenAI;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
@@ -21,6 +23,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.AI;
 using Microsoft.IdentityModel.Tokens;
 using Mscc.GenerativeAI.Microsoft;
+using Npgsql;
 using OpenAI;
 using StackExchange.Redis;
 
@@ -178,16 +181,28 @@ builder.Services.AddSignalR();
 
 // ── Database: PostgreSQL ────────────────────────────────────────────────
 var postgresConnectionString = builder.Configuration.GetConnectionString("PostgreSQL");
-if (!string.IsNullOrEmpty(postgresConnectionString))
+var usePostgresManagedIdentity = builder.Configuration.GetValue<bool>("Database:PostgreSql:UseManagedIdentity");
+if (usePostgresManagedIdentity)
+{
+    var postgresManagedIdentityConnectionString = BuildPostgresManagedIdentityConnectionString(builder.Configuration);
+    if (string.IsNullOrWhiteSpace(postgresManagedIdentityConnectionString))
+    {
+        throw new InvalidOperationException(
+            "Database:PostgreSql:UseManagedIdentity is enabled but PostgreSQL host/database/username settings are incomplete.");
+    }
+
+    builder.Services.AddSingleton(_ => CreatePostgresManagedIdentityDataSource(postgresManagedIdentityConnectionString));
+    builder.Services.AddDbContext<AgonDbContext>((sp, options) =>
+        options.UseNpgsql(sp.GetRequiredService<NpgsqlDataSource>()));
+
+    RegisterPersistenceServices(builder.Services);
+}
+else if (!string.IsNullOrEmpty(postgresConnectionString))
 {
     builder.Services.AddDbContext<AgonDbContext>(options =>
         options.UseNpgsql(postgresConnectionString));
-    
-    // ── Infrastructure: Repositories ────────────────────────────────────────
-    builder.Services.AddScoped<ISessionRepository, SessionRepository>();
-    builder.Services.AddScoped<ITruthMapRepository, TruthMapRepository>();
-    builder.Services.AddScoped<IAgentMessageRepository, AgentMessageRepository>();
-    builder.Services.AddScoped<IAttachmentRepository, AttachmentRepository>();
+
+    RegisterPersistenceServices(builder.Services);
 }
 
 // ── Blob Storage: Session Attachments ───────────────────────────────────
@@ -202,13 +217,32 @@ if (!string.IsNullOrWhiteSpace(blobConnectionString))
 
 // ── Database: Redis ─────────────────────────────────────────────────────
 var redisConnectionString = builder.Configuration.GetConnectionString("Redis") ?? "localhost:6379";
+var useRedisManagedIdentity = builder.Configuration.GetValue<bool>("Redis:UseManagedIdentity");
 if (!builder.Environment.IsEnvironment("Testing"))
 {
-    builder.Services.AddSingleton<IConnectionMultiplexer>(sp =>
-        ConnectionMultiplexer.Connect(redisConnectionString));
+    if (useRedisManagedIdentity)
+    {
+        var redisHost = builder.Configuration["Redis:Host"];
+        var redisPort = builder.Configuration.GetValue<int?>("Redis:Port") ?? 6380;
+
+        if (string.IsNullOrWhiteSpace(redisHost))
+        {
+            throw new InvalidOperationException(
+                "Redis:UseManagedIdentity is enabled but Redis:Host is missing.");
+        }
+
+        builder.Services.AddSingleton<IConnectionMultiplexer>(_ =>
+            CreateRedisManagedIdentityConnection(redisHost, redisPort));
+    }
+    else
+    {
+        builder.Services.AddSingleton<IConnectionMultiplexer>(_ =>
+            ConnectionMultiplexer.Connect(redisConnectionString));
+    }
+
     builder.Services.AddScoped<IDatabase>(sp =>
         sp.GetRequiredService<IConnectionMultiplexer>().GetDatabase());
-    
+
     builder.Services.AddScoped<ISnapshotStore, RedisSnapshotStore>();
 }
 
@@ -478,6 +512,81 @@ static string ReplaceEnvVars(string value)
         var envVarName = match.Groups[1].Value;
         return Environment.GetEnvironmentVariable(envVarName) ?? match.Value;
     });
+}
+
+static void RegisterPersistenceServices(IServiceCollection services)
+{
+    services.AddScoped<ISessionRepository, SessionRepository>();
+    services.AddScoped<ITruthMapRepository, TruthMapRepository>();
+    services.AddScoped<IAgentMessageRepository, AgentMessageRepository>();
+    services.AddScoped<IAttachmentRepository, AttachmentRepository>();
+}
+
+static string BuildPostgresManagedIdentityConnectionString(IConfiguration configuration)
+{
+    var host = configuration["Database:PostgreSql:Host"];
+    var database = configuration["Database:PostgreSql:Database"] ?? "agon";
+    var username = configuration["Database:PostgreSql:Username"];
+    var port = configuration.GetValue<int?>("Database:PostgreSql:Port") ?? 5432;
+
+    if (string.IsNullOrWhiteSpace(host) || string.IsNullOrWhiteSpace(database) || string.IsNullOrWhiteSpace(username))
+    {
+        return string.Empty;
+    }
+
+    var builder = new NpgsqlConnectionStringBuilder
+    {
+        Host = host,
+        Port = port,
+        Database = database,
+        Username = username,
+        SslMode = SslMode.Require,
+        IncludeErrorDetail = true
+    };
+
+    return builder.ConnectionString;
+}
+
+static NpgsqlDataSource CreatePostgresManagedIdentityDataSource(string connectionString)
+{
+    var credential = new DefaultAzureCredential(new DefaultAzureCredentialOptions
+    {
+        ExcludeInteractiveBrowserCredential = true
+    });
+    var tokenRequestContext = new TokenRequestContext(new[]
+    {
+        "https://ossrdbms-aad.database.windows.net/.default"
+    });
+
+    var dataSourceBuilder = new NpgsqlDataSourceBuilder(connectionString);
+    dataSourceBuilder.UsePeriodicPasswordProvider(
+        async (_, cancellationToken) =>
+        {
+            var token = await credential.GetTokenAsync(tokenRequestContext, cancellationToken);
+            return token.Token;
+        },
+        TimeSpan.FromMinutes(50),
+        TimeSpan.FromSeconds(30));
+
+    return dataSourceBuilder.Build();
+}
+
+static IConnectionMultiplexer CreateRedisManagedIdentityConnection(string host, int port)
+{
+    var options = new ConfigurationOptions
+    {
+        Ssl = true,
+        AbortOnConnectFail = false
+    };
+    options.EndPoints.Add(host, port);
+
+    var credential = new DefaultAzureCredential(new DefaultAzureCredentialOptions
+    {
+        ExcludeInteractiveBrowserCredential = true
+    });
+
+    options.ConfigureForAzureWithTokenCredentialAsync(credential).GetAwaiter().GetResult();
+    return ConnectionMultiplexer.Connect(options);
 }
 
 // Make Program class accessible to integration tests

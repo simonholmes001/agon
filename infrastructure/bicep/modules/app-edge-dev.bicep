@@ -56,11 +56,11 @@ param privateEndpointSubnetId string
 @description('Private DNS zone resource ID for App Service private endpoint resolution.')
 param appServicePrivateDnsZoneId string
 
-@description('Key Vault secret URI for PostgreSQL connection string.')
-param postgresConnectionSecretUri string
+@description('PostgreSQL server name (without DNS suffix).')
+param postgresServerName string
 
-@description('Key Vault secret URI for Redis connection string.')
-param redisConnectionSecretUri string
+@description('Redis host name.')
+param redisHostName string
 
 @description('Key Vault secret URI for OpenAI API key.')
 param openAiSecretUri string
@@ -172,12 +172,36 @@ resource appService 'Microsoft.Web/sites@2023-12-01' = {
           value: appInsights.properties.ConnectionString
         }
         {
-          name: 'ConnectionStrings__PostgreSQL'
-          value: '@Microsoft.KeyVault(SecretUri=${postgresConnectionSecretUri})'
+          name: 'Database__PostgreSql__UseManagedIdentity'
+          value: 'true'
         }
         {
-          name: 'ConnectionStrings__Redis'
-          value: '@Microsoft.KeyVault(SecretUri=${redisConnectionSecretUri})'
+          name: 'Database__PostgreSql__Host'
+          value: '${postgresServerName}.postgres.database.azure.com'
+        }
+        {
+          name: 'Database__PostgreSql__Port'
+          value: '5432'
+        }
+        {
+          name: 'Database__PostgreSql__Database'
+          value: 'agon'
+        }
+        {
+          name: 'Database__PostgreSql__Username'
+          value: appServiceName
+        }
+        {
+          name: 'Redis__UseManagedIdentity'
+          value: 'true'
+        }
+        {
+          name: 'Redis__Host'
+          value: redisHostName
+        }
+        {
+          name: 'Redis__Port'
+          value: '6380'
         }
         {
           name: 'OPENAI_KEY'
