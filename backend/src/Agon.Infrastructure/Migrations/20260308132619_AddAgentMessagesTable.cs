@@ -1,12 +1,12 @@
+using System.Diagnostics.CodeAnalysis;
 ﻿using System;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
-
 namespace Agon.Infrastructure.Migrations
 {
     /// <inheritdoc />
-    public partial class AddAgentMessagesTable : Migration
+    [ExcludeFromCodeCoverage]public partial class AddAgentMessagesTable : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)

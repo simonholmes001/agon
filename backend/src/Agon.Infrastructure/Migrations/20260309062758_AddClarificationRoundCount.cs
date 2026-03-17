@@ -1,11 +1,11 @@
+using System.Diagnostics.CodeAnalysis;
 ﻿using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
-
 namespace Agon.Infrastructure.Migrations
 {
     /// <inheritdoc />
-    public partial class AddClarificationRoundCount : Migration
+    [ExcludeFromCodeCoverage]public partial class AddClarificationRoundCount : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
