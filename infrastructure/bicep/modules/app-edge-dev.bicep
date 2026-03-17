@@ -19,8 +19,9 @@ param appGatewayResourceSuffix string = ''
 @description('Alert email receiver for action groups.')
 param alertEmail string
 
-@description('Application Gateway SKU name. Use Standard_Small/Standard_Medium/Standard_Large for v1, or Standard_v2/WAF_v2 for v2.')
+@description('Application Gateway SKU name. Use Basic/Standard_v2/WAF_v2 for modern SKUs, or Standard_Small/Standard_Medium/Standard_Large for legacy v1.')
 @allowed([
+  'Basic'
   'Standard_Small'
   'Standard_Medium'
   'Standard_Large'
@@ -29,28 +30,29 @@ param alertEmail string
   'Standard_v2'
   'WAF_v2'
 ])
-param appGatewaySkuName string = 'Standard_Small'
+param appGatewaySkuName string = 'Basic'
 
 @description('Application Gateway SKU tier. Keep aligned with appGatewaySkuName.')
 @allowed([
+  'Basic'
   'Standard'
   'WAF'
   'Standard_v2'
   'WAF_v2'
 ])
-param appGatewaySkuTier string = 'Standard'
+param appGatewaySkuTier string = 'Basic'
 
-@description('Application Gateway instance count for v1 SKUs. Ignored for v2 autoscale SKUs.')
+@description('Application Gateway instance count for legacy v1 SKUs. Ignored for Basic/Standard_v2/WAF_v2.')
 @minValue(1)
 @maxValue(32)
 param appGatewayInstanceCount int = 1
 
-@description('Application Gateway autoscale minimum capacity for v2 SKUs.')
+@description('Application Gateway autoscale minimum capacity for Standard_v2/WAF_v2 SKUs.')
 @minValue(0)
 @maxValue(125)
 param appGatewayAutoscaleMinCapacity int = 1
 
-@description('Application Gateway autoscale maximum capacity for v2 SKUs.')
+@description('Application Gateway autoscale maximum capacity for Standard_v2/WAF_v2 SKUs.')
 @minValue(1)
 @maxValue(125)
 param appGatewayAutoscaleMaxCapacity int = 2
@@ -152,19 +154,21 @@ var httpToHttpsRedirectName = 'redirect-http-to-https'
 var appGatewaySslCertificateName = 'agw-cert'
 var enableHttpsListener = !empty(appGatewaySslCertificatePfxBase64) && !empty(appGatewaySslCertificatePassword)
 var isV2Sku = endsWith(toLower(appGatewaySkuTier), '_v2')
+var isModernSku = toLower(appGatewaySkuTier) == 'basic' || isV2Sku
 var isWafSku = startsWith(toLower(appGatewaySkuTier), 'waf')
-var appGatewaySku = isV2Sku
+var isLegacyV1Sku = !isModernSku
+var appGatewaySku = isLegacyV1Sku
   ? {
-      name: appGatewaySkuName
-      tier: appGatewaySkuTier
-    }
-  : {
       name: appGatewaySkuName
       tier: appGatewaySkuTier
       capacity: appGatewayInstanceCount
     }
-var appGatewayPublicIpSkuName = isV2Sku ? 'Standard' : 'Basic'
-var appGatewayPublicIpAllocationMethod = isV2Sku ? 'Static' : 'Dynamic'
+  : {
+      name: appGatewaySkuName
+      tier: appGatewaySkuTier
+    }
+var appGatewayPublicIpSkuName = isModernSku ? 'Standard' : 'Basic'
+var appGatewayPublicIpAllocationMethod = isModernSku ? 'Static' : 'Dynamic'
 var frontendPorts = enableHttpsListener
   ? [
       {

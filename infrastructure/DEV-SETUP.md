@@ -4,7 +4,7 @@ This document is the source of truth for the `dev` backend infrastructure deploy
 
 ## Target Architecture (Dev)
 
-- Public edge: Azure Application Gateway (SKU is parameterized; default in this branch is `Standard_Small` v1 for cost reduction)
+- Public edge: Azure Application Gateway (SKU is parameterized; default in this branch is `Basic` tier for cost reduction)
 - App tier: Azure App Service (Linux) in a dedicated app resource group
 - Data tier: Azure Database for PostgreSQL Flexible Server + Azure Cache for Redis + Key Vault
 - Network tier: dedicated VNet/subnets/private DNS zones (including App Service private link DNS)
@@ -40,8 +40,8 @@ Naming follows Azure CAF guidance:
 - Prefix: `agon-dev-frc` (or your approved prefix)
 - Alert email: `<your-alert-email>`
 - `appGatewaySubnetPrefix`: `10.42.4.0/24` (default in dev)
-- `appGatewaySkuName`: `Standard_Small` (default in this branch)
-- `appGatewaySkuTier`: `Standard` (default in this branch)
+- `appGatewaySkuName`: `Basic` (default in this branch)
+- `appGatewaySkuTier`: `Basic` (default in this branch)
 
 ## One-Time Azure Identity Setup (OIDC)
 
@@ -173,8 +173,8 @@ Then rerun deployment from `main`.
    - `rg-agon-dev-frc-app`
    - `rg-agon-dev-frc-data`
 
-For the v2-to-v1 cost-optimization migration workflow, use:
-- `infrastructure/runbooks/app-gateway-v2-to-v1-migration.md`
+For the WAF_v2-to-Basic cost-optimization migration workflow, use:
+- `infrastructure/runbooks/app-gateway-wafv2-to-basic-migration.md`
 
 ## Common Errors
 

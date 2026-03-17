@@ -1,8 +1,8 @@
-# Application Gateway WAF_v2 to v1 Migration Runbook (Issue #58)
+# Application Gateway WAF_v2 to Basic Migration Runbook (Issue #58)
 
 ## Objective
 
-Replace the current `WAF_v2` gateway with a lower-cost v1-tier gateway while preserving:
+Replace the current `WAF_v2` gateway with a lower-cost `Basic` tier gateway while preserving:
 - App connectivity and routing behavior
 - CLI connectivity and command flow
 - TLS and redirect expectations
@@ -10,26 +10,25 @@ Replace the current `WAF_v2` gateway with a lower-cost v1-tier gateway while pre
 ## Target State
 
 - Existing app/data/network architecture remains unchanged.
-- Edge is provided by a new parallel Application Gateway v1 (`Standard_Small` by default in this branch).
+- Edge is provided by a new parallel Application Gateway `Basic` tier gateway.
 - Gateway uses equivalent listeners, probes, redirect, backend host header, and routing rules.
 - Cutover is DNS/IP based with explicit rollback to the existing gateway.
 
 ## Platform Constraints (Must Validate Before Cutover)
 
-- Microsoft states Application Gateway v1 stops accepting new deployments after **September 1, 2024**.
-- Microsoft states Application Gateway v1 retires on **April 28, 2026**.
-- If v1 provisioning is blocked in your subscription/region, use `Standard_v2` as the fallback lowest-risk path.
+- `Basic v1` is not a valid Application Gateway SKU combination. `Basic` is part of the modern SKU family.
+- If `Basic` is not available in your subscription/region, use `Standard_v2` as the fallback lowest-risk path.
 
 Reference: https://learn.microsoft.com/en-us/azure/application-gateway/overview-v2
 
 ## IaC Controls Added in This Branch
 
-- `appGatewaySkuName` / `appGatewaySkuTier`: selects v1 or v2 SKU profile.
-- `appGatewayInstanceCount`: used for v1 fixed-capacity SKUs.
-- `appGatewayAutoscaleMinCapacity` / `appGatewayAutoscaleMaxCapacity`: used only for v2 SKUs.
-- `appGatewayResourceSuffix`: allows parallel gateway + public IP creation (for example `v1`) for staged cutover.
+- `appGatewaySkuName` / `appGatewaySkuTier`: selects Basic/modern or legacy v1 SKU profile.
+- `appGatewayInstanceCount`: used only for legacy v1 fixed-capacity SKUs.
+- `appGatewayAutoscaleMinCapacity` / `appGatewayAutoscaleMaxCapacity`: used only for `Standard_v2`/`WAF_v2` SKUs.
+- `appGatewayResourceSuffix`: allows parallel gateway + public IP creation (for example `basic`) for staged cutover.
 - WAF configuration is only emitted when a WAF tier is selected.
-- Rule `priority` is only emitted for v2 SKUs to preserve v1 compatibility.
+- Rule `priority` is only emitted for `Standard_v2`/`WAF_v2` SKUs.
 
 ## Phase 1: Discovery and Design Validation
 
@@ -50,7 +49,7 @@ az network public-ip show \
   --output tsv
 ```
 
-3. Confirm v1 SKU availability in-region/subscription before change window.
+3. Confirm Basic SKU availability in-region/subscription before change window.
 
 ## Phase 2: Build Parallel Gateway
 
@@ -58,49 +57,47 @@ az network public-ip show \
 ```bash
 az deployment sub what-if \
   --location francecentral \
-  --name agw-v1-whatif-$(date +%Y%m%d%H%M%S) \
+  --name agw-basic-whatif-$(date +%Y%m%d%H%M%S) \
   --template-file infrastructure/bicep/main.bicep \
   --parameters @infrastructure/bicep/parameters/dev.parameters.json \
-  --parameters appGatewayResourceSuffix='v1' \
-               appGatewaySkuName='Standard_Small' \
-               appGatewaySkuTier='Standard' \
-               appGatewayInstanceCount=1
+  --parameters appGatewayResourceSuffix='basic' \
+               appGatewaySkuName='Basic' \
+               appGatewaySkuTier='Basic'
 ```
 
 2. Deploy:
 ```bash
 az deployment sub create \
   --location francecentral \
-  --name agw-v1-deploy-$(date +%Y%m%d%H%M%S) \
+  --name agw-basic-deploy-$(date +%Y%m%d%H%M%S) \
   --template-file infrastructure/bicep/main.bicep \
   --parameters @infrastructure/bicep/parameters/dev.parameters.json \
-  --parameters appGatewayResourceSuffix='v1' \
-               appGatewaySkuName='Standard_Small' \
-               appGatewaySkuTier='Standard' \
-               appGatewayInstanceCount=1
+  --parameters appGatewayResourceSuffix='basic' \
+               appGatewaySkuName='Basic' \
+               appGatewaySkuTier='Basic'
 ```
 
 ## Phase 3: Validate App and CLI Connectivity
 
 1. Resolve new gateway public IP:
 ```bash
-AGW_V1_IP=$(az network public-ip show \
+AGW_BASIC_IP=$(az network public-ip show \
   --resource-group rg-agon-dev-frc-app \
-  --name pip-agon-dev-frc-agw-v1 \
+  --name pip-agon-dev-frc-agw-basic \
   --query ipAddress \
   --output tsv)
-echo "$AGW_V1_IP"
+echo "$AGW_BASIC_IP"
 ```
 
 2. Validate health and redirect behavior:
 ```bash
-curl -i "http://${AGW_V1_IP}/health"
-curl -k -i "https://${AGW_V1_IP}/health"
+curl -i "http://${AGW_BASIC_IP}/health"
+curl -k -i "https://${AGW_BASIC_IP}/health"
 ```
 
 3. Validate CLI path against the new edge:
 ```bash
-agon config set apiUrl "http://${AGW_V1_IP}"
+agon config set apiUrl "http://${AGW_BASIC_IP}"
 agon sessions
 agon status
 ```
@@ -108,7 +105,7 @@ agon status
 ## Phase 4: Cutover, Stabilize, Rollback
 
 1. Cutover:
-- Point DNS/client edge target to `pip-agon-dev-frc-agw-v1` IP.
+- Point DNS/client edge target to `pip-agon-dev-frc-agw-basic` IP.
 - Keep old gateway running during stabilization.
 
 2. Stabilization window:
