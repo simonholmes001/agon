@@ -59,6 +59,9 @@ param postgresSubnetPrefix string = '10.42.3.0/24'
 @description('Application Gateway dedicated subnet prefix.')
 param appGatewaySubnetPrefix string = '10.42.4.0/24'
 
+@description('Application Gateway dedicated subnet prefix for Basic/legacy (v1 family) SKUs.')
+param appGatewayV1SubnetPrefix string = '10.42.5.0/24'
+
 @description('Optional suffix for Application Gateway resources to support parallel replacement cutovers (for example: v1).')
 @maxLength(20)
 param appGatewayResourceSuffix string = ''
@@ -143,6 +146,7 @@ var netResourceGroupName = 'rg-${namePrefix}-net'
 var appResourceGroupName = 'rg-${namePrefix}-app'
 var dataResourceGroupName = 'rg-${namePrefix}-data'
 var appServiceName = 'app-${namePrefix}-${take(uniqueString(subscription().id, rgApp.id, namePrefix, environment), 12)}'
+var isV2AppGatewayTier = endsWith(toLower(appGatewaySkuTier), '_v2')
 
 resource rgNet 'Microsoft.Resources/resourceGroups@2023-07-01' = {
   name: netResourceGroupName
@@ -175,6 +179,7 @@ module network './modules/network-dev.bicep' = {
     privateEndpointSubnetPrefix: privateEndpointSubnetPrefix
     postgresSubnetPrefix: postgresSubnetPrefix
     appGatewaySubnetPrefix: appGatewaySubnetPrefix
+    appGatewayV1SubnetPrefix: appGatewayV1SubnetPrefix
   }
 }
 
@@ -225,7 +230,7 @@ module appEdge './modules/app-edge-dev.bicep' = {
     appGatewaySslCertificatePfxBase64: appGatewaySslCertificatePfxBase64
     appGatewaySslCertificatePassword: appGatewaySslCertificatePassword
     appSubnetId: network.outputs.appSubnetId
-    appGatewaySubnetId: network.outputs.appGatewaySubnetId
+    appGatewaySubnetId: isV2AppGatewayTier ? network.outputs.appGatewaySubnetId : network.outputs.appGatewayV1SubnetId
     privateEndpointSubnetId: network.outputs.privateEndpointSubnetId
     appServicePrivateDnsZoneId: network.outputs.appServicePrivateDnsZoneId
     postgresServerName: data.outputs.postgresqlServerName
