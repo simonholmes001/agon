@@ -110,6 +110,149 @@ var httpRedirectRuleName = 'rule-http-redirect'
 var httpToHttpsRedirectName = 'redirect-http-to-https'
 var appGatewaySslCertificateName = 'agw-cert'
 var enableHttpsListener = !empty(appGatewaySslCertificatePfxBase64) && !empty(appGatewaySslCertificatePassword)
+var frontendPorts = enableHttpsListener
+  ? [
+      {
+        name: frontendHttpPortName
+        properties: {
+          port: 80
+        }
+      }
+      {
+        name: frontendHttpsPortName
+        properties: {
+          port: 443
+        }
+      }
+    ]
+  : [
+      {
+        name: frontendHttpPortName
+        properties: {
+          port: 80
+        }
+      }
+    ]
+var sslCertificates = enableHttpsListener
+  ? [
+      {
+        name: appGatewaySslCertificateName
+        properties: {
+          data: appGatewaySslCertificatePfxBase64
+          password: appGatewaySslCertificatePassword
+        }
+      }
+    ]
+  : []
+var httpListeners = enableHttpsListener
+  ? [
+      {
+        name: httpListenerName
+        properties: {
+          frontendIPConfiguration: {
+            id: resourceId('Microsoft.Network/applicationGateways/frontendIPConfigurations', appGatewayName, frontendIpConfigName)
+          }
+          frontendPort: {
+            id: resourceId('Microsoft.Network/applicationGateways/frontendPorts', appGatewayName, frontendHttpPortName)
+          }
+          protocol: 'Http'
+        }
+      }
+      {
+        name: httpsListenerName
+        properties: {
+          frontendIPConfiguration: {
+            id: resourceId('Microsoft.Network/applicationGateways/frontendIPConfigurations', appGatewayName, frontendIpConfigName)
+          }
+          frontendPort: {
+            id: resourceId('Microsoft.Network/applicationGateways/frontendPorts', appGatewayName, frontendHttpsPortName)
+          }
+          protocol: 'Https'
+          sslCertificate: {
+            id: resourceId('Microsoft.Network/applicationGateways/sslCertificates', appGatewayName, appGatewaySslCertificateName)
+          }
+        }
+      }
+    ]
+  : [
+      {
+        name: httpListenerName
+        properties: {
+          frontendIPConfiguration: {
+            id: resourceId('Microsoft.Network/applicationGateways/frontendIPConfigurations', appGatewayName, frontendIpConfigName)
+          }
+          frontendPort: {
+            id: resourceId('Microsoft.Network/applicationGateways/frontendPorts', appGatewayName, frontendHttpPortName)
+          }
+          protocol: 'Http'
+        }
+      }
+    ]
+var redirectConfigurations = enableHttpsListener
+  ? [
+      {
+        name: httpToHttpsRedirectName
+        properties: {
+          redirectType: 'Permanent'
+          targetListener: {
+            id: resourceId('Microsoft.Network/applicationGateways/httpListeners', appGatewayName, httpsListenerName)
+          }
+          includePath: true
+          includeQueryString: true
+        }
+      }
+    ]
+  : []
+var requestRoutingRules = enableHttpsListener
+  ? [
+      {
+        name: httpRedirectRuleName
+        properties: {
+          ruleType: 'Basic'
+          priority: 90
+          httpListener: {
+            id: resourceId('Microsoft.Network/applicationGateways/httpListeners', appGatewayName, httpListenerName)
+          }
+          redirectConfiguration: {
+            id: resourceId('Microsoft.Network/applicationGateways/redirectConfigurations', appGatewayName, httpToHttpsRedirectName)
+          }
+        }
+      }
+      {
+        name: httpsRequestRoutingRuleName
+        properties: {
+          ruleType: 'Basic'
+          priority: 100
+          httpListener: {
+            id: resourceId('Microsoft.Network/applicationGateways/httpListeners', appGatewayName, httpsListenerName)
+          }
+          backendAddressPool: {
+            id: resourceId('Microsoft.Network/applicationGateways/backendAddressPools', appGatewayName, backendPoolName)
+          }
+          backendHttpSettings: {
+            id: resourceId('Microsoft.Network/applicationGateways/backendHttpSettingsCollection', appGatewayName, backendHttpSettingsName)
+          }
+        }
+      }
+    ]
+  : [
+      {
+        name: requestRoutingRuleName
+        properties: {
+          ruleType: 'Basic'
+          priority: 100
+          httpListener: {
+            id: resourceId('Microsoft.Network/applicationGateways/httpListeners', appGatewayName, httpListenerName)
+          }
+          backendAddressPool: {
+            id: resourceId('Microsoft.Network/applicationGateways/backendAddressPools', appGatewayName, backendPoolName)
+          }
+          backendHttpSettings: {
+            id: resourceId('Microsoft.Network/applicationGateways/backendHttpSettingsCollection', appGatewayName, backendHttpSettingsName)
+          }
+        }
+      }
+    ]
 
 resource logAnalytics 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
   name: logAnalyticsName
@@ -335,20 +478,7 @@ resource appGateway 'Microsoft.Network/applicationGateways@2023-09-01' = {
         }
       }
     ]
-    frontendPorts: [
-      {
-        name: frontendHttpPortName
-        properties: {
-          port: 80
-        }
-      }
-      if (enableHttpsListener) {
-        name: frontendHttpsPortName
-        properties: {
-          port: 443
-        }
-      }
-    ]
+    frontendPorts: frontendPorts
     backendAddressPools: [
       {
         name: backendPoolName
@@ -394,92 +524,10 @@ resource appGateway 'Microsoft.Network/applicationGateways@2023-09-01' = {
         }
       }
     ]
-    sslCertificates: [
-      if (enableHttpsListener) {
-        name: appGatewaySslCertificateName
-        properties: {
-          data: appGatewaySslCertificatePfxBase64
-          password: appGatewaySslCertificatePassword
-        }
-      }
-    ]
-    httpListeners: [
-      {
-        name: httpListenerName
-        properties: {
-          frontendIPConfiguration: {
-            id: resourceId('Microsoft.Network/applicationGateways/frontendIPConfigurations', appGatewayName, frontendIpConfigName)
-          }
-          frontendPort: {
-            id: resourceId('Microsoft.Network/applicationGateways/frontendPorts', appGatewayName, frontendHttpPortName)
-          }
-          protocol: 'Http'
-        }
-      }
-      if (enableHttpsListener) {
-        name: httpsListenerName
-        properties: {
-          frontendIPConfiguration: {
-            id: resourceId('Microsoft.Network/applicationGateways/frontendIPConfigurations', appGatewayName, frontendIpConfigName)
-          }
-          frontendPort: {
-            id: resourceId('Microsoft.Network/applicationGateways/frontendPorts', appGatewayName, frontendHttpsPortName)
-          }
-          protocol: 'Https'
-          sslCertificate: {
-            id: resourceId('Microsoft.Network/applicationGateways/sslCertificates', appGatewayName, appGatewaySslCertificateName)
-          }
-        }
-      }
-    ]
-    redirectConfigurations: [
-      if (enableHttpsListener) {
-        name: httpToHttpsRedirectName
-        properties: {
-          redirectType: 'Permanent'
-          targetListener: {
-            id: resourceId('Microsoft.Network/applicationGateways/httpListeners', appGatewayName, httpsListenerName)
-          }
-          includePath: true
-          includeQueryString: true
-        }
-      }
-    ]
-    requestRoutingRules: [
-      if (enableHttpsListener) {
-        name: httpRedirectRuleName
-        properties: {
-          ruleType: 'Basic'
-          priority: 90
-          httpListener: {
-            id: resourceId('Microsoft.Network/applicationGateways/httpListeners', appGatewayName, httpListenerName)
-          }
-          redirectConfiguration: {
-            id: resourceId('Microsoft.Network/applicationGateways/redirectConfigurations', appGatewayName, httpToHttpsRedirectName)
-          }
-        }
-      }
-      {
-        name: enableHttpsListener ? httpsRequestRoutingRuleName : requestRoutingRuleName
-        properties: {
-          ruleType: 'Basic'
-          priority: 100
-          httpListener: {
-            id: resourceId(
-              'Microsoft.Network/applicationGateways/httpListeners',
-              appGatewayName,
-              enableHttpsListener ? httpsListenerName : httpListenerName
-            )
-          }
-          backendAddressPool: {
-            id: resourceId('Microsoft.Network/applicationGateways/backendAddressPools', appGatewayName, backendPoolName)
-          }
-          backendHttpSettings: {
-            id: resourceId('Microsoft.Network/applicationGateways/backendHttpSettingsCollection', appGatewayName, backendHttpSettingsName)
-          }
-        }
-      }
-    ]
+    sslCertificates: sslCertificates
+    httpListeners: httpListeners
+    redirectConfigurations: redirectConfigurations
+    requestRoutingRules: requestRoutingRules
     webApplicationFirewallConfiguration: {
       enabled: true
       firewallMode: appGatewayWafMode
