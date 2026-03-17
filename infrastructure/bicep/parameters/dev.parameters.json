@@ -29,6 +29,24 @@
     "appGatewaySubnetPrefix": {
       "value": "10.42.4.0/24"
     },
+    "appGatewayResourceSuffix": {
+      "value": ""
+    },
+    "appGatewaySkuName": {
+      "value": "Standard_Small"
+    },
+    "appGatewaySkuTier": {
+      "value": "Standard"
+    },
+    "appGatewayInstanceCount": {
+      "value": 1
+    },
+    "appGatewayAutoscaleMinCapacity": {
+      "value": 1
+    },
+    "appGatewayAutoscaleMaxCapacity": {
+      "value": 2
+    },
     "appGatewayWafMode": {
       "value": "Detection"
     },

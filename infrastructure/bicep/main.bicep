@@ -59,7 +59,47 @@ param postgresSubnetPrefix string = '10.42.3.0/24'
 @description('Application Gateway dedicated subnet prefix.')
 param appGatewaySubnetPrefix string = '10.42.4.0/24'
 
-@description('Application Gateway WAF mode for this environment.')
+@description('Optional suffix for Application Gateway resources to support parallel replacement cutovers (for example: v1).')
+@maxLength(20)
+param appGatewayResourceSuffix string = ''
+
+@description('Application Gateway SKU name. Use Standard_Small/Standard_Medium/Standard_Large for v1, or Standard_v2/WAF_v2 for v2.')
+@allowed([
+  'Standard_Small'
+  'Standard_Medium'
+  'Standard_Large'
+  'WAF_Medium'
+  'WAF_Large'
+  'Standard_v2'
+  'WAF_v2'
+])
+param appGatewaySkuName string = 'Standard_Small'
+
+@description('Application Gateway SKU tier. Keep aligned with appGatewaySkuName.')
+@allowed([
+  'Standard'
+  'WAF'
+  'Standard_v2'
+  'WAF_v2'
+])
+param appGatewaySkuTier string = 'Standard'
+
+@description('Application Gateway instance count for v1 SKUs. Ignored for v2 autoscale SKUs.')
+@minValue(1)
+@maxValue(32)
+param appGatewayInstanceCount int = 1
+
+@description('Application Gateway autoscale minimum capacity for v2 SKUs.')
+@minValue(0)
+@maxValue(125)
+param appGatewayAutoscaleMinCapacity int = 1
+
+@description('Application Gateway autoscale maximum capacity for v2 SKUs.')
+@minValue(1)
+@maxValue(125)
+param appGatewayAutoscaleMaxCapacity int = 2
+
+@description('Application Gateway WAF mode when using WAF tier SKUs.')
 @allowed([
   'Detection'
   'Prevention'
@@ -169,6 +209,12 @@ module appEdge './modules/app-edge-dev.bicep' = {
     workloadName: workloadName
     namePrefix: namePrefix
     alertEmail: alertEmail
+    appGatewayResourceSuffix: appGatewayResourceSuffix
+    appGatewaySkuName: appGatewaySkuName
+    appGatewaySkuTier: appGatewaySkuTier
+    appGatewayInstanceCount: appGatewayInstanceCount
+    appGatewayAutoscaleMinCapacity: appGatewayAutoscaleMinCapacity
+    appGatewayAutoscaleMaxCapacity: appGatewayAutoscaleMaxCapacity
     appGatewayWafMode: appGatewayWafMode
     appGatewayRequestTimeoutSeconds: appGatewayRequestTimeoutSeconds
     authEnabled: authEnabled
