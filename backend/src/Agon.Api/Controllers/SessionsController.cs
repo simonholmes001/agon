@@ -29,10 +29,10 @@ public class SessionsController : ControllerBase
 
     public SessionsController(
         ISessionService sessionService,
-        IAttachmentStorageService? attachmentStorage,
         IAttachmentTextExtractor attachmentTextExtractor,
         ConversationHistoryService conversationHistory,
-        ILogger<SessionsController> logger)
+        ILogger<SessionsController> logger,
+        IAttachmentStorageService? attachmentStorage = null)
     {
         _sessionService = sessionService;
         _attachmentStorage = attachmentStorage;

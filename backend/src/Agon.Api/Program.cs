@@ -206,10 +206,10 @@ else if (!string.IsNullOrEmpty(postgresConnectionString))
 }
 
 // ── Blob Storage: Session Attachments ───────────────────────────────────
-var blobConnectionString = builder.Configuration.GetConnectionString("BlobStorage");
+var blobConnectionString = ReplaceEnvVars(builder.Configuration.GetConnectionString("BlobStorage") ?? string.Empty);
 var attachmentContainerName = builder.Configuration["Storage:AttachmentContainer"] ?? "session-attachments";
 
-if (!string.IsNullOrWhiteSpace(blobConnectionString))
+if (IsConfiguredValue(blobConnectionString))
 {
     builder.Services.AddSingleton<IAttachmentStorageService>(_ =>
         new AzureBlobAttachmentStorageService(blobConnectionString, attachmentContainerName));
@@ -512,6 +512,17 @@ static string ReplaceEnvVars(string value)
         var envVarName = match.Groups[1].Value;
         return Environment.GetEnvironmentVariable(envVarName) ?? match.Value;
     });
+}
+
+static bool IsConfiguredValue(string? value)
+{
+    if (string.IsNullOrWhiteSpace(value))
+    {
+        return false;
+    }
+
+    var trimmed = value.Trim();
+    return !(trimmed.StartsWith("${", StringComparison.Ordinal) && trimmed.EndsWith("}", StringComparison.Ordinal));
 }
 
 static void RegisterPersistenceServices(IServiceCollection services)
