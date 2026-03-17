@@ -23,7 +23,7 @@ jobs:
           set -euo pipefail
 
           BASE_REF="${{ github.base_ref }}"
-          git fetch origin "${BASE_REF}" --depth=1
+          git fetch origin "${BASE_REF}"
 
           CHANGED_FILES="$(git diff --name-only "origin/${BASE_REF}"...HEAD)"
           echo "Changed files:"
