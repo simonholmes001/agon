@@ -107,4 +107,25 @@ jobs:
 
       - name: Run tests
         if: steps.check.outputs.exists == 'true'
-        run: dotnet test --no-build --configuration Release --verbosity normal --collect:"XPlat Code Coverage"
+        run: dotnet test --no-build --configuration Release --verbosity normal --collect:"XPlat Code Coverage" --settings coverage.runsettings --results-directory TestResults
+
+      - name: Install ReportGenerator
+        if: steps.check.outputs.exists == 'true'
+        run: dotnet tool install -g dotnet-reportgenerator-globaltool
+
+      - name: Generate coverage report
+        if: steps.check.outputs.exists == 'true'
+        run: |
+          reportgenerator \
+            -reports:"TestResults/*/coverage.cobertura.xml" \
+            -targetdir:"TestResults/coverage-report" \
+            -reporttypes:"TextSummary;Cobertura;Badges"
+          cat TestResults/coverage-report/Summary.txt
+
+      - name: Upload coverage report
+        if: steps.check.outputs.exists == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage-report
+          path: backend/TestResults/coverage-report/
+          retention-days: 30
