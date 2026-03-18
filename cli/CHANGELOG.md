@@ -1,5 +1,12 @@
 # @agon_agents/cli
 
+## 0.1.11
+
+### Patch Changes
+
+- Add in-session self-update flow via `/self-update` (alias: `/update`) so users can install updates without leaving the interactive shell, while keeping `agon --self-update` compatibility.
+- Route `agon --self-update` through the same command implementation used by `agon self-update` for consistent checks, messaging, and failure handling.
+
 ## 0.1.10
 
 ### Patch Changes

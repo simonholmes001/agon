@@ -1,4 +1,5 @@
 import type { SessionResponse } from '../api/types.js';
+import type { SelfUpdateFailureCategory } from '../utils/self-update.js';
 import { parseShellInput } from './parser.js';
 import type { PlainInputRoute } from './router.js';
 
@@ -45,8 +46,35 @@ interface ShellControllerLike {
 export interface ShellEngineDeps {
   controller: ShellControllerLike;
   routePlainInput: (session: SessionResponse | null) => PlainInputRoute;
+  selfUpdate: (options: { check: boolean }) => Promise<ShellSelfUpdateResult>;
   print: (line: string) => void;
 }
+
+export type ShellSelfUpdateResult =
+  | {
+      status: 'up-to-date';
+      currentVersion: string;
+    }
+  | {
+      status: 'update-available';
+      currentVersion: string;
+      latestVersion: string;
+      installCommand: string;
+    }
+  | {
+      status: 'updated';
+      currentVersion: string;
+      latestVersion: string;
+    }
+  | {
+      status: 'failed';
+      currentVersion: string;
+      latestVersion: string;
+      reason: SelfUpdateFailureCategory;
+      message: string;
+      guidance: string;
+      installCommand: string;
+    };
 
 export type ShellEngineOutcome =
   | { kind: 'noop' }
@@ -73,11 +101,13 @@ export type ShellEngineOutcome =
 export class ShellEngine {
   private readonly controller: ShellControllerLike;
   private readonly routePlainInputFn: (session: SessionResponse | null) => PlainInputRoute;
+  private readonly selfUpdateFn: (options: { check: boolean }) => Promise<ShellSelfUpdateResult>;
   private readonly print: (line: string) => void;
 
   constructor(deps: ShellEngineDeps) {
     this.controller = deps.controller;
     this.routePlainInputFn = deps.routePlainInput;
+    this.selfUpdateFn = deps.selfUpdate;
     this.print = deps.print;
   }
 
@@ -138,6 +168,7 @@ export class ShellEngine {
         this.print('  /help                         Show this command reference');
         this.print('  /params                       Show current shell parameters and active session');
         this.print('  /set <key> <value>            Persist config key (apiUrl|defaultFriction|researchEnabled|logLevel)');
+        this.print('  /self-update [--check]        Update CLI without exiting shell (alias: /update)');
         this.print('  /new                          Reset shell to awaiting-idea mode');
         this.print('  /show-sessions                List your sessions');
         this.print('  /resume [session-id]          Resume latest session (or specific session)');
@@ -174,6 +205,25 @@ export class ShellEngine {
         await this.controller.clearShellSessionSelection();
         this.print('Ready for a new idea.');
         return { kind: 'noop' };
+      case 'self-update': {
+        const result = await this.selfUpdateFn({ check: parsed.check });
+        switch (result.status) {
+          case 'up-to-date':
+            return { kind: 'notice', message: `You are already on the latest version (${result.currentVersion}).` };
+          case 'update-available':
+            this.print(`Update available: v${result.currentVersion} -> v${result.latestVersion}`);
+            this.print(`Install with: ${result.installCommand}`);
+            return { kind: 'noop' };
+          case 'updated':
+            this.print(`Updated CLI from v${result.currentVersion} to v${result.latestVersion}.`);
+            this.print('Current shell session stays active. Restart later to run the new runtime.');
+            return { kind: 'noop' };
+          case 'failed':
+            this.print(`Self-update failed (${result.reason}): ${result.message}`);
+            this.print(result.guidance);
+            return { kind: 'noop' };
+        }
+      }
       case 'show-sessions': {
         const sessions = await this.controller.listSessions();
         if (sessions.length === 0) {

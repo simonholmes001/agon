@@ -8,7 +8,11 @@ import { ConfigManager } from '../state/config-manager.js';
 import { SessionManager } from '../state/session-manager.js';
 import { ShellController } from '../shell/controller.js';
 import { createKeypressInitializer } from '../shell/keypress.js';
-import { ShellEngine, type ShellEngineOutcome } from '../shell/engine.js';
+import {
+  ShellEngine,
+  type ShellEngineOutcome,
+  type ShellSelfUpdateResult
+} from '../shell/engine.js';
 import { parseShellInput } from '../shell/parser.js';
 import { routePlainInput } from '../shell/router.js';
 import {
@@ -25,6 +29,11 @@ import {
 import { renderMarkdown } from '../utils/markdown.js';
 import { normalizeStatus } from '../utils/session-flow.js';
 import { checkForCliUpdate } from '../utils/update-check.js';
+import {
+  describeSelfUpdateFailure,
+  getSelfUpdateGuidance,
+  runNpmGlobalInstall
+} from '../utils/self-update.js';
 
 export default class Shell extends Command {
   static override readonly description = 'Open interactive codex-style Agon shell';
@@ -63,6 +72,7 @@ export default class Shell extends Command {
     const engine = new ShellEngine({
       controller,
       routePlainInput,
+      selfUpdate: (options) => this.runSelfUpdate(options.check),
       print: (line: string) => this.printLine(line)
     });
 
@@ -84,9 +94,9 @@ export default class Shell extends Command {
     });
     if (updateInfo) {
       this.log(chalk.yellow(`Update available: v${updateInfo.currentVersion} → v${updateInfo.latestVersion}`));
-      this.log(chalk.cyan('To update:'));
-      this.log(chalk.cyan('  1) Exit shell now: /exit'));
-      this.log(chalk.cyan('  2) Run in terminal: agon --self-update'));
+      this.log(chalk.cyan('Run now in this shell:'));
+      this.log(chalk.cyan('  /self-update'));
+      this.log(chalk.dim('Tip: Use /self-update --check to only verify availability.'));
       this.log(chalk.dim('If that fails, run:'));
       this.log(chalk.dim(`  ${updateInfo.installCommand}`));
     }
@@ -201,6 +211,49 @@ export default class Shell extends Command {
         return;
       case 'noop':
         return;
+    }
+  }
+
+  private async runSelfUpdate(checkOnly: boolean): Promise<ShellSelfUpdateResult> {
+    const packageName = this.config.pjson.name ?? '@agon_agents/cli';
+    const currentVersion = this.config.pjson.version ?? '0.0.0';
+    const updateInfo = await checkForCliUpdate({ packageName, currentVersion });
+    const installCommand = `npm install -g ${packageName}@latest`;
+
+    if (!updateInfo) {
+      return {
+        status: 'up-to-date',
+        currentVersion
+      };
+    }
+
+    if (checkOnly) {
+      return {
+        status: 'update-available',
+        currentVersion: updateInfo.currentVersion,
+        latestVersion: updateInfo.latestVersion,
+        installCommand: updateInfo.installCommand
+      };
+    }
+
+    try {
+      await runNpmGlobalInstall(packageName);
+      return {
+        status: 'updated',
+        currentVersion: updateInfo.currentVersion,
+        latestVersion: updateInfo.latestVersion
+      };
+    } catch (error) {
+      const failure = describeSelfUpdateFailure(error);
+      return {
+        status: 'failed',
+        currentVersion: updateInfo.currentVersion,
+        latestVersion: updateInfo.latestVersion,
+        reason: failure.category,
+        message: failure.message,
+        guidance: getSelfUpdateGuidance(failure.category, installCommand),
+        installCommand
+      };
     }
   }
 
@@ -666,6 +719,8 @@ function getSpinnerText(parsed: ReturnType<typeof parseShellInput>): string | nu
     case 'params':
     case 'new':
       return null;
+    case 'self-update':
+      return parsed.check ? 'Checking for CLI updates...' : 'Updating CLI...';
     case 'set':
       return 'Saving parameter...';
     case 'session':
