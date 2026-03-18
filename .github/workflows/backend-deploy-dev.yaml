@@ -16,9 +16,6 @@ permissions:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
-  APP_RESOURCE_GROUP: rg-agon-dev-swc-app
-  APP_NAME_PREFIX: app-agon-dev-swc-
-  AGW_PUBLIC_IP_NAME: pip-agon-dev-swc-agw
 
 concurrency:
   group: backend-dev-deploy
@@ -108,18 +105,35 @@ jobs:
         uses: azure/cli@v2
         with:
           inlineScript: |
-            APP_NAME=$(az webapp list \
-              --resource-group "${APP_RESOURCE_GROUP}" \
-              --query "[?starts_with(name, '${APP_NAME_PREFIX}')].name | [0]" \
+            set -euo pipefail
+            APPS=$(az webapp list \
+              --query "[?tags.environment=='dev' && tags.workload=='agon'].[name,resourceGroup]" \
               --output tsv)
 
-            if [ -z "${APP_NAME}" ] || [ "${APP_NAME}" = "null" ]; then
-              echo "No App Service found in ${APP_RESOURCE_GROUP} matching prefix ${APP_NAME_PREFIX}"
+            if [ -z "${APPS}" ]; then
+              APPS=$(az webapp list \
+                --query "[?starts_with(name, 'app-agon-dev-')].[name,resourceGroup]" \
+                --output tsv)
+            fi
+
+            if [ -z "${APPS}" ]; then
+              echo "No dev App Service found for workload 'agon'. Deploy infrastructure first."
               exit 1
             fi
 
+            PREFERRED=$(echo "${APPS}" | awk '$2 ~ /-swc-/ {print $0; exit}')
+            if [ -n "${PREFERRED}" ]; then
+              APP_NAME=$(echo "${PREFERRED}" | awk '{print $1}')
+              APP_RESOURCE_GROUP=$(echo "${PREFERRED}" | awk '{print $2}')
+            else
+              APP_NAME=$(echo "${APPS}" | head -n1 | awk '{print $1}')
+              APP_RESOURCE_GROUP=$(echo "${APPS}" | head -n1 | awk '{print $2}')
+            fi
+
             echo "Resolved app service: ${APP_NAME}"
+            echo "Resolved app resource group: ${APP_RESOURCE_GROUP}"
             echo "app_name=${APP_NAME}" >> "$GITHUB_OUTPUT"
+            echo "app_resource_group=${APP_RESOURCE_GROUP}" >> "$GITHUB_OUTPUT"
 
       - name: Configure App Service container image
         uses: azure/cli@v2
@@ -129,7 +143,7 @@ jobs:
         with:
           inlineScript: |
             az webapp config container set \
-              --resource-group "${APP_RESOURCE_GROUP}" \
+              --resource-group "${{ steps.app.outputs.app_resource_group }}" \
               --name "${{ steps.app.outputs.app_name }}" \
               --container-image-name "${{ steps.image.outputs.image_sha }}" \
               --container-registry-url "https://index.docker.io" \
@@ -137,7 +151,7 @@ jobs:
               --container-registry-password "${DOCKERHUB_TOKEN}"
 
             az webapp config appsettings set \
-              --resource-group "${APP_RESOURCE_GROUP}" \
+              --resource-group "${{ steps.app.outputs.app_resource_group }}" \
               --name "${{ steps.app.outputs.app_name }}" \
               --settings WEBSITES_PORT=8080
 
@@ -146,16 +160,45 @@ jobs:
         with:
           inlineScript: |
             az webapp restart \
-              --resource-group "${APP_RESOURCE_GROUP}" \
+              --resource-group "${{ steps.app.outputs.app_resource_group }}" \
               --name "${{ steps.app.outputs.app_name }}"
 
       - name: Verify health through Application Gateway
         uses: azure/cli@v2
         with:
           inlineScript: |
+            set -euo pipefail
+            APP_RG="${{ steps.app.outputs.app_resource_group }}"
+            AGW_NAME=$(az network application-gateway list \
+              --resource-group "${APP_RG}" \
+              --query "[?tags.environment=='dev' && tags.workload=='agon'].name | [0]" \
+              --output tsv)
+
+            if [ -z "${AGW_NAME}" ] || [ "${AGW_NAME}" = "null" ]; then
+              AGW_NAME=$(az network application-gateway list \
+                --resource-group "${APP_RG}" \
+                --query "[?starts_with(name, 'agw-agon-dev-')].name | [0]" \
+                --output tsv)
+            fi
+
+            if [ -z "${AGW_NAME}" ] || [ "${AGW_NAME}" = "null" ]; then
+              echo "Failed to resolve Application Gateway in ${APP_RG}."
+              exit 1
+            fi
+
+            AGW_PIP_ID=$(az network application-gateway show \
+              --resource-group "${APP_RG}" \
+              --name "${AGW_NAME}" \
+              --query "frontendIPConfigurations[0].publicIPAddress.id" \
+              --output tsv)
+
+            if [ -z "${AGW_PIP_ID}" ] || [ "${AGW_PIP_ID}" = "null" ]; then
+              echo "Failed to resolve Application Gateway public IP reference."
+              exit 1
+            fi
+
             AGW_IP=$(az network public-ip show \
-              --resource-group "${APP_RESOURCE_GROUP}" \
-              --name "${AGW_PUBLIC_IP_NAME}" \
+              --ids "${AGW_PIP_ID}" \
               --query ipAddress \
               --output tsv)
 
