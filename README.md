@@ -378,6 +378,8 @@ Agon/
 
 This section is for developers working on the Agon codebase.
 
+For a full environment setup walkthrough, see the [Developer Setup Guide](infrastructure/DEV-SETUP.md).
+
 ### Prerequisites
 
 - **.NET 9.0 SDK** ([download](https://dotnet.microsoft.com/download))
