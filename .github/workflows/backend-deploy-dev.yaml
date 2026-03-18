@@ -1,6 +1,6 @@
 name: Backend Deploy (Dev)
 
-on:
+'on':
   push:
     branches: [main]
     paths:
@@ -15,8 +15,6 @@ on:
 permissions:
   contents: read
   id-token: write
-  # Required to push supply-chain attestations (SBOM + provenance) to Docker Hub
-  # via the docker/build-push-action attestation support.
   attestations: write
 
 env:
@@ -37,8 +35,36 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+          fetch-depth: 2
+
+      - name: Guard deploy ordering
+        id: guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_run" ]; then
+            echo "deploy=true" >> "$GITHUB_OUTPUT"
+            echo "deploy_sha=${{ github.event.workflow_run.head_sha }}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "deploy_sha=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+
+          if [ "${{ github.event_name }}" = "push" ]; then
+            if git diff --name-only "${{ github.event.before }}" "${{ github.sha }}" | grep -q '^infrastructure/'; then
+              echo "deploy=false" >> "$GITHUB_OUTPUT"
+              echo "Skipping push-triggered backend deploy because infrastructure changed in the same push."
+              echo "Backend deploy will run automatically after successful Infrastructure Deploy via workflow_run."
+              exit 0
+            fi
+          fi
+
+          echo "deploy=true" >> "$GITHUB_OUTPUT"
 
       - name: Setup .NET
+        if: steps.guard.outputs.deploy == 'true'
         uses: actions/setup-dotnet@v5
         with:
           dotnet-version: 9.0.x
@@ -53,6 +79,7 @@ jobs:
 
       - name: Validate required Docker Hub secrets
         if: steps.guard.outputs.deploy == 'true'
+        id: docker_secrets
         shell: bash
         env:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -72,31 +99,55 @@ jobs:
             echo "::error::Missing DOCKERHUB_IMAGE_NAME secret (example: youruser/agon-backend)."
             exit 1
           fi
+          IMAGE_NAME="$(echo "${DOCKERHUB_IMAGE_NAME}" | tr -d '[:space:]')"
+          if ! echo "${IMAGE_NAME}" | grep -Eq '^[a-z0-9]+([._-][a-z0-9]+)*/[a-z0-9]+([._-][a-z0-9]+)*$'; then
+            echo "::error::Invalid DOCKERHUB_IMAGE_NAME '${DOCKERHUB_IMAGE_NAME}'. Expected 'namespace/repository' (lowercase)."
+            exit 1
+          fi
+          echo "image_name=${IMAGE_NAME}" >> "$GITHUB_OUTPUT"
 
       - name: Docker Hub login
+        if: steps.guard.outputs.deploy == 'true'
         uses: docker/login-action@v4
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      # Buildx is required to generate SBOM and provenance attestations.
       - name: Set up Docker Buildx
+        if: steps.guard.outputs.deploy == 'true'
         uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2 # v3.10.0
 
       - name: Set image tags
         if: steps.guard.outputs.deploy == 'true'
         id: image
         shell: bash
-        env:
-          DOCKERHUB_IMAGE_NAME: ${{ secrets.DOCKERHUB_IMAGE_NAME }}
         run: |
           set -euo pipefail
           SHORT_SHA="$(echo "${{ steps.guard.outputs.deploy_sha }}" | cut -c1-12)"
+          IMAGE_NAME="${{ steps.docker_secrets.outputs.image_name }}"
           echo "tag_sha=sha-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
-          echo "image_sha=${DOCKERHUB_IMAGE_NAME}:sha-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
-          echo "image_latest=${DOCKERHUB_IMAGE_NAME}:dev-latest" >> "$GITHUB_OUTPUT"
+          echo "image_sha=${IMAGE_NAME}:sha-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+          echo "image_latest=${IMAGE_NAME}:dev-latest" >> "$GITHUB_OUTPUT"
+          if [ -z "${IMAGE_NAME}" ]; then
+            echo "::error::Computed image name is empty."
+            exit 1
+          fi
+
+      - name: Assert Docker tags
+        if: steps.guard.outputs.deploy == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          IMAGE_SHA="${{ steps.image.outputs.image_sha }}"
+          IMAGE_LATEST="${{ steps.image.outputs.image_latest }}"
+          if [ -z "${IMAGE_SHA}" ] || [ -z "${IMAGE_LATEST}" ]; then
+            echo "::error::Docker tags were not generated. image_sha='${IMAGE_SHA}', image_latest='${IMAGE_LATEST}'"
+            exit 1
+          fi
+          echo "Resolved Docker tags: ${IMAGE_SHA} and ${IMAGE_LATEST}"
 
       - name: Build and push backend image
+        if: steps.guard.outputs.deploy == 'true'
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: backend
@@ -105,15 +156,11 @@ jobs:
           tags: |
             ${{ steps.image.outputs.image_sha }}
             ${{ steps.image.outputs.image_latest }}
-          # Supply-chain attestations — resolves Docker Scout warnings:
-          #   • "Missing supply chain attestation(s)"
-          # provenance=mode=max records the full build provenance (git source,
-          # build inputs, runner info) as an OCI attestation attached to the image.
-          # sbom=true generates a CycloneDX SBOM listing every package in the image.
           provenance: mode=max
           sbom: true
 
       - name: Login to Azure (OIDC)
+        if: steps.guard.outputs.deploy == 'true'
         uses: azure/login@v3
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
@@ -178,6 +225,7 @@ jobs:
             echo "app_resource_group=${APP_RESOURCE_GROUP}" >> "$GITHUB_OUTPUT"
 
       - name: Configure App Service container image
+        if: steps.guard.outputs.deploy == 'true'
         uses: azure/cli@9f7ce6f37c31b777ec6c6b6d1dfe7db79f497956 # v2.2.0
         env:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -198,6 +246,7 @@ jobs:
               --settings WEBSITES_PORT=8080
 
       - name: Restart App Service
+        if: steps.guard.outputs.deploy == 'true'
         uses: azure/cli@9f7ce6f37c31b777ec6c6b6d1dfe7db79f497956 # v2.2.0
         with:
           inlineScript: |
@@ -206,6 +255,7 @@ jobs:
               --name "${{ steps.app.outputs.app_name }}"
 
       - name: Verify health through Application Gateway
+        if: steps.guard.outputs.deploy == 'true'
         uses: azure/cli@9f7ce6f37c31b777ec6c6b6d1dfe7db79f497956 # v2.2.0
         with:
           inlineScript: |
