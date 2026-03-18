@@ -26,6 +26,7 @@ import {
   renderShellHeader,
   renderStatusLine
 } from '../shell/renderer.js';
+import { PromptHistory } from '../shell/history.js';
 import { renderMarkdown } from '../utils/markdown.js';
 import { normalizeStatus } from '../utils/session-flow.js';
 import { checkForCliUpdate } from '../utils/update-check.js';
@@ -49,6 +50,7 @@ export default class Shell extends Command {
   private apiClient?: AgonAPIClient;
   private sessionManager?: SessionManager;
   private initializeKeypressEvents: () => void = () => {};
+  private readonly promptHistory = new PromptHistory();
 
   public async run(): Promise<void> {
     const configManager = new ConfigManager();
@@ -108,6 +110,10 @@ export default class Shell extends Command {
         const rawInput = await this.promptForInput(promptFrame);
 
         const trimmed = rawInput.trim();
+        if (trimmed.length > 0 && !isExitInput(trimmed)) {
+          this.promptHistory.push(trimmed);
+        }
+
         if (isExitInput(trimmed)) {
           this.log(chalk.dim('Exiting shell.'));
           return;
@@ -315,6 +321,8 @@ export default class Shell extends Command {
       let cursorLineIndex = getPromptCursorPosition(frame, value, 0).lineIndex;
       let cursorIndex = 0;
 
+      this.promptHistory.reset();
+
       const redraw = (): void => {
         if (cursorLineIndex > 0) {
           output.write(`\u001b[${cursorLineIndex}A`);
@@ -423,14 +431,32 @@ export default class Shell extends Command {
         }
 
         if (keyName === 'up') {
-          cursorIndex = Math.max(0, cursorIndex - frame.maxInputCharsPerLine);
-          redraw();
+          if (this.promptHistory.isNavigating() || value === '') {
+            const prev = this.promptHistory.navigateBack(value);
+            if (prev !== undefined) {
+              value = prev;
+              cursorIndex = value.length;
+              redraw();
+            }
+          } else {
+            cursorIndex = Math.max(0, cursorIndex - frame.maxInputCharsPerLine);
+            redraw();
+          }
           return;
         }
 
         if (keyName === 'down') {
-          cursorIndex = Math.min(value.length, cursorIndex + frame.maxInputCharsPerLine);
-          redraw();
+          if (this.promptHistory.isNavigating()) {
+            const next = this.promptHistory.navigateForward();
+            if (next !== undefined) {
+              value = next;
+              cursorIndex = value.length;
+              redraw();
+            }
+          } else {
+            cursorIndex = Math.min(value.length, cursorIndex + frame.maxInputCharsPerLine);
+            redraw();
+          }
           return;
         }
 

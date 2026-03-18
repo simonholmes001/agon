@@ -7,6 +7,7 @@ import {
   shouldPrintVersion,
   shouldSelfUpdate
 } from './run-helpers.js';
+import { ensureDefaultShellCommand } from '../dist/shell/entrypoint.js';
 
 const args = process.argv.slice(2);
 const require = createRequire(import.meta.url);
@@ -27,6 +28,8 @@ const normalizedArgs = normalizeSelfUpdateArgs(args);
 if (normalizedArgs !== args) {
   process.argv = [process.argv[0], process.argv[1], ...normalizedArgs];
 }
+
+process.argv = ensureDefaultShellCommand(process.argv);
 
 execute({ development: false, dir: import.meta.url })
   .catch((error) => {
