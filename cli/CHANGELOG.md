@@ -1,5 +1,11 @@
 # @agon_agents/cli
 
+## 0.1.12
+
+### Patch Changes
+
+- Enable in-session CLI self-update with `/self-update` (alias `/update`) so updates can run without exiting shell first. Route `agon --self-update` through the `self-update` command path for consistent behavior and improve failure guidance for permission/network/file-lock scenarios.
+
 ## 0.1.11
 
 ### Patch Changes
