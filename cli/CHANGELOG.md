@@ -1,5 +1,11 @@
 # @agon_agents/cli
 
+## 0.1.10
+
+### Patch Changes
+
+- Add npm provenance attestation support via .npmrc (provenance=true) to cryptographically link every published release to its source commit and GitHub Actions build.
+
 ## 0.1.9
 
 ### Patch Changes
