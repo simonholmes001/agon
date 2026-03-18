@@ -61,6 +61,24 @@ jobs:
             exit 1
           fi
 
+      - name: Preflight check soft-deleted Document Intelligence accounts
+        uses: azure/cli@v2
+        with:
+          inlineScript: |
+            set -euo pipefail
+            NAME_PREFIX=$(python -c "import json; print(json.load(open('infrastructure/bicep/parameters/dev.parameters.json'))['parameters']['namePrefix']['value'])")
+            LOCATION=$(python -c "import json; print(json.load(open('infrastructure/bicep/parameters/dev.parameters.json'))['parameters']['location']['value'])")
+            DATA_RG="rg-${NAME_PREFIX}-data"
+            MATCHES=$(az cognitiveservices account list-deleted \
+              --query "[?starts_with(name, 'docint-${NAME_PREFIX}-') && location=='${LOCATION}'].[name, location, deletionDate]" \
+              -o tsv || true)
+            if [ -n "${MATCHES}" ]; then
+              echo "::warning::Soft-deleted Document Intelligence account(s) found for prefix ${NAME_PREFIX} in ${LOCATION}."
+              echo "${MATCHES}"
+              echo "::warning::Purge each stale account before rerun, for example:"
+              echo "az cognitiveservices account purge --name <account-name> --resource-group ${DATA_RG} --location ${LOCATION}"
+            fi
+
       - name: Run what-if for dev deployment
         uses: azure/cli@v2
         env:
@@ -70,7 +88,7 @@ jobs:
             az account show --query "{name:name, subscriptionId:id}" -o table
             az deployment sub what-if \
               --name "agon-dev-whatif-${{ github.run_id }}" \
-              --location francecentral \
+              --location swedencentral \
               --template-file infrastructure/bicep/main.bicep \
               --parameters @infrastructure/bicep/parameters/dev.parameters.json \
               --parameters postgresAdminPassword="$AZURE_POSTGRES_ADMIN_PASSWORD"

@@ -3,7 +3,7 @@
   "contentVersion": "1.0.0.0",
   "parameters": {
     "location": {
-      "value": "francecentral"
+      "value": "swedencentral"
     },
     "environment": {
       "value": "dev"
@@ -12,7 +12,7 @@
       "value": "agon"
     },
     "namePrefix": {
-      "value": "agon-dev-frc"
+      "value": "agon-dev-swc"
     },
     "vnetAddressSpace": {
       "value": "10.42.0.0/16"
@@ -33,7 +33,7 @@
       "value": "10.42.5.0/24"
     },
     "appGatewayResourceSuffix": {
-      "value": "basic"
+      "value": ""
     },
     "appGatewaySkuName": {
       "value": "Basic"

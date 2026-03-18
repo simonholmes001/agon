@@ -16,9 +16,9 @@ permissions:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
-  APP_RESOURCE_GROUP: rg-agon-dev-frc-app
-  APP_NAME_PREFIX: app-agon-dev-frc-
-  AGW_PUBLIC_IP_NAME: pip-agon-dev-frc-agw
+  APP_RESOURCE_GROUP: rg-agon-dev-swc-app
+  APP_NAME_PREFIX: app-agon-dev-swc-
+  AGW_PUBLIC_IP_NAME: pip-agon-dev-swc-agw
 
 concurrency:
   group: backend-dev-deploy

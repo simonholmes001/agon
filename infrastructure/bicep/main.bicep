@@ -1,7 +1,7 @@
 targetScope = 'subscription'
 
 @description('Primary Azure region for the dev environment.')
-param location string = 'francecentral'
+param location string = 'swedencentral'
 
 @description('Environment short name.')
 @allowed([
@@ -13,7 +13,7 @@ param environment string = 'dev'
 param workloadName string = 'agon'
 
 @description('CAF-style naming prefix.')
-param namePrefix string = 'agon-dev-frc'
+param namePrefix string = 'agon-dev-swc'
 
 @description('Alert email receiver for action groups.')
 param alertEmail string = 'simonholmesabc@gmail.com'
