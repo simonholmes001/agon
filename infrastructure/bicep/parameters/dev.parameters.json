@@ -36,10 +36,10 @@
       "value": ""
     },
     "appGatewaySkuName": {
-      "value": "Basic"
+      "value": "Standard_v2"
     },
     "appGatewaySkuTier": {
-      "value": "Basic"
+      "value": "Standard_v2"
     },
     "appGatewayInstanceCount": {
       "value": 1

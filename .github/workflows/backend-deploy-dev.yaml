@@ -6,8 +6,10 @@ on:
     paths:
       - 'backend/**'
       - '.github/workflows/backend-deploy-dev.yaml'
-      - 'infrastructure/bicep/main.bicep'
-      - 'infrastructure/bicep/modules/app-edge-dev.bicep'
+  workflow_run:
+    workflows: ['Infrastructure Deploy (Dev)']
+    types: [completed]
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -28,6 +30,7 @@ jobs:
   deploy-dev:
     name: Build, Push, and Deploy Backend (Dev)
     runs-on: ubuntu-latest
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     environment:
       name: dev
 
@@ -41,6 +44,7 @@ jobs:
           dotnet-version: 9.0.x
 
       - name: Run backend tests
+        if: steps.guard.outputs.deploy == 'true'
         working-directory: backend
         run: |
           dotnet restore
@@ -48,6 +52,7 @@ jobs:
           dotnet test --no-build --configuration Release --verbosity normal
 
       - name: Validate required Docker Hub secrets
+        if: steps.guard.outputs.deploy == 'true'
         shell: bash
         env:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -79,13 +84,14 @@ jobs:
         uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2 # v3.10.0
 
       - name: Set image tags
+        if: steps.guard.outputs.deploy == 'true'
         id: image
         shell: bash
         env:
           DOCKERHUB_IMAGE_NAME: ${{ secrets.DOCKERHUB_IMAGE_NAME }}
         run: |
           set -euo pipefail
-          SHORT_SHA="$(echo "${GITHUB_SHA}" | cut -c1-12)"
+          SHORT_SHA="$(echo "${{ steps.guard.outputs.deploy_sha }}" | cut -c1-12)"
           echo "tag_sha=sha-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
           echo "image_sha=${DOCKERHUB_IMAGE_NAME}:sha-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
           echo "image_latest=${DOCKERHUB_IMAGE_NAME}:dev-latest" >> "$GITHUB_OUTPUT"
@@ -115,6 +121,7 @@ jobs:
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Resolve App Service name
+        if: steps.guard.outputs.deploy == 'true'
         id: app
         uses: azure/cli@9f7ce6f37c31b777ec6c6b6d1dfe7db79f497956 # v2.2.0
         with:
