@@ -4,7 +4,7 @@ This document is the source of truth for the `dev` backend infrastructure deploy
 
 ## Target Architecture (Dev)
 
-- Public edge: Azure Application Gateway (SKU is parameterized; default in this branch is `Basic` tier for cost reduction)
+- Public edge: Azure Application Gateway (SKU is parameterized; default is `Basic` tier for cost reduction)
 - App tier: Azure App Service (Linux) in a dedicated app resource group
 - Data tier: Azure Database for PostgreSQL Flexible Server + Azure Cache for Redis + Key Vault
 - Network tier: dedicated VNet/subnets/private DNS zones (including App Service private link DNS)
@@ -16,15 +16,15 @@ This document is the source of truth for the `dev` backend infrastructure deploy
 
 Deployment is **subscription-scope** and creates three resource groups:
 
-- `rg-agon-dev-frc-net`: VNet, subnets, private DNS zones
-- `rg-agon-dev-frc-app`: App Service, Application Gateway, monitoring + alerts
-- `rg-agon-dev-frc-data`: PostgreSQL, Redis, Key Vault (+ private endpoints)
+- `rg-agon-dev-swc-net`: VNet, subnets, private DNS zones
+- `rg-agon-dev-swc-app`: App Service, Application Gateway, monitoring + alerts
+- `rg-agon-dev-swc-data`: PostgreSQL, Redis, Key Vault (+ private endpoints)
 
 This split follows Azure operational best practice: isolate lifecycle and access by domain (network/app/data), not by single mega-RG.
 
 ## Naming Standard
 
-Prefix used by this project: `agon-dev-frc`
+Prefix used by this project: `agon-dev-swc`
 
 Naming follows Azure CAF guidance:
 
@@ -36,11 +36,11 @@ Naming follows Azure CAF guidance:
 
 - Subscription ID: `<your-subscription-id>`
 - Tenant ID: `<your-tenant-id>`
-- Region: `francecentral` (or your approved region)
-- Prefix: `agon-dev-frc` (or your approved prefix)
+- Region: `swedencentral` (or your approved region)
+- Prefix: `agon-dev-swc` (or your approved prefix)
 - Alert email: `<your-alert-email>`
 - `appGatewaySubnetPrefix`: `10.42.4.0/24` (default in dev)
-- `appGatewayResourceSuffix`: `basic` (default in this branch, creates parallel edge resource names)
+- `appGatewayResourceSuffix`: `` (empty for primary gateway names)
 - `appGatewaySkuName`: `Basic` (default in this branch)
 - `appGatewaySkuTier`: `Basic` (default in this branch)
 
@@ -149,18 +149,18 @@ Optional (written into Key Vault during deploy):
 
 ## Legacy Front Door Cleanup (if previously deployed)
 
-If older runs created Front Door/CDN resources, remove them manually from `rg-agon-dev-frc-app`:
+If older runs created Front Door/CDN resources, remove them manually from `rg-agon-dev-swc-app`:
 
 ```bash
 az resource delete \
-  --resource-group rg-agon-dev-frc-app \
+  --resource-group rg-agon-dev-swc-app \
   --resource-type Microsoft.Cdn/profiles \
-  --name afd-agon-dev-frc
+  --name afd-agon-dev-swc
 
 az resource delete \
-  --resource-group rg-agon-dev-frc-app \
+  --resource-group rg-agon-dev-swc-app \
   --resource-type Microsoft.Cdn/cdnWebApplicationFirewallPolicies \
-  --name waf-agon-dev-frc
+  --name waf-agon-dev-swc
 ```
 
 Then rerun deployment from `main`.
@@ -170,12 +170,9 @@ Then rerun deployment from `main`.
 1. Open PR with infra changes -> validation workflow runs (`build` + `what-if`)
 2. Merge PR to `main` -> deploy workflow runs (`az deployment sub create`)
 3. Verify resources in Azure:
-   - `rg-agon-dev-frc-net`
-   - `rg-agon-dev-frc-app`
-   - `rg-agon-dev-frc-data`
-
-For the WAF_v2-to-Basic cost-optimization migration workflow, use:
-- `infrastructure/runbooks/app-gateway-wafv2-to-basic-migration.md`
+   - `rg-agon-dev-swc-net`
+   - `rg-agon-dev-swc-app`
+   - `rg-agon-dev-swc-data`
 
 ## Common Errors
 
@@ -196,11 +193,21 @@ Service principal has no valid RBAC on subscription (or wrong IDs in secrets).
 
 Add `User Access Administrator` (or `Owner`) in addition to `Contributor`.
 
-### API calls succeed initially, then return `403` on follow-up text
+### `FlagMustBeSetForRestore` on Document Intelligence account
 
-If you run a WAF tier (`WAF`/`WAF_v2`), this is likely a false-positive block on request bodies in Prevention mode.
+Cause: a previously deleted `docint-*` account still exists in soft-deleted state.
 
-For dev WAF usage, keep `appGatewayWafMode = Detection` until exclusions/custom rules are tuned for your traffic patterns.
+Check/purge:
+
+```bash
+az cognitiveservices account list-deleted -o table
+az cognitiveservices account purge \
+  --name <docint-account-name> \
+  --resource-group rg-agon-dev-swc-data \
+  --location swedencentral
+```
+
+Both infra workflows now include a preflight warning step to detect this condition before `what-if`/deploy.
 
 ## Security Posture (Dev Baseline)
 

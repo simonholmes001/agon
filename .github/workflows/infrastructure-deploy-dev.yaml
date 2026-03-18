@@ -48,6 +48,28 @@ jobs:
             exit 1
           fi
 
+      - name: Preflight check soft-deleted Document Intelligence accounts
+        uses: azure/cli@v2
+        with:
+          inlineScript: |
+            set -euo pipefail
+            NAME_PREFIX=$(sed -n '/"namePrefix"/,/"value"/p' infrastructure/bicep/parameters/dev.parameters.json | sed -n 's/.*"value"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)
+            LOCATION=$(sed -n '/"location"/,/"value"/p' infrastructure/bicep/parameters/dev.parameters.json | sed -n 's/.*"value"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)
+            if [ -z "${NAME_PREFIX}" ] || [ -z "${LOCATION}" ]; then
+              echo "::warning::Unable to parse namePrefix/location from dev.parameters.json. Skipping soft-delete preflight."
+              exit 0
+            fi
+            DATA_RG="rg-${NAME_PREFIX}-data"
+            MATCHES=$(az cognitiveservices account list-deleted \
+              --query "[?starts_with(name, 'docint-${NAME_PREFIX}-') && location=='${LOCATION}'].[name, location, deletionDate]" \
+              -o tsv || true)
+            if [ -n "${MATCHES}" ]; then
+              echo "::warning::Soft-deleted Document Intelligence account(s) found for prefix ${NAME_PREFIX} in ${LOCATION}."
+              echo "${MATCHES}"
+              echo "::warning::Purge each stale account before rerun, for example:"
+              echo "az cognitiveservices account purge --name <account-name> --resource-group ${DATA_RG} --location ${LOCATION}"
+            fi
+
       - name: Build Bicep templates
         uses: azure/cli@v2
         with:
@@ -72,7 +94,7 @@ jobs:
             az account show --query "{name:name, subscriptionId:id}" -o table
             az deployment sub create \
               --name "agon-dev-deploy-${{ github.run_id }}" \
-              --location francecentral \
+              --location swedencentral \
               --template-file infrastructure/bicep/main.bicep \
               --parameters @infrastructure/bicep/parameters/dev.parameters.json \
               --parameters postgresAdminPassword="$AZURE_POSTGRES_ADMIN_PASSWORD" \
