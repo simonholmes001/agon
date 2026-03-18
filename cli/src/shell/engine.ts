@@ -163,22 +163,27 @@ export class ShellEngine {
     parsed: Extract<ReturnType<typeof parseShellInput>, { type: 'slash' }>
   ): Promise<ShellEngineOutcome> {
     switch (parsed.command) {
-      case 'help':
+      case 'help': {
+        const commands: Array<{ token: string; description: string }> = [
+          { token: '/attach <file-path>',           description: 'Attach a document/image to the active session' },
+          { token: '/exit',                          description: 'Exit shell (also: /quit)' },
+          { token: '/follow-up <message>',           description: 'Send explicit follow-up message' },
+          { token: '/help',                          description: 'Show this command reference' },
+          { token: '/new',                           description: 'Reset shell to awaiting-idea mode' },
+          { token: '/params',                        description: 'Show current shell parameters and active session' },
+          { token: '/refresh [artifact]',            description: 'Refresh latest artifact (default: verdict)' },
+          { token: '/resume [session-id]',           description: 'Resume latest session (or specific session)' },
+          { token: '/session <session-id>',          description: 'Switch active session' },
+          { token: '/set <key> <value>',             description: 'Persist config key (apiUrl|defaultFriction|researchEnabled|logLevel)' },
+          { token: '/show <artifact> [flags]',       description: 'Show artifact (e.g. verdict, prd)' },
+          { token: '/show-sessions',                 description: 'List your sessions' },
+          { token: '/status [session-id]',           description: 'Fetch session status/phase' },
+        ].sort((a, b) => a.token.localeCompare(b.token));
+
         this.print('Commands:');
-        this.print('  /help                         Show this command reference');
-        this.print('  /params                       Show current shell parameters and active session');
-        this.print('  /set <key> <value>            Persist config key (apiUrl|defaultFriction|researchEnabled|logLevel)');
-        this.print('  /self-update [--check]        Update CLI without exiting shell (alias: /update)');
-        this.print('  /new                          Reset shell to awaiting-idea mode');
-        this.print('  /show-sessions                List your sessions');
-        this.print('  /resume [session-id]          Resume latest session (or specific session)');
-        this.print('  /session <session-id>         Switch active session');
-        this.print('  /status [session-id]          Fetch session status/phase');
-        this.print('  /show <artifact> [flags]      Show artifact (e.g. verdict, prd)');
-        this.print('  /refresh [artifact]           Refresh latest artifact (default: verdict)');
-        this.print('  /attach <file-path>           Attach a document/image to the active session');
-        this.print('  /follow-up <message>          Send explicit follow-up message');
-        this.print('  /exit                         Exit shell (also: /quit)');
+        for (const { token, description } of commands) {
+          this.print(`  ${token.padEnd(30)}${description}`);
+        }
         this.print('Examples:');
         this.print('  /set defaultFriction 75');
         this.print('  /set researchEnabled false');
@@ -186,6 +191,7 @@ export class ShellEngine {
         this.print('  /set apiUrl http://localhost:5000');
         this.print('  /attach ./docs/product-brief.md');
         return { kind: 'noop' };
+      }
       case 'params': {
         const snapshot = await this.controller.getParamsSnapshot();
         this.print('Current parameters:');

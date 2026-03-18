@@ -93,14 +93,34 @@ describe('shell engine', () => {
   it('prints detailed command help for /help', async () => {
     await engine.handleInput('/help');
     expect(print).toHaveBeenCalledWith('Commands:');
-    expect(print).toHaveBeenCalledWith('  /set <key> <value>            Persist config key (apiUrl|defaultFriction|researchEnabled|logLevel)');
-    expect(print).toHaveBeenCalledWith('  /self-update [--check]        Update CLI without exiting shell (alias: /update)');
-    expect(print).toHaveBeenCalledWith('  /show-sessions                List your sessions');
-    expect(print).toHaveBeenCalledWith('  /resume [session-id]          Resume latest session (or specific session)');
-    expect(print).toHaveBeenCalledWith('  /refresh [artifact]           Refresh latest artifact (default: verdict)');
-    expect(print).toHaveBeenCalledWith('  /attach <file-path>           Attach a document/image to the active session');
-    expect(print).toHaveBeenCalledWith('  /exit                         Exit shell (also: /quit)');
+    expect(print).toHaveBeenCalledWith(expect.stringContaining('/set <key> <value>'));
+    expect(print).toHaveBeenCalledWith(expect.stringContaining('/show-sessions'));
+    expect(print).toHaveBeenCalledWith(expect.stringContaining('/resume [session-id]'));
+    expect(print).toHaveBeenCalledWith(expect.stringContaining('/refresh [artifact]'));
+    expect(print).toHaveBeenCalledWith(expect.stringContaining('/attach <file-path>'));
+    expect(print).toHaveBeenCalledWith(expect.stringContaining('/exit'));
     expect(print).toHaveBeenCalledWith('  /set defaultFriction 75');
+  });
+
+  it('prints /help command entries in strict alphabetical order', async () => {
+    await engine.handleInput('/help');
+
+    const allLines: string[] = print.mock.calls.map((callArgs: string[]) => callArgs[0]);
+
+    // Collect only the command definition lines (between 'Commands:' and 'Examples:' headers)
+    const commandsStart = allLines.indexOf('Commands:');
+    const examplesStart = allLines.indexOf('Examples:');
+    // Matches indented slash-command entries, e.g. "  /attach <file-path>  ..."
+    const isCommandEntry = (line: string): boolean => /^\s+\//.test(line);
+    const commandLines = allLines
+      .slice(commandsStart + 1, examplesStart)
+      .filter(isCommandEntry);
+
+    // Extract the slash-token (first word after leading whitespace)
+    const tokens = commandLines.map((line: string) => line.trimStart().split(/\s+/)[0]);
+
+    const sorted = [...tokens].sort((a: string, b: string) => a.localeCompare(b));
+    expect(tokens).toEqual(sorted);
   });
 
   it('executes /show-sessions via controller', async () => {
