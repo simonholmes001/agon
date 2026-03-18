@@ -50,9 +50,6 @@
     "appGatewayAutoscaleMaxCapacity": {
       "value": 2
     },
-    "appGatewayWafMode": {
-      "value": "Detection"
-    },
     "appGatewayRequestTimeoutSeconds": {
       "value": 120
     },
