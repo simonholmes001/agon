@@ -4,6 +4,7 @@ using Agon.Application.Services;
 using Agon.Domain.Sessions;
 using Agon.Domain.TruthMap;
 using Microsoft.Extensions.Logging;
+using System.Text.Json;
 
 namespace Agon.Application.Orchestration;
 
@@ -393,11 +394,25 @@ public sealed class AgentRunner : IAgentRunner
                 continue;
             }
 
-            state.TruthMap = await _truthMapRepository.ApplyPatchAsync(
-                state.SessionId, patch, cancellationToken);
+            try
+            {
+                state.TruthMap = await _truthMapRepository.ApplyPatchAsync(
+                    state.SessionId, patch, cancellationToken);
 
-            await _broadcaster.SendTruthMapPatchAsync(
-                state.SessionId, patch, state.TruthMap.Version, cancellationToken);
+                await _broadcaster.SendTruthMapPatchAsync(
+                    state.SessionId, patch, state.TruthMap.Version, cancellationToken);
+            }
+            catch (Exception ex) when (
+                ex is JsonException
+                || ex is InvalidOperationException
+                || ex is NotSupportedException)
+            {
+                // Do not fail the whole request on malformed agent patch payloads.
+                _logger?.LogWarning(
+                    ex,
+                    "Patch from agent {AgentId} failed at apply-time and was skipped.",
+                    response.AgentId);
+            }
         }
     }
 

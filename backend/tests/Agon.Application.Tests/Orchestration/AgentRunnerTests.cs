@@ -9,6 +9,7 @@ using Agon.Domain.TruthMap.Entities;
 using FluentAssertions;
 using NSubstitute;
 using System.Diagnostics;
+using System.Text.Json;
 using TruthMapModel = Agon.Domain.TruthMap.TruthMap;
 
 namespace Agon.Application.Tests.Orchestration;
@@ -495,6 +496,47 @@ public class AgentRunnerTests
         await runner.RunModeratorAsync(state, CancellationToken.None);
 
         // Assert
+        await repo.Received(1).ApplyPatchAsync(SessionId, patch, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task RunModeratorAsync_WhenPatchApplyThrowsJsonException_ShouldSkipPatchAndNotThrow()
+    {
+        // Arrange
+        var repo = Substitute.For<ITruthMapRepository>();
+        var map = EmptyMap();
+        repo.GetAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<TruthMapModel?>(map));
+        repo.ApplyPatchAsync(Arg.Any<Guid>(), Arg.Any<TruthMapPatch>(), Arg.Any<CancellationToken>())
+            .Returns<Task<TruthMapModel>>(_ => throw new JsonException("Malformed patch payload"));
+
+        var patch = new TruthMapPatch(
+            [new PatchOperation(PatchOp.Add, "/open_questions/0", "Who is the primary target?")],
+            new PatchMeta(AgentId.Moderator, 1, "Moderator patch", SessionId));
+
+        var moderatorResponse = new AgentResponse(
+            AgentId.Moderator,
+            "STATUS: NEEDS_INFO",
+            patch,
+            100,
+            false,
+            null);
+
+        var moderator = Substitute.For<ICouncilAgent>();
+        moderator.AgentId.Returns(AgentId.Moderator);
+        moderator.ModelProvider.Returns("fake/model");
+        moderator.RunAsync(Arg.Any<AgentContext>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(moderatorResponse));
+
+        var runner = BuildRunner([moderator], repo: repo);
+        var state = BuildSessionState();
+        state.Phase = SessionPhase.Clarification;
+
+        // Act
+        var act = async () => await runner.RunModeratorAsync(state, CancellationToken.None);
+
+        // Assert
+        await act.Should().NotThrowAsync();
         await repo.Received(1).ApplyPatchAsync(SessionId, patch, Arg.Any<CancellationToken>());
     }
 
