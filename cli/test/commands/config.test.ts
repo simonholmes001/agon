@@ -14,8 +14,7 @@ import Config from '../../src/commands/config';
 
 // vi.mock() is hoisted to before all variable declarations in vitest 4.x,
 // so mockConfigManager must be initialised with vi.hoisted() to be available
-// inside the factory. A regular function (not an arrow) is used so it can be
-// called with `new` by the command under test.
+// inside the factory.
 const mockConfigManager = vi.hoisted(() => ({
   load: vi.fn(),
   get: vi.fn(),
@@ -25,6 +24,10 @@ const mockConfigManager = vi.hoisted(() => ({
 }));
 
 vi.mock('../../src/state/config-manager.js', () => ({
+  // Regular function (not arrow) required: vitest 4.x invokes the implementation
+  // with `new` when the mock is called as a constructor, and arrow functions
+  // cannot be constructors. Returning mockConfigManager makes `new ConfigManager()`
+  // resolve to the shared mock instance.
   ConfigManager: vi.fn(function () { return mockConfigManager; })
 }));
 
