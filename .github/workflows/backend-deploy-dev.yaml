@@ -120,28 +120,50 @@ jobs:
         with:
           inlineScript: |
             set -euo pipefail
-            APPS=$(az webapp list \
-              --query "[?tags.environment=='dev' && tags.workload=='agon'].[name,resourceGroup]" \
-              --output tsv)
-
-            if [ -z "${APPS}" ]; then
-              APPS=$(az webapp list \
-                --query "[?starts_with(name, 'app-agon-dev-')].[name,resourceGroup]" \
+            APP_MATCH=""
+            for attempt in $(seq 1 20); do
+              APP_MATCH=$(az webapp list \
+                --query "[?tags.environment=='dev' && tags.workload=='agon' && contains(resourceGroup, '-swc-')].[name,resourceGroup] | [0]" \
                 --output tsv)
-            fi
 
-            if [ -z "${APPS}" ]; then
-              echo "No dev App Service found for workload 'agon'. Deploy infrastructure first."
+              if [ -z "${APP_MATCH}" ]; then
+                APP_MATCH=$(az webapp list \
+                  --query "[?tags.environment=='dev' && tags.workload=='agon'].[name,resourceGroup] | [0]" \
+                  --output tsv)
+              fi
+
+              if [ -z "${APP_MATCH}" ]; then
+                APP_MATCH=$(az webapp list \
+                  --query "[?starts_with(name, 'app-agon-dev-') && contains(resourceGroup, '-swc-')].[name,resourceGroup] | [0]" \
+                  --output tsv)
+              fi
+
+              if [ -z "${APP_MATCH}" ]; then
+                APP_MATCH=$(az webapp list \
+                  --query "[?starts_with(name, 'app-agon-dev-')].[name,resourceGroup] | [0]" \
+                  --output tsv)
+              fi
+
+              if [ -n "${APP_MATCH}" ]; then
+                break
+              fi
+
+              echo "Attempt ${attempt}/20: no App Service found yet, waiting for infra readiness..."
+              sleep 30
+            done
+
+            if [ -z "${APP_MATCH}" ]; then
+              echo "No dev App Service found for workload 'agon' after waiting 10 minutes."
+              echo "Current web apps in subscription:"
+              az webapp list --query "[].{name:name,resourceGroup:resourceGroup}" --output table
               exit 1
             fi
 
-            PREFERRED=$(echo "${APPS}" | awk '$2 ~ /-swc-/ {print $0; exit}')
-            if [ -n "${PREFERRED}" ]; then
-              APP_NAME=$(echo "${PREFERRED}" | awk '{print $1}')
-              APP_RESOURCE_GROUP=$(echo "${PREFERRED}" | awk '{print $2}')
-            else
-              APP_NAME=$(echo "${APPS}" | head -n1 | awk '{print $1}')
-              APP_RESOURCE_GROUP=$(echo "${APPS}" | head -n1 | awk '{print $2}')
+            IFS=$'\t' read -r APP_NAME APP_RESOURCE_GROUP <<< "${APP_MATCH}"
+
+            if [ -z "${APP_NAME:-}" ] || [ -z "${APP_RESOURCE_GROUP:-}" ]; then
+              echo "App Service match could not be parsed: '${APP_MATCH}'"
+              exit 1
             fi
 
             echo "Resolved app service: ${APP_NAME}"
