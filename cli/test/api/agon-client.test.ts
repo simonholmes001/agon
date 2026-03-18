@@ -390,6 +390,36 @@ describe('AgonAPIClient', () => {
       );
       expect(result).toEqual(attachment);
     });
+
+    it('returns actionable error when attachment file is missing', async () => {
+      const sessionId = 'session-123';
+      const fsError: any = new Error('ENOENT');
+      fsError.code = 'ENOENT';
+      (fsPromises.stat as any).mockRejectedValue(fsError);
+
+      await expect(client.uploadAttachment(sessionId, './missing.pdf')).rejects.toMatchObject({
+        code: ErrorCode.INVALID_INPUT,
+        message: 'Attachment file not found: ./missing.pdf'
+      });
+      expect(mockAxios.post).not.toHaveBeenCalled();
+    });
+
+    it('returns actionable error when attachment cannot be read', async () => {
+      const sessionId = 'session-123';
+      (fsPromises.stat as any).mockResolvedValue({
+        isFile: () => true,
+        size: 11
+      });
+      const fsError: any = new Error('EACCES');
+      fsError.code = 'EACCES';
+      (fsPromises.readFile as any).mockRejectedValue(fsError);
+
+      await expect(client.uploadAttachment(sessionId, './restricted.pdf')).rejects.toMatchObject({
+        code: ErrorCode.INVALID_INPUT,
+        message: 'Permission denied reading attachment: ./restricted.pdf'
+      });
+      expect(mockAxios.post).not.toHaveBeenCalled();
+    });
   });
 
   describe('retry policy', () => {

@@ -135,7 +135,7 @@ var appResourceGroupName = 'rg-${namePrefix}-app'
 var dataResourceGroupName = 'rg-${namePrefix}-data'
 var appServiceName = 'app-${namePrefix}-${take(uniqueString(subscription().id, rgApp.id, namePrefix, environment), 12)}'
 var normalizedAppGatewaySkuTier = toLower(appGatewaySkuTier)
-var isModernAppGatewayTier = normalizedAppGatewaySkuTier == 'basic' || endsWith(normalizedAppGatewaySkuTier, '_v2')
+var isModernAppGatewayTier = endsWith(normalizedAppGatewaySkuTier, '_v2')
 var isParallelAppGatewayDeployment = !empty(appGatewayResourceSuffix)
 
 resource rgNet 'Microsoft.Resources/resourceGroups@2023-07-01' = {

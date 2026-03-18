@@ -141,7 +141,7 @@ var httpToHttpsRedirectName = 'redirect-http-to-https'
 var appGatewaySslCertificateName = 'agw-cert'
 var enableHttpsListener = !empty(appGatewaySslCertificatePfxBase64) && !empty(appGatewaySslCertificatePassword)
 var normalizedAppGatewaySkuTier = toLower(appGatewaySkuTier)
-var isModernAppGatewaySku = normalizedAppGatewaySkuTier == 'basic' || endsWith(normalizedAppGatewaySkuTier, '_v2')
+var isModernAppGatewaySku = endsWith(normalizedAppGatewaySkuTier, '_v2')
 var isLegacyV1Sku = !isModernAppGatewaySku
 var appGatewayPublicIpName = isModernAppGatewaySku
   ? 'pip-${namePrefix}-agw${appGatewayResourceSuffixSegment}'

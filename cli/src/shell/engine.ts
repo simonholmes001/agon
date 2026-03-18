@@ -1,4 +1,5 @@
 import type { SessionResponse } from '../api/types.js';
+import type { SelfUpdateFailureCategory } from '../utils/self-update.js';
 import { parseShellInput } from './parser.js';
 import type { PlainInputRoute } from './router.js';
 
@@ -45,8 +46,35 @@ interface ShellControllerLike {
 export interface ShellEngineDeps {
   controller: ShellControllerLike;
   routePlainInput: (session: SessionResponse | null) => PlainInputRoute;
+  selfUpdate: (options: { check: boolean }) => Promise<ShellSelfUpdateResult>;
   print: (line: string) => void;
 }
+
+export type ShellSelfUpdateResult =
+  | {
+      status: 'up-to-date';
+      currentVersion: string;
+    }
+  | {
+      status: 'update-available';
+      currentVersion: string;
+      latestVersion: string;
+      installCommand: string;
+    }
+  | {
+      status: 'updated';
+      currentVersion: string;
+      latestVersion: string;
+    }
+  | {
+      status: 'failed';
+      currentVersion: string;
+      latestVersion: string;
+      reason: SelfUpdateFailureCategory;
+      message: string;
+      guidance: string;
+      installCommand: string;
+    };
 
 export type ShellEngineOutcome =
   | { kind: 'noop' }
@@ -73,11 +101,13 @@ export type ShellEngineOutcome =
 export class ShellEngine {
   private readonly controller: ShellControllerLike;
   private readonly routePlainInputFn: (session: SessionResponse | null) => PlainInputRoute;
+  private readonly selfUpdateFn: (options: { check: boolean }) => Promise<ShellSelfUpdateResult>;
   private readonly print: (line: string) => void;
 
   constructor(deps: ShellEngineDeps) {
     this.controller = deps.controller;
     this.routePlainInputFn = deps.routePlainInput;
+    this.selfUpdateFn = deps.selfUpdate;
     this.print = deps.print;
   }
 
@@ -93,11 +123,48 @@ export class ShellEngine {
       return this.handleSlash(parsed);
     }
 
+    return this.handlePlainInput(parsed.text);
+  }
+
+  private async handlePlainInput(text: string): Promise<ShellEngineOutcome> {
+    const inlineAttach = extractInlineAttach(text);
+    if (inlineAttach?.type === 'error') {
+      this.print(inlineAttach.message);
+      return { kind: 'noop' };
+    }
+
+    let plainText = text;
+    if (inlineAttach?.type === 'attach') {
+      const result = await this.controller.attachDocument(inlineAttach.path);
+      if (!inlineAttach.remainingText) {
+        return {
+          kind: 'attachment',
+          sessionId: result.sessionId,
+          fileName: result.attachment.fileName,
+          contentType: result.attachment.contentType,
+          sizeBytes: result.attachment.sizeBytes,
+          hasExtractedText: result.attachment.hasExtractedText
+        };
+      }
+
+      this.print(
+        `Attached ${result.attachment.fileName} to session ${result.sessionId}.`
+        + ` Type: ${result.attachment.contentType} | Size: ${result.attachment.sizeBytes} B`
+      );
+      if (result.attachment.hasExtractedText) {
+        this.print('Document text extracted and added to agent context.');
+      } else {
+        this.print('No text extraction available; file metadata/link still added to context.');
+      }
+
+      plainText = inlineAttach.remainingText;
+    }
+
     const activeSession = await this.controller.getActiveSession();
     const route = this.routePlainInputFn(activeSession);
 
     if (route.action === 'start') {
-      const started = await this.controller.startIdea(parsed.text);
+      const started = await this.controller.startIdea(plainText);
       return {
         kind: 'started',
         sessionId: started.session.id,
@@ -111,7 +178,7 @@ export class ShellEngine {
     }
 
     if (route.action === 'follow-up') {
-      const followUp = await this.controller.submitFollowUp(parsed.text);
+      const followUp = await this.controller.submitFollowUp(plainText);
       return {
         kind: 'follow-up',
         sessionId: followUp.session.id,
@@ -133,21 +200,27 @@ export class ShellEngine {
     parsed: Extract<ReturnType<typeof parseShellInput>, { type: 'slash' }>
   ): Promise<ShellEngineOutcome> {
     switch (parsed.command) {
-      case 'help':
+      case 'help': {
+        const commands: Array<{ token: string; description: string }> = [
+          { token: '/attach <file-path>',           description: 'Attach a document/image to the active session' },
+          { token: '/exit',                          description: 'Exit shell (also: /quit)' },
+          { token: '/follow-up <message>',           description: 'Send explicit follow-up message' },
+          { token: '/help',                          description: 'Show this command reference' },
+          { token: '/new',                           description: 'Reset shell to awaiting-idea mode' },
+          { token: '/params',                        description: 'Show current shell parameters and active session' },
+          { token: '/refresh [artifact]',            description: 'Refresh latest artifact (default: verdict)' },
+          { token: '/resume [session-id]',           description: 'Resume latest session (or specific session)' },
+          { token: '/session <session-id>',          description: 'Switch active session' },
+          { token: '/set <key> <value>',             description: 'Persist config key (apiUrl|defaultFriction|researchEnabled|logLevel)' },
+          { token: '/show <artifact> [flags]',       description: 'Show artifact (e.g. verdict, prd)' },
+          { token: '/show-sessions',                 description: 'List your sessions' },
+          { token: '/status [session-id]',           description: 'Fetch session status/phase' },
+        ].sort((a, b) => a.token.localeCompare(b.token));
+
         this.print('Commands:');
-        this.print('  /help                         Show this command reference');
-        this.print('  /params                       Show current shell parameters and active session');
-        this.print('  /set <key> <value>            Persist config key (apiUrl|defaultFriction|researchEnabled|logLevel)');
-        this.print('  /new                          Reset shell to awaiting-idea mode');
-        this.print('  /show-sessions                List your sessions');
-        this.print('  /resume [session-id]          Resume latest session (or specific session)');
-        this.print('  /session <session-id>         Switch active session');
-        this.print('  /status [session-id]          Fetch session status/phase');
-        this.print('  /show <artifact> [flags]      Show artifact (e.g. verdict, prd)');
-        this.print('  /refresh [artifact]           Refresh latest artifact (default: verdict)');
-        this.print('  /attach <file-path>           Attach a document/image to the active session');
-        this.print('  /follow-up <message>          Send explicit follow-up message');
-        this.print('  /exit                         Exit shell (also: /quit)');
+        for (const { token, description } of commands) {
+          this.print(`  ${token.padEnd(30)}${description}`);
+        }
         this.print('Examples:');
         this.print('  /set defaultFriction 75');
         this.print('  /set researchEnabled false');
@@ -155,6 +228,7 @@ export class ShellEngine {
         this.print('  /set apiUrl http://localhost:5000');
         this.print('  /attach ./docs/product-brief.md');
         return { kind: 'noop' };
+      }
       case 'params': {
         const snapshot = await this.controller.getParamsSnapshot();
         this.print('Current parameters:');
@@ -174,6 +248,25 @@ export class ShellEngine {
         await this.controller.clearShellSessionSelection();
         this.print('Ready for a new idea.');
         return { kind: 'noop' };
+      case 'self-update': {
+        const result = await this.selfUpdateFn({ check: parsed.check });
+        switch (result.status) {
+          case 'up-to-date':
+            return { kind: 'notice', message: `You are already on the latest version (${result.currentVersion}).` };
+          case 'update-available':
+            this.print(`Update available: v${result.currentVersion} -> v${result.latestVersion}`);
+            this.print(`Install with: ${result.installCommand}`);
+            return { kind: 'noop' };
+          case 'updated':
+            this.print(`Updated CLI from v${result.currentVersion} to v${result.latestVersion}.`);
+            this.print('Current shell session stays active. Restart later to run the new runtime.');
+            return { kind: 'noop' };
+          case 'failed':
+            this.print(`Self-update failed (${result.reason}): ${result.message}`);
+            this.print(result.guidance);
+            return { kind: 'noop' };
+        }
+      }
       case 'show-sessions': {
         const sessions = await this.controller.listSessions();
         if (sessions.length === 0) {

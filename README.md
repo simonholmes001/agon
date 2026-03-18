@@ -7,7 +7,7 @@
 [![.NET](https://img.shields.io/badge/.NET-9-512BD4?style=flat-square&logo=dotnet&logoColor=fff)](https://dotnet.microsoft.com)
 [![Vitest](https://img.shields.io/badge/Tested_with-Vitest-6E9F18?style=flat-square&logo=vitest&logoColor=fff)](https://vitest.dev)
 [![xUnit](https://img.shields.io/badge/Tested_with-xUnit-512BD4?style=flat-square&logo=dotnet&logoColor=fff)](https://xunit.net)
-[![Tests](https://img.shields.io/badge/Tests-769_passing-brightgreen?style=flat-square)]()
+[![Tests](https://img.shields.io/badge/Tests-777_passing-brightgreen?style=flat-square)]()
 [![Coverage](https://img.shields.io/badge/Coverage-40%25_lines-red?style=flat-square)]()
 [![TDD](https://img.shields.io/badge/Methodology-TDD-red?style=flat-square)]()
 [![Licence](https://img.shields.io/badge/Licence-Private-lightgrey?style=flat-square)]()
@@ -225,15 +225,17 @@ After launching `agon`, use these in-shell commands:
 /refresh verdict
 /attach "./docs/product-brief.pdf"
 /follow-up "<your request>"
+/self-update [--check]
 /exit
 ```
 
 Notes:
 - `agon --version` prints the installed CLI version and exits.
 - `agon --help` shows launcher help.
-- `agon --self-update` updates the global CLI install (run from terminal, not inside the interactive shell).
+- `agon --self-update` updates the global CLI install from terminal.
+- `/self-update` runs the same update flow from inside an active shell session.
 - By default, Agon CLI connects to the hosted backend endpoint (no manual `apiUrl` setup required for end users).
-- If startup shows an update prompt, exit shell first (`/exit`) then run `agon --self-update`.
+- After successful in-shell update, your current session remains usable; restart later to run the newly installed runtime.
 - On startup, Agon checks npm and alerts when a newer stable version is available.
 
 ### Web Application (In Development)

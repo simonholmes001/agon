@@ -1,8 +1,12 @@
 import { Command, Flags } from '@oclif/core';
 import ora from 'ora';
 import chalk from 'chalk';
-import { spawn } from 'node:child_process';
 import { checkForCliUpdate } from '../utils/update-check.js';
+import {
+  describeSelfUpdateFailure,
+  getSelfUpdateGuidance,
+  runNpmGlobalInstall as npmGlobalInstall
+} from '../utils/self-update.js';
 
 export default class SelfUpdate extends Command {
   static override readonly description = 'Update Agon CLI to the latest version';
@@ -54,39 +58,19 @@ export default class SelfUpdate extends Command {
     try {
       await this.installLatest(packageName);
       installSpinner.succeed(`Updated to v${updateInfo.latestVersion}.`);
+      this.log(chalk.dim('Current process continues running this session. Restart later to use the updated runtime.'));
     } catch (error) {
       installSpinner.fail('Update failed.');
-      const message = error instanceof Error ? error.message : String(error);
+      const failure = describeSelfUpdateFailure(error);
+      const guidance = getSelfUpdateGuidance(failure.category, updateInfo.installCommand);
       this.error(
-        `${message}\nRun manually: ${updateInfo.installCommand}`,
+        `${failure.message}\n${guidance}`,
         { exit: 1 }
       );
     }
   }
 
   protected async installLatest(packageName: string): Promise<void> {
-    await runNpmGlobalInstall(packageName);
+    await npmGlobalInstall(packageName);
   }
-}
-
-export function runNpmGlobalInstall(packageName: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const child = spawn('npm', ['install', '-g', `${packageName}@latest`], {
-      stdio: 'inherit',
-      shell: process.platform === 'win32'
-    });
-
-    child.on('error', (error) => {
-      reject(new Error(`Unable to start npm: ${error.message}`));
-    });
-
-    child.on('exit', (code) => {
-      if (code === 0) {
-        resolve();
-        return;
-      }
-
-      reject(new Error(`npm install exited with status ${code ?? 'unknown'}`));
-    });
-  });
 }
