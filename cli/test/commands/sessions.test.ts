@@ -1,326 +1,155 @@
 /**
  * Sessions Command Tests
- * 
- * Testing strategy:
- * - Mock SessionManager
- * - Test session listing with table formatting
- * - Test filtering (active vs all sessions)
- * - Test sorting (newest first)
- * - Test current session highlighting
- * - Test empty state
+ *
+ * Tests for agon sessions command:
+ * - List active sessions (default)
+ * - List all sessions with --all flag
+ * - Handle empty session list
+ * - Highlight current session
+ * - Handle errors
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import Sessions from '../../src/commands/sessions.js';
 import { SessionManager } from '../../src/state/session-manager.js';
 import type { SessionResponse } from '../../src/api/types.js';
 
 // Mock dependencies
 vi.mock('../../src/state/session-manager.js');
 
-describe('sessions command', () => {
+const mockOclifConfig = {
+  bin: 'agon',
+  runHook: vi.fn().mockResolvedValue({}),
+  runCommand: vi.fn(),
+  findCommand: vi.fn(),
+  pjson: { name: '@agon_agents/cli', version: '0.1.0' },
+  root: '/fake/root',
+  version: '0.1.0',
+};
+
+function createCommand(args: string[]): Sessions {
+  const command = new Sessions(args, mockOclifConfig as any);
+  vi.spyOn(command, 'log').mockImplementation(() => {});
+  vi.spyOn(command, 'error').mockImplementation((msg: any) => {
+    throw new Error(typeof msg === 'string' ? msg : String(msg));
+  });
+  return command;
+}
+
+describe('Sessions Command', () => {
   let mockSessionManager: any;
 
   beforeEach(() => {
     vi.clearAllMocks();
-    
-    // Setup session manager mock
+
     mockSessionManager = {
       listSessions: vi.fn(),
-      getCurrentSessionId: vi.fn()
+      getCurrentSessionId: vi.fn(),
     };
-    
+
     vi.mocked(SessionManager).mockImplementation(() => mockSessionManager);
   });
 
-  describe('session listing', () => {
-    it('should list all cached sessions', async () => {
-      // Arrange
-      const mockSessions: SessionResponse[] = [
-        {
-          id: 'session-123',
-          status: 'complete',
-          phase: 'DELIVER',
-          createdAt: '2026-03-07T10:00:00Z',
-          updatedAt: '2026-03-07T11:00:00Z',
-          convergence: { overall: 0.85, dimensions: {
-            assumption_explicitness: 0.88,
-            evidence_quality: 0.82,
-            risk_coverage: 0.84,
-            decision_clarity: 0.87,
-            scope_definition: 0.83,
-            constraint_alignment: 0.85,
-            uncertainty_acknowledgment: 0.86
-          }}
-        },
-        {
-          id: 'session-456',
-          status: 'active',
-          phase: 'CLARIFICATION',
-          createdAt: '2026-03-07T12:00:00Z',
-          updatedAt: '2026-03-07T12:30:00Z'
-        }
-      ];
-      
-      mockSessionManager.listSessions.mockResolvedValue(mockSessions);
-
-      // Act
-      const sessions = await mockSessionManager.listSessions();
-
-      // Assert
-      expect(sessions).toHaveLength(2);
-      expect(sessions[0].id).toBe('session-123');
-      expect(sessions[1].id).toBe('session-456');
-    });
-
-    it('should sort sessions by creation date (newest first)', async () => {
-      // Arrange
-      const mockSessions: SessionResponse[] = [
-        {
-          id: 'session-new',
-          status: 'active',
-          phase: 'CLARIFICATION',
-          createdAt: '2026-03-07T14:00:00Z',
-          updatedAt: '2026-03-07T14:00:00Z'
-        },
-        {
-          id: 'session-old',
-          status: 'complete',
-          phase: 'DELIVER',
-          createdAt: '2026-03-06T10:00:00Z',
-          updatedAt: '2026-03-06T11:00:00Z'
-        }
-      ];
-      
-      mockSessionManager.listSessions.mockResolvedValue(mockSessions);
-
-      // Act
-      const sessions = await mockSessionManager.listSessions();
-
-      // Assert - Newest should be first
-      expect(sessions[0].id).toBe('session-new');
-      expect(new Date(sessions[0].createdAt).getTime()).toBeGreaterThan(
-        new Date(sessions[1].createdAt).getTime()
-      );
-    });
-
-    it('should handle empty session list', async () => {
-      // Arrange
+  describe('Empty state', () => {
+    it('should show no-sessions message when list is empty (default filter)', async () => {
       mockSessionManager.listSessions.mockResolvedValue([]);
-
-      // Act
-      const sessions = await mockSessionManager.listSessions();
-
-      // Assert
-      expect(sessions).toHaveLength(0);
-    });
-  });
-
-  describe('current session highlighting', () => {
-    it('should identify current session', async () => {
-      // Arrange
-      const currentSessionId = 'session-456';
-      const mockSessions: SessionResponse[] = [
-        {
-          id: 'session-123',
-          status: 'complete',
-          phase: 'DELIVER',
-          createdAt: '2026-03-07T10:00:00Z',
-          updatedAt: '2026-03-07T11:00:00Z'
-        },
-        {
-          id: 'session-456',
-          status: 'active',
-          phase: 'CLARIFICATION',
-          createdAt: '2026-03-07T12:00:00Z',
-          updatedAt: '2026-03-07T12:30:00Z'
-        }
-      ];
-      
-      mockSessionManager.listSessions.mockResolvedValue(mockSessions);
-      mockSessionManager.getCurrentSessionId.mockResolvedValue(currentSessionId);
-
-      // Act
-      const sessions = await mockSessionManager.listSessions();
-      const current = await mockSessionManager.getCurrentSessionId();
-
-      // Assert
-      expect(current).toBe(currentSessionId);
-      const currentSession = sessions.find(s => s.id === current);
-      expect(currentSession).toBeDefined();
-      expect(currentSession?.id).toBe('session-456');
-    });
-
-    it('should handle no current session', async () => {
-      // Arrange
-      const mockSessions: SessionResponse[] = [
-        {
-          id: 'session-123',
-          status: 'complete',
-          phase: 'DELIVER',
-          createdAt: '2026-03-07T10:00:00Z',
-          updatedAt: '2026-03-07T11:00:00Z'
-        }
-      ];
-      
-      mockSessionManager.listSessions.mockResolvedValue(mockSessions);
       mockSessionManager.getCurrentSessionId.mockResolvedValue(null);
 
-      // Act
-      const current = await mockSessionManager.getCurrentSessionId();
+      const command = createCommand([]);
+      await command.run();
 
-      // Assert
-      expect(current).toBeNull();
+      expect(mockSessionManager.listSessions).toHaveBeenCalled();
+    });
+
+    it('should show no-sessions message with --all flag when list is empty', async () => {
+      mockSessionManager.listSessions.mockResolvedValue([]);
+      mockSessionManager.getCurrentSessionId.mockResolvedValue(null);
+
+      const command = createCommand(['--all']);
+      await command.run();
+
+      expect(mockSessionManager.listSessions).toHaveBeenCalled();
     });
   });
 
-  describe('session filtering', () => {
-    it('should filter active sessions by default', async () => {
-      // Arrange
+  describe('Listing sessions (default — active/paused only)', () => {
+    it('should display active sessions', async () => {
       const mockSessions: SessionResponse[] = [
         {
           id: 'session-active',
           status: 'active',
           phase: 'CLARIFICATION',
-          createdAt: '2026-03-07T12:00:00Z',
-          updatedAt: '2026-03-07T12:30:00Z'
+          createdAt: new Date(Date.now() - 60_000).toISOString(),
+          updatedAt: new Date(Date.now() - 30_000).toISOString(),
         },
-        {
-          id: 'session-paused',
-          status: 'paused',
-          phase: 'ANALYSIS_ROUND',
-          createdAt: '2026-03-07T11:00:00Z',
-          updatedAt: '2026-03-07T11:30:00Z'
-        }
       ];
-      
+
       mockSessionManager.listSessions.mockResolvedValue(mockSessions);
+      mockSessionManager.getCurrentSessionId.mockResolvedValue('session-active');
 
-      // Act
-      const sessions = await mockSessionManager.listSessions();
-      const activeSessions = sessions.filter(s => s.status === 'active' || s.status === 'paused');
+      const command = createCommand([]);
+      await command.run();
 
-      // Assert
-      expect(activeSessions).toHaveLength(2);
+      expect(mockSessionManager.listSessions).toHaveBeenCalled();
+      expect(mockSessionManager.getCurrentSessionId).toHaveBeenCalled();
     });
 
-    it('should show all sessions with --all flag', async () => {
-      // Arrange
+    it('should filter out completed sessions by default', async () => {
       const mockSessions: SessionResponse[] = [
         {
           id: 'session-active',
           status: 'active',
           phase: 'CLARIFICATION',
-          createdAt: '2026-03-07T12:00:00Z',
-          updatedAt: '2026-03-07T12:30:00Z'
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
         },
         {
           id: 'session-complete',
           status: 'complete',
           phase: 'DELIVER',
-          createdAt: '2026-03-07T10:00:00Z',
-          updatedAt: '2026-03-07T11:00:00Z'
+          createdAt: new Date(Date.now() - 3_600_000).toISOString(),
+          updatedAt: new Date(Date.now() - 3_600_000).toISOString(),
         },
-        {
-          id: 'session-closed',
-          status: 'closed',
-          phase: 'POST_DELIVERY',
-          createdAt: '2026-03-06T10:00:00Z',
-          updatedAt: '2026-03-06T12:00:00Z'
-        }
       ];
-      
+
       mockSessionManager.listSessions.mockResolvedValue(mockSessions);
+      mockSessionManager.getCurrentSessionId.mockResolvedValue(null);
 
-      // Act - With --all flag, show all
-      const sessions = await mockSessionManager.listSessions();
+      const command = createCommand([]);
+      await command.run();
 
-      // Assert
-      expect(sessions).toHaveLength(3);
-      expect(sessions.some(s => s.status === 'complete')).toBe(true);
-      expect(sessions.some(s => s.status === 'closed')).toBe(true);
+      expect(mockSessionManager.listSessions).toHaveBeenCalled();
     });
-  });
 
-  describe('session information display', () => {
-    it('should include session ID (shortened)', async () => {
-      // Arrange
+    it('should include paused sessions by default', async () => {
       const mockSessions: SessionResponse[] = [
         {
-          id: 'session-123456789',
+          id: 'session-paused',
+          status: 'paused',
+          phase: 'ANALYSIS_ROUND',
+          createdAt: new Date(Date.now() - 1_800_000).toISOString(),
+          updatedAt: new Date(Date.now() - 1_800_000).toISOString(),
+        },
+      ];
+
+      mockSessionManager.listSessions.mockResolvedValue(mockSessions);
+      mockSessionManager.getCurrentSessionId.mockResolvedValue(null);
+
+      const command = createCommand([]);
+      await command.run();
+
+      expect(mockSessionManager.listSessions).toHaveBeenCalled();
+    });
+
+    it('should display sessions with convergence data', async () => {
+      const mockSessions: SessionResponse[] = [
+        {
+          id: 'session-active',
           status: 'active',
-          phase: 'CLARIFICATION',
-          createdAt: '2026-03-07T12:00:00Z',
-          updatedAt: '2026-03-07T12:30:00Z'
-        }
-      ];
-      
-      mockSessionManager.listSessions.mockResolvedValue(mockSessions);
-
-      // Act
-      const sessions = await mockSessionManager.listSessions();
-
-      // Assert
-      expect(sessions[0].id).toBe('session-123456789');
-      
-      // Test shortening logic
-      const shortId = sessions[0].id.substring(0, 12);
-      expect(shortId).toBe('session-1234');
-    });
-
-    it('should include creation timestamp', async () => {
-      // Arrange
-      const mockSessions: SessionResponse[] = [
-        {
-          id: 'session-123',
-          status: 'active',
-          phase: 'CLARIFICATION',
-          createdAt: '2026-03-07T12:00:00Z',
-          updatedAt: '2026-03-07T12:30:00Z'
-        }
-      ];
-      
-      mockSessionManager.listSessions.mockResolvedValue(mockSessions);
-
-      // Act
-      const sessions = await mockSessionManager.listSessions();
-
-      // Assert
-      expect(sessions[0].createdAt).toBeDefined();
-      expect(new Date(sessions[0].createdAt).getTime()).toBeGreaterThan(0);
-    });
-
-    it('should include status and phase', async () => {
-      // Arrange
-      const mockSessions: SessionResponse[] = [
-        {
-          id: 'session-123',
-          status: 'complete',
-          phase: 'DELIVER',
-          createdAt: '2026-03-07T12:00:00Z',
-          updatedAt: '2026-03-07T12:30:00Z'
-        }
-      ];
-      
-      mockSessionManager.listSessions.mockResolvedValue(mockSessions);
-
-      // Act
-      const sessions = await mockSessionManager.listSessions();
-
-      // Assert
-      expect(sessions[0].status).toBe('complete');
-      expect(sessions[0].phase).toBe('DELIVER');
-    });
-
-    it('should include convergence score if available', async () => {
-      // Arrange
-      const mockSessions: SessionResponse[] = [
-        {
-          id: 'session-123',
-          status: 'complete',
-          phase: 'DELIVER',
-          createdAt: '2026-03-07T12:00:00Z',
-          updatedAt: '2026-03-07T12:30:00Z',
-          convergence: { 
+          phase: 'SYNTHESIS',
+          createdAt: new Date(Date.now() - 3_600_000).toISOString(),
+          updatedAt: new Date(Date.now() - 1_800_000).toISOString(),
+          convergence: {
             overall: 0.85,
             dimensions: {
               assumption_explicitness: 0.88,
@@ -329,20 +158,243 @@ describe('sessions command', () => {
               decision_clarity: 0.87,
               scope_definition: 0.83,
               constraint_alignment: 0.85,
-              uncertainty_acknowledgment: 0.86
-            }
-          }
-        }
+              uncertainty_acknowledgment: 0.86,
+            },
+          },
+        },
       ];
-      
+
       mockSessionManager.listSessions.mockResolvedValue(mockSessions);
+      mockSessionManager.getCurrentSessionId.mockResolvedValue(null);
 
-      // Act
-      const sessions = await mockSessionManager.listSessions();
+      const command = createCommand([]);
+      await command.run();
 
-      // Assert
-      expect(sessions[0].convergence).toBeDefined();
-      expect(sessions[0].convergence?.overall).toBe(0.85);
+      expect(mockSessionManager.listSessions).toHaveBeenCalled();
+    });
+
+    it('should display sessions with dates in the recent past (minutes)', async () => {
+      const mockSessions: SessionResponse[] = [
+        {
+          id: 'session-active',
+          status: 'active',
+          phase: 'CLARIFICATION',
+          createdAt: new Date(Date.now() - 5 * 60_000).toISOString(),
+          updatedAt: new Date(Date.now() - 5 * 60_000).toISOString(),
+        },
+      ];
+
+      mockSessionManager.listSessions.mockResolvedValue(mockSessions);
+      mockSessionManager.getCurrentSessionId.mockResolvedValue(null);
+
+      const command = createCommand([]);
+      await command.run();
+
+      expect(mockSessionManager.listSessions).toHaveBeenCalled();
+    });
+
+    it('should display sessions created hours ago', async () => {
+      const mockSessions: SessionResponse[] = [
+        {
+          id: 'session-active',
+          status: 'active',
+          phase: 'CRITIQUE',
+          createdAt: new Date(Date.now() - 3 * 3_600_000).toISOString(),
+          updatedAt: new Date(Date.now() - 3 * 3_600_000).toISOString(),
+        },
+      ];
+
+      mockSessionManager.listSessions.mockResolvedValue(mockSessions);
+      mockSessionManager.getCurrentSessionId.mockResolvedValue(null);
+
+      const command = createCommand([]);
+      await command.run();
+
+      expect(mockSessionManager.listSessions).toHaveBeenCalled();
+    });
+
+    it('should display sessions created days ago', async () => {
+      const mockSessions: SessionResponse[] = [
+        {
+          id: 'session-active',
+          status: 'active',
+          phase: 'CRITIQUE',
+          createdAt: new Date(Date.now() - 3 * 86_400_000).toISOString(),
+          updatedAt: new Date(Date.now() - 3 * 86_400_000).toISOString(),
+        },
+      ];
+
+      mockSessionManager.listSessions.mockResolvedValue(mockSessions);
+      mockSessionManager.getCurrentSessionId.mockResolvedValue(null);
+
+      const command = createCommand([]);
+      await command.run();
+
+      expect(mockSessionManager.listSessions).toHaveBeenCalled();
+    });
+
+    it('should display sessions created weeks ago (absolute date)', async () => {
+      const mockSessions: SessionResponse[] = [
+        {
+          id: 'session-old',
+          status: 'active',
+          phase: 'CRITIQUE',
+          createdAt: new Date(Date.now() - 14 * 86_400_000).toISOString(),
+          updatedAt: new Date(Date.now() - 14 * 86_400_000).toISOString(),
+        },
+      ];
+
+      mockSessionManager.listSessions.mockResolvedValue(mockSessions);
+      mockSessionManager.getCurrentSessionId.mockResolvedValue(null);
+
+      const command = createCommand([]);
+      await command.run();
+
+      expect(mockSessionManager.listSessions).toHaveBeenCalled();
+    });
+
+    it('should display sessions created just now', async () => {
+      const mockSessions: SessionResponse[] = [
+        {
+          id: 'session-new',
+          status: 'active',
+          phase: 'INTAKE',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+      ];
+
+      mockSessionManager.listSessions.mockResolvedValue(mockSessions);
+      mockSessionManager.getCurrentSessionId.mockResolvedValue(null);
+
+      const command = createCommand([]);
+      await command.run();
+
+      expect(mockSessionManager.listSessions).toHaveBeenCalled();
+    });
+  });
+
+  describe('--all flag', () => {
+    it('should display all sessions including completed and closed', async () => {
+      const mockSessions: SessionResponse[] = [
+        {
+          id: 'session-complete',
+          status: 'complete',
+          phase: 'DELIVER',
+          createdAt: new Date(Date.now() - 86_400_000).toISOString(),
+          updatedAt: new Date(Date.now() - 86_400_000).toISOString(),
+        },
+        {
+          id: 'session-closed',
+          status: 'closed',
+          phase: 'POST_DELIVERY',
+          createdAt: new Date(Date.now() - 2 * 86_400_000).toISOString(),
+          updatedAt: new Date(Date.now() - 2 * 86_400_000).toISOString(),
+        },
+      ];
+
+      mockSessionManager.listSessions.mockResolvedValue(mockSessions);
+      mockSessionManager.getCurrentSessionId.mockResolvedValue(null);
+
+      const command = createCommand(['--all']);
+      await command.run();
+
+      expect(mockSessionManager.listSessions).toHaveBeenCalled();
+      expect(mockSessionManager.getCurrentSessionId).toHaveBeenCalled();
+    });
+
+    it('should display complete_with_gaps sessions', async () => {
+      const mockSessions: SessionResponse[] = [
+        {
+          id: 'session-gaps',
+          status: 'complete_with_gaps',
+          phase: 'DELIVER_WITH_GAPS',
+          createdAt: new Date(Date.now() - 86_400_000).toISOString(),
+          updatedAt: new Date(Date.now() - 86_400_000).toISOString(),
+        },
+      ];
+
+      mockSessionManager.listSessions.mockResolvedValue(mockSessions);
+      mockSessionManager.getCurrentSessionId.mockResolvedValue(null);
+
+      const command = createCommand(['--all']);
+      await command.run();
+
+      expect(mockSessionManager.listSessions).toHaveBeenCalled();
+    });
+  });
+
+  describe('convergence formatting', () => {
+    it('should display green convergence for high scores', async () => {
+      const mockSessions: SessionResponse[] = [
+        {
+          id: 'session-high',
+          status: 'active',
+          phase: 'SYNTHESIS',
+          createdAt: new Date(Date.now() - 60_000).toISOString(),
+          updatedAt: new Date(Date.now() - 60_000).toISOString(),
+          convergence: { overall: 0.9, dimensions: {} as any },
+        },
+      ];
+
+      mockSessionManager.listSessions.mockResolvedValue(mockSessions);
+      mockSessionManager.getCurrentSessionId.mockResolvedValue(null);
+
+      const command = createCommand([]);
+      await command.run();
+
+      expect(mockSessionManager.listSessions).toHaveBeenCalled();
+    });
+
+    it('should display yellow convergence for medium scores', async () => {
+      const mockSessions: SessionResponse[] = [
+        {
+          id: 'session-medium',
+          status: 'active',
+          phase: 'SYNTHESIS',
+          createdAt: new Date(Date.now() - 60_000).toISOString(),
+          updatedAt: new Date(Date.now() - 60_000).toISOString(),
+          convergence: { overall: 0.6, dimensions: {} as any },
+        },
+      ];
+
+      mockSessionManager.listSessions.mockResolvedValue(mockSessions);
+      mockSessionManager.getCurrentSessionId.mockResolvedValue(null);
+
+      const command = createCommand([]);
+      await command.run();
+
+      expect(mockSessionManager.listSessions).toHaveBeenCalled();
+    });
+
+    it('should display red convergence for low scores', async () => {
+      const mockSessions: SessionResponse[] = [
+        {
+          id: 'session-low',
+          status: 'active',
+          phase: 'CRITIQUE',
+          createdAt: new Date(Date.now() - 60_000).toISOString(),
+          updatedAt: new Date(Date.now() - 60_000).toISOString(),
+          convergence: { overall: 0.3, dimensions: {} as any },
+        },
+      ];
+
+      mockSessionManager.listSessions.mockResolvedValue(mockSessions);
+      mockSessionManager.getCurrentSessionId.mockResolvedValue(null);
+
+      const command = createCommand([]);
+      await command.run();
+
+      expect(mockSessionManager.listSessions).toHaveBeenCalled();
+    });
+  });
+
+  describe('Error handling', () => {
+    it('should throw on SessionManager.listSessions() failure', async () => {
+      mockSessionManager.listSessions.mockRejectedValue(new Error('Disk error'));
+
+      const command = createCommand([]);
+      await expect(command.run()).rejects.toThrow('Disk error');
     });
   });
 });

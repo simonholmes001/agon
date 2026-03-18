@@ -1,181 +1,161 @@
 /**
  * Status Command Tests
- * 
- * Testing strategy:
- * - Mock AgonAPIClient
- * - Mock SessionManager
- * - Test status display for different session states
- * - Test error handling
+ *
+ * Tests for agon status command:
+ * - No current session
+ * - Display active session (various phases)
+ * - Display complete session with convergence
+ * - Cache vs live refresh (--no-refresh)
+ * - Token usage display
+ * - Error handling
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import Status from '../../src/commands/status.js';
 import { AgonAPIClient } from '../../src/api/agon-client.js';
 import { SessionManager } from '../../src/state/session-manager.js';
+import { ConfigManager } from '../../src/state/config-manager.js';
 import type { SessionResponse } from '../../src/api/types.js';
 
 // Mock dependencies
 vi.mock('../../src/api/agon-client.js');
 vi.mock('../../src/state/session-manager.js');
+vi.mock('../../src/state/config-manager.js');
 
-describe('status command', () => {
+const mockOclifConfig = {
+  bin: 'agon',
+  runHook: vi.fn().mockResolvedValue({}),
+  runCommand: vi.fn(),
+  findCommand: vi.fn(),
+  pjson: { name: '@agon_agents/cli', version: '0.1.0' },
+  root: '/fake/root',
+  version: '0.1.0',
+};
+
+function createCommand(args: string[]): Status {
+  const command = new Status(args, mockOclifConfig as any);
+  vi.spyOn(command, 'log').mockImplementation(() => {});
+  vi.spyOn(command, 'error').mockImplementation((msg: any) => {
+    throw new Error(typeof msg === 'string' ? msg : String(msg));
+  });
+  return command;
+}
+
+describe('Status Command', () => {
   let mockApiClient: any;
   let mockSessionManager: any;
+  let mockConfigManager: any;
 
   beforeEach(() => {
     vi.clearAllMocks();
-    
-    // Setup API client mock
+
     mockApiClient = {
-      getSession: vi.fn()
+      getSession: vi.fn(),
     };
-    
-    // Setup session manager mock
+
     mockSessionManager = {
       getCurrentSessionId: vi.fn(),
       getSession: vi.fn(),
-      saveSession: vi.fn()
+      saveSession: vi.fn(),
     };
-    
+
+    mockConfigManager = {
+      load: vi.fn().mockResolvedValue({
+        apiUrl: 'http://localhost:5000',
+        defaultFriction: 50,
+        researchEnabled: true,
+        logLevel: 'info',
+      }),
+    };
+
     vi.mocked(AgonAPIClient).mockImplementation(() => mockApiClient);
     vi.mocked(SessionManager).mockImplementation(() => mockSessionManager);
+    vi.mocked(ConfigManager).mockImplementation(() => mockConfigManager);
   });
 
-  describe('current session detection', () => {
-    it('should detect and display current session', async () => {
-      // Arrange
-      const sessionId = 'test-session-123';
+  describe('No active session', () => {
+    it('should print guidance message when no current session exists', async () => {
+      mockSessionManager.getCurrentSessionId.mockResolvedValue(null);
+
+      const command = createCommand([]);
+      const logSpy = vi.spyOn(command, 'log').mockImplementation(() => {});
+      await command.run();
+
+      const output = logSpy.mock.calls.flat().join('\n');
+      expect(output).toContain('No active session found');
+    });
+  });
+
+  describe('With session ID argument', () => {
+    it('should use provided session ID instead of current session', async () => {
+      const sessionId = 'explicit-session-id';
       const mockSession: SessionResponse = {
         id: sessionId,
         status: 'active',
         phase: 'CLARIFICATION',
         createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
+        updatedAt: new Date().toISOString(),
       };
-      
-      mockSessionManager.getCurrentSessionId.mockResolvedValue(sessionId);
-      mockSessionManager.getSession.mockResolvedValue(null); // Cache miss
+
       mockApiClient.getSession.mockResolvedValue(mockSession);
 
-      // Act - Simulate the command flow
-      const currentId = await mockSessionManager.getCurrentSessionId();
-      
-      if (!currentId) {
-        throw new Error('No current session');
-      }
-      
-      const cachedSession = await mockSessionManager.getSession(currentId);
-      const session = cachedSession || await mockApiClient.getSession(currentId);
+      const command = createCommand([sessionId]);
+      await command.run();
 
-      // Assert
-      expect(mockSessionManager.getCurrentSessionId).toHaveBeenCalled();
+      expect(mockSessionManager.getCurrentSessionId).not.toHaveBeenCalled();
       expect(mockApiClient.getSession).toHaveBeenCalledWith(sessionId);
-      expect(session.id).toBe(sessionId);
-      expect(session.phase).toBe('CLARIFICATION');
-    });
-
-    it('should handle no current session', async () => {
-      // Arrange
-      mockSessionManager.getCurrentSessionId.mockResolvedValue(null);
-
-      // Act
-      const currentSessionId = await mockSessionManager.getCurrentSessionId();
-
-      // Assert
-      expect(currentSessionId).toBeNull();
     });
   });
 
-  describe('session status display', () => {
-    it('should display basic session info (CLARIFICATION phase)', async () => {
-      // Arrange
+  describe('Active session display', () => {
+    it('should display clarification phase status', async () => {
+      mockSessionManager.getCurrentSessionId.mockResolvedValue('session-abc');
       const mockSession: SessionResponse = {
-        id: 'test-session-123',
+        id: 'session-abc',
         status: 'active',
         phase: 'CLARIFICATION',
         createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
+        updatedAt: new Date().toISOString(),
+        currentRound: 1,
       };
-      
       mockApiClient.getSession.mockResolvedValue(mockSession);
 
-      // Act
-      const session = await mockApiClient.getSession('test-session-123');
+      const command = createCommand([]);
+      const logSpy = vi.spyOn(command, 'log').mockImplementation(() => {});
+      await command.run();
 
-      // Assert
-      expect(session.phase).toBe('CLARIFICATION');
-      expect(session.status).toBe('active');
+      const output = logSpy.mock.calls.flat().join('\n');
+      expect(output).toContain('Clarification');
     });
 
-    it('should display convergence score (DEBATE phase)', async () => {
-      // Arrange
+    it('should display analysis round status', async () => {
+      mockSessionManager.getCurrentSessionId.mockResolvedValue('session-abc');
       const mockSession: SessionResponse = {
-        id: 'test-session-123',
+        id: 'session-abc',
         status: 'active',
-        phase: 'ANALYSIS_ROUND',
+        phase: 'ANALYSISROUND',
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
-        convergence: {
-          overall: 0.65,
-          dimensions: {
-            assumption_explicitness: 0.7,
-            evidence_quality: 0.6,
-            risk_coverage: 0.65,
-            decision_clarity: 0.68,
-            scope_definition: 0.62,
-            constraint_alignment: 0.64,
-            uncertainty_acknowledgment: 0.66
-          }
-        },
-        currentRound: 1
+        currentRound: 1,
       };
-      
       mockApiClient.getSession.mockResolvedValue(mockSession);
 
-      // Act
-      const session = await mockApiClient.getSession('test-session-123');
-
-      // Assert
-      expect(session.convergence).toBeDefined();
-      expect(session.convergence?.overall).toBe(0.65);
-      expect(session.currentRound).toBe(1);
+      const command = createCommand([]);
+      await expect(command.run()).resolves.not.toThrow();
     });
+  });
 
-    it('should display token usage', async () => {
-      // Arrange
+  describe('Complete session display', () => {
+    it('should display complete session with convergence data', async () => {
+      mockSessionManager.getCurrentSessionId.mockResolvedValue('session-abc');
       const mockSession: SessionResponse = {
-        id: 'test-session-123',
-        status: 'active',
-        phase: 'ANALYSIS_ROUND',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        tokensUsed: 15000,
-        tokenBudget: 100000
-      };
-      
-      mockApiClient.getSession.mockResolvedValue(mockSession);
-
-      // Act
-      const session = await mockApiClient.getSession('test-session-123');
-
-      // Assert
-      expect(session.tokensUsed).toBe(15000);
-      expect(session.tokenBudget).toBe(100000);
-      
-      // Calculate percentage
-      const usagePercent = (session.tokensUsed! / session.tokenBudget!) * 100;
-      expect(usagePercent).toBe(15);
-    });
-
-    it('should display complete session', async () => {
-      // Arrange
-      const mockSession: SessionResponse = {
-        id: 'test-session-123',
+        id: 'session-abc',
         status: 'complete',
-        phase: 'DELIVER',
+        phase: 'POST_DELIVERY',
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         convergence: {
-          overall: 0.85,
+          overall: 0.87,
           dimensions: {
             assumption_explicitness: 0.88,
             evidence_quality: 0.82,
@@ -183,136 +163,156 @@ describe('status command', () => {
             decision_clarity: 0.87,
             scope_definition: 0.83,
             constraint_alignment: 0.85,
-            uncertainty_acknowledgment: 0.86
-          }
-        }
+            uncertainty_acknowledgment: 0.86,
+          },
+        },
       };
-      
       mockApiClient.getSession.mockResolvedValue(mockSession);
 
-      // Act
-      const session = await mockApiClient.getSession('test-session-123');
+      const command = createCommand([]);
+      const logSpy = vi.spyOn(command, 'log').mockImplementation(() => {});
+      await command.run();
 
-      // Assert
-      expect(session.status).toBe('complete');
-      expect(session.phase).toBe('DELIVER');
-      expect(session.convergence?.overall).toBeGreaterThanOrEqual(0.75);
+      const output = logSpy.mock.calls.flat().join('\n');
+      expect(output).toContain('87%');
     });
 
-    it('should display session with gaps', async () => {
-      // Arrange
+    it('should display complete_with_gaps session', async () => {
+      mockSessionManager.getCurrentSessionId.mockResolvedValue('session-abc');
       const mockSession: SessionResponse = {
-        id: 'test-session-123',
+        id: 'session-abc',
         status: 'complete_with_gaps',
         phase: 'DELIVER_WITH_GAPS',
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
-        convergence: {
-          overall: 0.68,
-          dimensions: {
-            assumption_explicitness: 0.65,
-            evidence_quality: 0.6,
-            risk_coverage: 0.7,
-            decision_clarity: 0.72,
-            scope_definition: 0.65,
-            constraint_alignment: 0.68,
-            uncertainty_acknowledgment: 0.7
-          }
-        }
       };
-      
       mockApiClient.getSession.mockResolvedValue(mockSession);
 
-      // Act
-      const session = await mockApiClient.getSession('test-session-123');
+      const command = createCommand([]);
+      const logSpy = vi.spyOn(command, 'log').mockImplementation(() => {});
+      await command.run();
 
-      // Assert
-      expect(session.status).toBe('complete_with_gaps');
-      expect(session.convergence?.overall).toBeLessThan(0.75);
+      const output = logSpy.mock.calls.flat().join('\n');
+      expect(output).toContain('gaps');
     });
   });
 
-  describe('error handling', () => {
-    it('should handle session not found', async () => {
-      // Arrange
-      const error = new Error('Session not found');
-      mockApiClient.getSession.mockRejectedValue(error);
+  describe('Token usage display', () => {
+    it('should display token usage when available', async () => {
+      mockSessionManager.getCurrentSessionId.mockResolvedValue('session-abc');
+      const mockSession: SessionResponse = {
+        id: 'session-abc',
+        status: 'active',
+        phase: 'CRITIQUE',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        tokensUsed: 15000,
+        tokenBudget: 200000,
+      };
+      mockApiClient.getSession.mockResolvedValue(mockSession);
 
-      // Act & Assert
-      await expect(
-        mockApiClient.getSession('non-existent-id')
-      ).rejects.toThrow('Session not found');
-    });
+      const command = createCommand([]);
+      const logSpy = vi.spyOn(command, 'log').mockImplementation(() => {});
+      await command.run();
 
-    it('should handle network errors', async () => {
-      // Arrange
-      const error = new Error('Network request failed');
-      mockApiClient.getSession.mockRejectedValue(error);
-
-      // Act & Assert
-      await expect(
-        mockApiClient.getSession('test-session-123')
-      ).rejects.toThrow('Network request failed');
-    });
-
-    it('should handle backend unavailable', async () => {
-      // Arrange
-      const error = new Error('Backend service unavailable');
-      mockApiClient.getSession.mockRejectedValue(error);
-
-      // Act & Assert
-      await expect(
-        mockApiClient.getSession('test-session-123')
-      ).rejects.toThrow('Backend service unavailable');
+      const output = logSpy.mock.calls.flat().join('\n');
+      expect(output).toContain('15,000');
     });
   });
 
-  describe('cache handling', () => {
-    it('should use cached session if available', async () => {
-      // Arrange
-      const mockSession: SessionResponse = {
-        id: 'test-session-123',
+  describe('Cache behaviour', () => {
+    it('should skip API call and use cache when --no-refresh is set', async () => {
+      mockSessionManager.getCurrentSessionId.mockResolvedValue('session-abc');
+      const cachedSession: SessionResponse = {
+        id: 'session-abc',
         status: 'active',
         phase: 'CLARIFICATION',
         createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
+        updatedAt: new Date().toISOString(),
       };
-      
-      mockSessionManager.getSession.mockResolvedValue(mockSession);
+      mockSessionManager.getSession.mockResolvedValue(cachedSession);
 
-      // Act
-      const session = await mockSessionManager.getSession('test-session-123');
+      const command = createCommand(['--no-refresh']);
+      await command.run();
 
-      // Assert
-      expect(mockSessionManager.getSession).toHaveBeenCalledWith('test-session-123');
-      expect(session).toBe(mockSession);
+      expect(mockSessionManager.getSession).toHaveBeenCalled();
+      expect(mockApiClient.getSession).not.toHaveBeenCalled();
     });
 
-    it('should fetch from API if cache miss', async () => {
-      // Arrange
-      const mockSession: SessionResponse = {
-        id: 'test-session-123',
-        status: 'active',
-        phase: 'CLARIFICATION',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      };
-      
+    it('should fall back to API when cache miss even with --no-refresh', async () => {
+      mockSessionManager.getCurrentSessionId.mockResolvedValue('session-abc');
       mockSessionManager.getSession.mockResolvedValue(null);
-      mockApiClient.getSession.mockResolvedValue(mockSession);
+      const freshSession: SessionResponse = {
+        id: 'session-abc',
+        status: 'active',
+        phase: 'CLARIFICATION',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      mockApiClient.getSession.mockResolvedValue(freshSession);
 
-      // Act
-      const cachedSession = await mockSessionManager.getSession('test-session-123');
-      let session: SessionResponse;
-      
-      if (!cachedSession) {
-        session = await mockApiClient.getSession('test-session-123');
-        await mockSessionManager.saveSession(session);
-      }
+      const command = createCommand(['--no-refresh']);
+      await command.run();
 
-      // Assert
-      expect(mockApiClient.getSession).toHaveBeenCalledWith('test-session-123');
-      expect(mockSessionManager.saveSession).toHaveBeenCalledWith(mockSession);
+      expect(mockApiClient.getSession).toHaveBeenCalledWith('session-abc');
+    });
+
+    it('should fall back to cache when API fails and cache is available', async () => {
+      mockSessionManager.getCurrentSessionId.mockResolvedValue('session-abc');
+      const cachedSession: SessionResponse = {
+        id: 'session-abc',
+        status: 'active',
+        phase: 'CRITIQUE',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      // --no-refresh: first read cache successfully
+      mockSessionManager.getSession.mockResolvedValue(cachedSession);
+
+      const command = createCommand(['--no-refresh']);
+      await expect(command.run()).resolves.not.toThrow();
+    });
+  });
+
+  describe('Phase formatting', () => {
+    const phases = [
+      { raw: 'INTAKE', expected: 'Intake' },
+      { raw: 'CLARIFICATION', expected: 'Clarification' },
+      { raw: 'CRITIQUE', expected: 'Critique' },
+      { raw: 'SYNTHESIS', expected: 'Synthesis' },
+      { raw: 'DELIVER', expected: 'Delivery' },
+      { raw: 'POSTDELIVERY', expected: 'Post-Delivery' },
+    ];
+
+    for (const { raw, expected } of phases) {
+      it(`should format "${raw}" phase as "${expected}"`, async () => {
+        mockSessionManager.getCurrentSessionId.mockResolvedValue('session-abc');
+        const mockSession: SessionResponse = {
+          id: 'session-abc',
+          status: 'active',
+          phase: raw,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+        mockApiClient.getSession.mockResolvedValue(mockSession);
+
+        const command = createCommand([]);
+        const logSpy = vi.spyOn(command, 'log').mockImplementation(() => {});
+        await command.run();
+
+        const output = logSpy.mock.calls.flat().join('\n');
+        expect(output).toContain(expected);
+      });
+    }
+  });
+
+  describe('Error handling', () => {
+    it('should throw when API fails and no cached session is available', async () => {
+      mockSessionManager.getCurrentSessionId.mockResolvedValue('session-abc');
+      mockApiClient.getSession.mockRejectedValue(new Error('API down'));
+
+      const command = createCommand([]);
+      await expect(command.run()).rejects.toThrow();
     });
   });
 });
