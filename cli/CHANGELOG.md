@@ -1,5 +1,11 @@
 # @agon_agents/cli
 
+## 0.1.14
+
+### Patch Changes
+
+- Update the CLI hosted default API endpoint to the current dev Application Gateway public ingress (`http://4.225.205.12`) while preserving `AGON_API_URL` override behavior for local testing.
+
 ## 0.1.13
 
 ### Patch Changes
