@@ -7,6 +7,7 @@ import {
   shouldPrintVersion,
   shouldSelfUpdate
 } from './run-helpers.js';
+import { ensureDefaultShellCommand } from '../dist/shell/entrypoint.js';
 
 const args = process.argv.slice(2);
 const require = createRequire(import.meta.url);
@@ -28,10 +29,7 @@ if (normalizedArgs !== args) {
   process.argv = [process.argv[0], process.argv[1], ...normalizedArgs];
 }
 
-// Default to 'shell' command when no subcommand is given
-if (process.argv.length === 2) {
-  process.argv.push('shell');
-}
+process.argv = ensureDefaultShellCommand(process.argv);
 
 execute({ development: false, dir: import.meta.url })
   .catch((error) => {
