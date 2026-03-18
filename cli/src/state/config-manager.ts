@@ -19,7 +19,7 @@ import { stringify as yamlStringify } from 'yaml';
 import * as path from 'node:path';
 import * as os from 'node:os';
 
-const DEFAULT_HOSTED_API_URL = 'http://20.111.24.4';
+const DEFAULT_HOSTED_API_URL = 'http://4.225.205.12';
 
 // Configuration schema
 const ConfigSchema = z.object({
