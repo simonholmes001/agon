@@ -99,6 +99,7 @@ describe('shell engine', () => {
     expect(print).toHaveBeenCalledWith(expect.stringContaining('/refresh [artifact]'));
     expect(print).toHaveBeenCalledWith(expect.stringContaining('/attach <file-path>'));
     expect(print).toHaveBeenCalledWith(expect.stringContaining('/exit'));
+    expect(print).toHaveBeenCalledWith(expect.stringContaining('/self-update'));
     expect(print).toHaveBeenCalledWith('  /set defaultFriction 75');
   });
 
