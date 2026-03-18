@@ -203,4 +203,35 @@ describe('shell engine', () => {
       hasExtractedText: true
     });
   });
+
+  it('handles inline /attach in plain input before follow-up submission', async () => {
+    const outcome = await engine.handleInput(
+      'Please review this /attach "./docs/spec.md" and suggest role matches'
+    );
+
+    expect(controller.attachDocument).toHaveBeenCalledWith('./docs/spec.md');
+    expect(controller.submitFollowUp).toHaveBeenCalledWith('Please review this and suggest role matches');
+    expect(outcome).toEqual({
+      kind: 'follow-up',
+      sessionId: 'session-123',
+      status: 'active',
+      phase: 'Clarification',
+      response: {
+        agentId: 'moderator',
+        message: 'Next question'
+      }
+    });
+    expect(print).toHaveBeenCalledWith(
+      'Attached spec.md to session session-123. Type: text/markdown | Size: 1024 B'
+    );
+  });
+
+  it('returns usage guidance for malformed inline /attach', async () => {
+    const outcome = await engine.handleInput('Please review /attach');
+
+    expect(outcome).toEqual({ kind: 'noop' });
+    expect(controller.attachDocument).not.toHaveBeenCalled();
+    expect(controller.submitFollowUp).not.toHaveBeenCalled();
+    expect(print).toHaveBeenCalledWith('Usage: /attach <file-path>');
+  });
 });

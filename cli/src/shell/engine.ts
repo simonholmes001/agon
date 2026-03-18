@@ -1,5 +1,5 @@
 import type { SessionResponse } from '../api/types.js';
-import { parseShellInput } from './parser.js';
+import { extractInlineAttach, parseShellInput } from './parser.js';
 import type { PlainInputRoute } from './router.js';
 
 interface ShellControllerLike {
@@ -93,11 +93,48 @@ export class ShellEngine {
       return this.handleSlash(parsed);
     }
 
+    return this.handlePlainInput(parsed.text);
+  }
+
+  private async handlePlainInput(text: string): Promise<ShellEngineOutcome> {
+    const inlineAttach = extractInlineAttach(text);
+    if (inlineAttach?.type === 'error') {
+      this.print(inlineAttach.message);
+      return { kind: 'noop' };
+    }
+
+    let plainText = text;
+    if (inlineAttach?.type === 'attach') {
+      const result = await this.controller.attachDocument(inlineAttach.path);
+      if (!inlineAttach.remainingText) {
+        return {
+          kind: 'attachment',
+          sessionId: result.sessionId,
+          fileName: result.attachment.fileName,
+          contentType: result.attachment.contentType,
+          sizeBytes: result.attachment.sizeBytes,
+          hasExtractedText: result.attachment.hasExtractedText
+        };
+      }
+
+      this.print(
+        `Attached ${result.attachment.fileName} to session ${result.sessionId}.`
+        + ` Type: ${result.attachment.contentType} | Size: ${result.attachment.sizeBytes} B`
+      );
+      if (result.attachment.hasExtractedText) {
+        this.print('Document text extracted and added to agent context.');
+      } else {
+        this.print('No text extraction available; file metadata/link still added to context.');
+      }
+
+      plainText = inlineAttach.remainingText;
+    }
+
     const activeSession = await this.controller.getActiveSession();
     const route = this.routePlainInputFn(activeSession);
 
     if (route.action === 'start') {
-      const started = await this.controller.startIdea(parsed.text);
+      const started = await this.controller.startIdea(plainText);
       return {
         kind: 'started',
         sessionId: started.session.id,
@@ -111,7 +148,7 @@ export class ShellEngine {
     }
 
     if (route.action === 'follow-up') {
-      const followUp = await this.controller.submitFollowUp(parsed.text);
+      const followUp = await this.controller.submitFollowUp(plainText);
       return {
         kind: 'follow-up',
         sessionId: followUp.session.id,
