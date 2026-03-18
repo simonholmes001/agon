@@ -27,7 +27,7 @@ param alertEmail string
   'Standard_Large'
   'Standard_v2'
 ])
-param appGatewaySkuName string = 'Basic'
+param appGatewaySkuName string = 'Standard_v2'
 
 @description('Application Gateway SKU tier. Keep aligned with appGatewaySkuName.')
 @allowed([
@@ -35,7 +35,7 @@ param appGatewaySkuName string = 'Basic'
   'Standard'
   'Standard_v2'
 ])
-param appGatewaySkuTier string = 'Basic'
+param appGatewaySkuTier string = 'Standard_v2'
 
 @description('Application Gateway instance count for legacy v1 SKUs. Ignored for Basic and Standard_v2.')
 @minValue(1)
