@@ -4,6 +4,7 @@ import { ShellEngine } from '../../src/shell/engine.js';
 
 describe('shell engine', () => {
   let controller: any;
+  let selfUpdate: ReturnType<typeof vi.fn>;
   let print: ReturnType<typeof vi.fn>;
   let routeFn: ReturnType<typeof vi.fn>;
   let engine: ShellEngine;
@@ -68,12 +69,17 @@ describe('shell engine', () => {
       getActiveSession: vi.fn().mockResolvedValue(session)
     };
 
+    selfUpdate = vi.fn().mockResolvedValue({
+      status: 'up-to-date',
+      currentVersion: '0.1.10'
+    });
     print = vi.fn();
     routeFn = vi.fn().mockReturnValue({ action: 'follow-up' });
 
     engine = new ShellEngine({
       controller,
       routePlainInput: routeFn,
+      selfUpdate,
       print
     });
   });
@@ -223,5 +229,20 @@ describe('shell engine', () => {
       sizeBytes: 1024,
       hasExtractedText: true
     });
+  });
+
+  it('runs /self-update --check through updater callback', async () => {
+    selfUpdate.mockResolvedValueOnce({
+      status: 'update-available',
+      currentVersion: '0.1.10',
+      latestVersion: '0.1.11',
+      installCommand: 'npm install -g @agon_agents/cli@latest'
+    });
+
+    const outcome = await engine.handleInput('/self-update --check');
+
+    expect(selfUpdate).toHaveBeenCalledWith({ check: true });
+    expect(outcome).toEqual({ kind: 'noop' });
+    expect(print).toHaveBeenCalledWith('Update available: v0.1.10 -> v0.1.11');
   });
 });
