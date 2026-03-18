@@ -79,7 +79,7 @@ jobs:
 
       - name: Validate required Docker Hub secrets
         if: steps.guard.outputs.deploy == 'true'
-        id: docker-secrets
+        id: docker_secrets
         shell: bash
         env:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -124,7 +124,7 @@ jobs:
         run: |
           set -euo pipefail
           SHORT_SHA="$(echo "${{ steps.guard.outputs.deploy_sha }}" | cut -c1-12)"
-          IMAGE_NAME="${{ steps.docker-secrets.outputs.image_name }}"
+          IMAGE_NAME="${{ steps.docker_secrets.outputs.image_name }}"
           echo "tag_sha=sha-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
           echo "image_sha=${IMAGE_NAME}:sha-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
           echo "image_latest=${IMAGE_NAME}:dev-latest" >> "$GITHUB_OUTPUT"
@@ -132,6 +132,19 @@ jobs:
             echo "::error::Computed image name is empty."
             exit 1
           fi
+
+      - name: Assert Docker tags
+        if: steps.guard.outputs.deploy == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          IMAGE_SHA="${{ steps.image.outputs.image_sha }}"
+          IMAGE_LATEST="${{ steps.image.outputs.image_latest }}"
+          if [ -z "${IMAGE_SHA}" ] || [ -z "${IMAGE_LATEST}" ]; then
+            echo "::error::Docker tags were not generated. image_sha='${IMAGE_SHA}', image_latest='${IMAGE_LATEST}'"
+            exit 1
+          fi
+          echo "Resolved Docker tags: ${IMAGE_SHA} and ${IMAGE_LATEST}"
 
       - name: Build and push backend image
         if: steps.guard.outputs.deploy == 'true'
