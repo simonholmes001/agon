@@ -35,6 +35,56 @@ import {
   runNpmGlobalInstall
 } from '../utils/self-update.js';
 
+/**
+ * Sentinel value returned from promptForInput when the user presses Ctrl+C.
+ * The main loop treats this as "interrupt current operation and stay in shell"
+ * rather than exiting the session.
+ */
+export const INTERRUPT_SENTINEL = '\x03';
+
+/**
+ * Races a promise against an AbortSignal. If the signal fires before the
+ * promise settles, an AbortError is thrown.
+ */
+export function raceAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) {
+    return Promise.reject(new DOMException('Aborted', 'AbortError'));
+  }
+
+  return new Promise<T>((resolve, reject) => {
+    // Guard against double-settlement: once one side wins, the other is a no-op.
+    let settled = false;
+
+    const onAbort = (): void => {
+      if (settled) return;
+      settled = true;
+      reject(new DOMException('Aborted', 'AbortError'));
+    };
+
+    signal.addEventListener('abort', onAbort, { once: true });
+
+    promise.then(
+      (value) => {
+        if (settled) return;
+        settled = true;
+        signal.removeEventListener('abort', onAbort);
+        resolve(value);
+      },
+      (error: unknown) => {
+        if (settled) return;
+        settled = true;
+        signal.removeEventListener('abort', onAbort);
+        reject(error);
+      }
+    );
+  });
+}
+
+/** Returns true when an error is an AbortError (Ctrl+C interrupt). */
+export function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === 'AbortError';
+}
+
 export default class Shell extends Command {
   static override readonly description = 'Open interactive codex-style Agon shell';
 
@@ -107,6 +157,12 @@ export default class Shell extends Command {
         const promptFrame = renderPromptBanner((line) => this.log(line));
         const rawInput = await this.promptForInput(promptFrame);
 
+        if (rawInput === INTERRUPT_SENTINEL) {
+          this.log(chalk.dim('Interrupted. Shell still active.'));
+          this.log('');
+          continue;
+        }
+
         const trimmed = rawInput.trim();
         if (isExitInput(trimmed)) {
           this.log(chalk.dim('Exiting shell.'));
@@ -123,24 +179,46 @@ export default class Shell extends Command {
           : null;
         this.spinnerActive = spinner !== null;
 
+        const abortController = new AbortController();
+        const sigintHandler = (): void => {
+          abortController.abort();
+        };
+        // process.once is intentional: the first Ctrl+C during an active
+        // operation interrupts it and stays in the shell. A second Ctrl+C
+        // (after the listener has been consumed and the operation is still
+        // winding down) falls through to Node's default SIGINT handling and
+        // exits the process — matching the "press twice to force-quit" UX.
+        process.once('SIGINT', sigintHandler);
+
         try {
-          const outcome = await engine.handleInput(trimmed);
+          const outcomePromise = engine.handleInput(trimmed);
+          const outcome = await raceAbort(outcomePromise, abortController.signal);
           stopShimmer?.();
           if (spinner) {
             spinner.succeed('Done');
           }
           this.spinnerActive = false;
           this.flushPendingLines();
-          await this.renderOutcome(outcome);
+          await this.renderOutcome(outcome, abortController.signal);
         } catch (error) {
           stopShimmer?.();
           if (spinner) {
-            spinner.fail('Failed');
+            if (isAbortError(error)) {
+              spinner.stop();
+            } else {
+              spinner.fail('Failed');
+            }
           }
           this.spinnerActive = false;
           this.flushPendingLines();
-          const message = error instanceof Error ? error.message : String(error);
-          this.log(chalk.red(`Error: ${message}`));
+          if (isAbortError(error)) {
+            this.log(chalk.dim('Interrupted. Shell still active.'));
+          } else {
+            const message = error instanceof Error ? error.message : String(error);
+            this.log(chalk.red(`Error: ${message}`));
+          }
+        } finally {
+          process.removeListener('SIGINT', sigintHandler);
         }
 
         this.log('');
@@ -150,7 +228,7 @@ export default class Shell extends Command {
     }
   }
 
-  private async renderOutcome(outcome: ShellEngineOutcome): Promise<void> {
+  private async renderOutcome(outcome: ShellEngineOutcome, signal?: AbortSignal): Promise<void> {
     switch (outcome.kind) {
       case 'notice':
         this.log(outcome.message);
@@ -183,7 +261,7 @@ export default class Shell extends Command {
           this.log('  • Start a new session: /new');
           this.log('  • Exit shell: /exit');
         } else if (this.isMidDebatePhase(outcome.phase)) {
-          await this.watchDebateProgress(outcome.sessionId);
+          await this.watchDebateProgress(outcome.sessionId, signal);
         } else {
           const phase = this.formatPhaseForDisplay(outcome.phase);
           this.log(chalk.yellow(`No new assistant/moderator response yet. Current phase: ${phase}.`));
@@ -344,7 +422,7 @@ export default class Shell extends Command {
         const keySequence = key?.sequence;
 
         if (isCtrl && keyName === 'c') {
-          finish('/quit');
+          finish(INTERRUPT_SENTINEL);
           return;
         }
 
@@ -500,7 +578,7 @@ export default class Shell extends Command {
       || compact === 'targetedloop';
   }
 
-  private async watchDebateProgress(sessionId: string): Promise<void> {
+  private async watchDebateProgress(sessionId: string, signal?: AbortSignal): Promise<void> {
     if (!this.apiClient || !this.sessionManager) {
       this.log(chalk.yellow('Debate is still running. Use /status to check progress.'));
       return;
@@ -531,6 +609,12 @@ export default class Shell extends Command {
 
     try {
       while (true) {
+        if (signal?.aborted) {
+          progressSpinner.stop();
+          this.log(chalk.dim('Interrupted. Shell still active.'));
+          return;
+        }
+
         if (Date.now() - watchStartedAt > maxWatchDurationMs) {
           progressSpinner.stop();
           this.log(chalk.yellow('Watch timed out before completion.'));
