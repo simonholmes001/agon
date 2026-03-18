@@ -24,6 +24,32 @@
 
 ---
 
+## Table of Contents
+
+- [What is Agon?](#project-overview)
+- [How to Run Agon](#installation)
+  - [CLI Application](#cli-application-available-now)
+  - [Web Application](#web-application-in-development)
+  - [iOS Application](#ios-application-in-development)
+  - [Local Deployment (Developer Runbook)](#local-deployment-developer-runbook)
+- [Repository Structure](#repository-structure)
+- [Development Guide](#for-developers)
+  - [CLI (TypeScript)](#cli-typescript)
+  - [Backend (.NET)](#backend-net)
+  - [Frontend (Next.js)](#frontend-nextjs)
+- [Testing and Quality](#testing--quality)
+  - [Running Tests](#running-tests)
+- [CLI Release Process](#cli-release-process)
+- [Architecture Documentation](#architecture-documentation)
+- [Current Status](#current-status-march-2026)
+- [Contributing to Agon](#contributing)
+  - [Reporting Issues and Feature Requests](#reporting-issues-and-feature-requests)
+  - [Submitting Pull Requests](#submitting-pull-requests)
+- [License](#license)
+- [Notes for Project Maintainers](#notes-for-project-maintainers)
+
+---
+
 ## Project Overview
 
 **Agon** transforms raw ideas into production-ready documentation through structured multi-agent analysis. You submit a product concept, technical proposal, strategic decision, or just a simple question, and a council of AI agents (powered by OpenAI GPT, Google Gemini, and Anthropic Claude) collaboratively analyze it across multiple rounds to produce:
@@ -530,9 +556,31 @@ Coverage and test counts are maintained by CI badges at the top of this README. 
 - **Infrastructure**: Integration tests with in-memory DB and mocked external services
 - **Frontend**: UI tests are currently not part of required CI/merge gates for this phase
 
+### Running Tests
+
+Run the full test suite from the repository root:
+
+```bash
+# Backend (.NET)
+dotnet test backend/Agon.sln --verbosity minimal
+
+# CLI (TypeScript)
+npm --prefix cli test
+```
+
+Individual project tests:
+
+```bash
+# Backend domain tests only
+dotnet test backend/tests/Agon.Domain.Tests
+
+# CLI tests with coverage
+cd cli && npm run test:coverage
+```
+
 ---
 
-## CLI Release Process
+## Local Pre-Commit Hooks
 
 Local pre-commit test gate is available at `.githooks/pre-commit` and runs:
 - CLI tests
@@ -642,6 +690,31 @@ This project follows strict **Clean Architecture** and **TDD** principles. See `
 4. **Structured logging**: Use `ILogger<T>` (backend) or `lib/logger.ts` (frontend)
 5. **Error boundaries**: Every route must have `error.tsx` and root must have `global-error.tsx`
 
+### Reporting Issues and Feature Requests
+
+If you encounter a bug or have a feature request, please [open an issue](https://github.com/simonholmes001/agon/issues) and include:
+
+- A clear, descriptive title
+- Steps to reproduce the problem (for bugs)
+- Expected and actual behaviour
+- Your environment (OS, Node.js version, .NET version, CLI version)
+- Any relevant log output (check `~/.agon/logs/agon.log` for CLI logs)
+
+For feature requests, describe the problem you are trying to solve and your proposed solution. The more context you provide, the easier it is for maintainers to evaluate and prioritise.
+
+### Submitting Pull Requests
+
+1. **Fork** the repository and create a feature branch from `main`.
+2. Follow the TDD cycle: write a failing test first, then implement the fix or feature.
+3. Ensure all existing tests continue to pass (`dotnet test backend/Agon.sln` and `npm --prefix cli test`).
+4. If your change touches the CLI package, add a changeset before opening the PR:
+   ```bash
+   npx --yes @changesets/cli add --cwd cli
+   ```
+5. Keep pull requests focused — one logical change per PR makes review faster.
+6. Fill out the PR description with a summary of what changed and why.
+7. PRs that reduce test coverage below the current baseline will not be merged.
+
 ---
 
 ## License
@@ -653,3 +726,35 @@ Proprietary — All rights reserved.
 ## Contact
 
 For questions or contributions, contact the development team.
+
+---
+
+## Notes for Project Maintainers
+
+This section captures operational notes relevant to maintainers of the Agon repository.
+
+### Badge Maintenance
+
+CI badges at the top of this README are auto-updated by `.github/workflows/update-badges.yaml` on every push to `main`. If badge values appear stale, manually trigger the workflow from the Actions tab.
+
+### npm Publish
+
+The CLI package (`@agon_agents/cli`) is published to npm via GitHub Actions using OIDC trusted publishing. No npm token is stored in repository secrets — ensure the npm Trusted Publisher is configured for `publish-cli.yaml` with `id-token: write` permission before any release.
+
+### Dependency Updates
+
+Dependencies should be updated regularly:
+
+```bash
+# CLI
+cd cli && npm outdated
+
+# Backend
+cd backend && dotnet list package --outdated
+```
+
+Run the full test suite after any dependency bump before merging.
+
+### Architecture Documentation
+
+All living architecture documents are in `.github/instructions/`. Update these files alongside code changes to keep them accurate. They are auto-injected into Copilot sessions, so stale documentation directly affects AI-assisted development quality.

@@ -1,0 +1,59 @@
+version: 2
+updates:
+  # GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    target-branch: "main"
+    labels:
+      - "dependencies"
+      - "github-actions"
+
+  # npm — root workspace
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    target-branch: "main"
+    labels:
+      - "dependencies"
+      - "npm"
+
+  # npm — CLI package
+  - package-ecosystem: "npm"
+    directory: "/cli"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    target-branch: "main"
+    labels:
+      - "dependencies"
+      - "npm"
+      - "cli"
+
+  # npm — Frontend package
+  - package-ecosystem: "npm"
+    directory: "/frontend"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    target-branch: "main"
+    labels:
+      - "dependencies"
+      - "npm"
+      - "frontend"
+
+  # NuGet — .NET backend
+  - package-ecosystem: "nuget"
+    directory: "/backend"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    target-branch: "main"
+    labels:
+      - "dependencies"
+      - "nuget"
+      - "backend"
