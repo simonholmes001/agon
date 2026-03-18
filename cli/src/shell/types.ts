@@ -21,7 +21,7 @@ export type ParsedShellInput =
     }
   | {
       type: 'slash';
-      command: 'self-update';
+      command: 'update';
       check: boolean;
     }
   | {

@@ -211,6 +211,7 @@ export class ShellEngine {
           { token: '/refresh [artifact]',            description: 'Refresh latest artifact (default: verdict)' },
           { token: '/resume [session-id]',           description: 'Resume latest session (or specific session)' },
           { token: '/session <session-id>',          description: 'Switch active session' },
+          { token: '/update [--check]',               description: 'Update CLI in-session (--check to only verify)' },
           { token: '/set <key> <value>',             description: 'Persist config key (apiUrl|defaultFriction|researchEnabled|logLevel)' },
           { token: '/show <artifact> [flags]',       description: 'Show artifact (e.g. verdict, prd)' },
           { token: '/show-sessions',                 description: 'List your sessions' },
@@ -248,7 +249,7 @@ export class ShellEngine {
         await this.controller.clearShellSessionSelection();
         this.print('Ready for a new idea.');
         return { kind: 'noop' };
-      case 'self-update': {
+      case 'update': {
         const result = await this.selfUpdateFn({ check: parsed.check });
         switch (result.status) {
           case 'up-to-date':

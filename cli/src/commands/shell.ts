@@ -95,8 +95,8 @@ export default class Shell extends Command {
     if (updateInfo) {
       this.log(chalk.yellow(`Update available: v${updateInfo.currentVersion} → v${updateInfo.latestVersion}`));
       this.log(chalk.cyan('Run now in this shell:'));
-      this.log(chalk.cyan('  /self-update'));
-      this.log(chalk.dim('Tip: Use /self-update --check to only verify availability.'));
+      this.log(chalk.cyan('  /update'));
+      this.log(chalk.dim('Tip: Use /update --check to only verify availability.'));
       this.log(chalk.dim('If that fails, run:'));
       this.log(chalk.dim(`  ${updateInfo.installCommand}`));
     }
@@ -719,7 +719,7 @@ function getSpinnerText(parsed: ReturnType<typeof parseShellInput>): string | nu
     case 'params':
     case 'new':
       return null;
-    case 'self-update':
+    case 'update':
       return parsed.check ? 'Checking for CLI updates...' : 'Updating CLI...';
     case 'set':
       return 'Saving parameter...';

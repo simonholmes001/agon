@@ -99,6 +99,7 @@ describe('shell engine', () => {
     expect(print).toHaveBeenCalledWith(expect.stringContaining('/refresh [artifact]'));
     expect(print).toHaveBeenCalledWith(expect.stringContaining('/attach <file-path>'));
     expect(print).toHaveBeenCalledWith(expect.stringContaining('/exit'));
+    expect(print).toHaveBeenCalledWith(expect.stringContaining('/update'));
     expect(print).toHaveBeenCalledWith('  /set defaultFriction 75');
   });
 
@@ -231,7 +232,7 @@ describe('shell engine', () => {
     });
   });
 
-  it('runs /self-update --check through updater callback', async () => {
+  it('runs /update --check through updater callback', async () => {
     selfUpdate.mockResolvedValueOnce({
       status: 'update-available',
       currentVersion: '0.1.10',
@@ -239,7 +240,7 @@ describe('shell engine', () => {
       installCommand: 'npm install -g @agon_agents/cli@latest'
     });
 
-    const outcome = await engine.handleInput('/self-update --check');
+    const outcome = await engine.handleInput('/update --check');
 
     expect(selfUpdate).toHaveBeenCalledWith({ check: true });
     expect(outcome).toEqual({ kind: 'noop' });
