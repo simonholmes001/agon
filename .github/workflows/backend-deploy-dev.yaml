@@ -6,8 +6,10 @@ on:
     paths:
       - 'backend/**'
       - '.github/workflows/backend-deploy-dev.yaml'
-      - 'infrastructure/bicep/main.bicep'
-      - 'infrastructure/bicep/modules/app-edge-dev.bicep'
+  workflow_run:
+    workflows: ['Infrastructure Deploy (Dev)']
+    types: [completed]
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -25,19 +27,49 @@ jobs:
   deploy-dev:
     name: Build, Push, and Deploy Backend (Dev)
     runs-on: ubuntu-latest
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     environment:
       name: dev
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+          fetch-depth: 2
+
+      - name: Guard deploy ordering
+        id: guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_run" ]; then
+            echo "deploy=true" >> "$GITHUB_OUTPUT"
+            echo "deploy_sha=${{ github.event.workflow_run.head_sha }}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "deploy_sha=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+
+          if [ "${{ github.event_name }}" = "push" ]; then
+            if git diff --name-only "${{ github.event.before }}" "${{ github.sha }}" | grep -q '^infrastructure/'; then
+              echo "deploy=false" >> "$GITHUB_OUTPUT"
+              echo "Skipping push-triggered backend deploy because infrastructure changed in the same push."
+              echo "Backend deploy will run automatically after successful Infrastructure Deploy via workflow_run."
+              exit 0
+            fi
+          fi
+
+          echo "deploy=true" >> "$GITHUB_OUTPUT"
 
       - name: Setup .NET
+        if: steps.guard.outputs.deploy == 'true'
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 9.0.x
 
       - name: Run backend tests
+        if: steps.guard.outputs.deploy == 'true'
         working-directory: backend
         run: |
           dotnet restore
@@ -45,6 +77,7 @@ jobs:
           dotnet test --no-build --configuration Release --verbosity normal
 
       - name: Validate required Docker Hub secrets
+        if: steps.guard.outputs.deploy == 'true'
         shell: bash
         env:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -66,24 +99,27 @@ jobs:
           fi
 
       - name: Docker Hub login
+        if: steps.guard.outputs.deploy == 'true'
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Set image tags
+        if: steps.guard.outputs.deploy == 'true'
         id: image
         shell: bash
         env:
           DOCKERHUB_IMAGE_NAME: ${{ secrets.DOCKERHUB_IMAGE_NAME }}
         run: |
           set -euo pipefail
-          SHORT_SHA="$(echo "${GITHUB_SHA}" | cut -c1-12)"
+          SHORT_SHA="$(echo "${{ steps.guard.outputs.deploy_sha }}" | cut -c1-12)"
           echo "tag_sha=sha-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
           echo "image_sha=${DOCKERHUB_IMAGE_NAME}:sha-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
           echo "image_latest=${DOCKERHUB_IMAGE_NAME}:dev-latest" >> "$GITHUB_OUTPUT"
 
       - name: Build and push backend image
+        if: steps.guard.outputs.deploy == 'true'
         uses: docker/build-push-action@v6
         with:
           context: backend
@@ -94,6 +130,7 @@ jobs:
             ${{ steps.image.outputs.image_latest }}
 
       - name: Login to Azure (OIDC)
+        if: steps.guard.outputs.deploy == 'true'
         uses: azure/login@v2
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
@@ -101,6 +138,7 @@ jobs:
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Resolve App Service name
+        if: steps.guard.outputs.deploy == 'true'
         id: app
         uses: azure/cli@v2
         with:
@@ -157,6 +195,7 @@ jobs:
             echo "app_resource_group=${APP_RESOURCE_GROUP}" >> "$GITHUB_OUTPUT"
 
       - name: Configure App Service container image
+        if: steps.guard.outputs.deploy == 'true'
         uses: azure/cli@v2
         env:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -177,6 +216,7 @@ jobs:
               --settings WEBSITES_PORT=8080
 
       - name: Restart App Service
+        if: steps.guard.outputs.deploy == 'true'
         uses: azure/cli@v2
         with:
           inlineScript: |
@@ -185,6 +225,7 @@ jobs:
               --name "${{ steps.app.outputs.app_name }}"
 
       - name: Verify health through Application Gateway
+        if: steps.guard.outputs.deploy == 'true'
         uses: azure/cli@v2
         with:
           inlineScript: |
