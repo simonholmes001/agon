@@ -92,7 +92,6 @@
     "bin": "agon",
     "dirname": "agon",
     "commands": "./dist/commands",
-    "default": "shell",
     "topicSeparator": " "
   }
 }

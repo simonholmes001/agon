@@ -28,6 +28,11 @@ if (normalizedArgs !== args) {
   process.argv = [process.argv[0], process.argv[1], ...normalizedArgs];
 }
 
+// Default to 'shell' command when no subcommand is given
+if (process.argv.length === 2) {
+  process.argv.push('shell');
+}
+
 execute({ development: false, dir: import.meta.url })
   .catch((error) => {
     console.error(error);
