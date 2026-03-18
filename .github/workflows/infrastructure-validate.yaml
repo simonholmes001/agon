@@ -24,7 +24,7 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Build main Bicep template
-        uses: azure/cli@v2
+        uses: azure/cli@9f7ce6f37c31b777ec6c6b6d1dfe7db79f497956 # v2.2.0
         with:
           inlineScript: |
             az bicep install
@@ -84,7 +84,7 @@ jobs:
             fi
 
       - name: Run what-if for dev deployment
-        uses: azure/cli@v2
+        uses: azure/cli@9f7ce6f37c31b777ec6c6b6d1dfe7db79f497956 # v2.2.0
         env:
           AZURE_POSTGRES_ADMIN_PASSWORD: ${{ secrets.AZURE_POSTGRES_ADMIN_PASSWORD }}
         with:

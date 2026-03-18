@@ -53,7 +53,7 @@ jobs:
           fi
 
       - name: Version / Release with Changesets
-        uses: changesets/action@v1
+        uses: changesets/action@6a0a831ff30acef54f2c6aa1cbbc1096b066edaf # v1.7.0
         with:
           cwd: cli
           version: npx --yes @changesets/cli version
@@ -62,3 +62,5 @@ jobs:
           commit: 'chore(release): version @agon_agents/cli'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_CONFIG_PROVENANCE: "true"

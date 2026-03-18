@@ -71,7 +71,7 @@ jobs:
             fi
 
       - name: Build Bicep templates
-        uses: azure/cli@v2
+        uses: azure/cli@9f7ce6f37c31b777ec6c6b6d1dfe7db79f497956 # v2.2.0
         with:
           inlineScript: |
             az bicep install
@@ -82,7 +82,7 @@ jobs:
             az bicep build --file infrastructure/bicep/modules/keyvault-access-dev.bicep
 
       - name: Deploy dev infrastructure (subscription scope)
-        uses: azure/cli@v2
+        uses: azure/cli@9f7ce6f37c31b777ec6c6b6d1dfe7db79f497956 # v2.2.0
         env:
           AZURE_POSTGRES_ADMIN_PASSWORD: ${{ secrets.AZURE_POSTGRES_ADMIN_PASSWORD }}
           OPENAI_KEY: ${{ secrets.OPENAI_KEY }}

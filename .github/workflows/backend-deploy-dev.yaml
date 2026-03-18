@@ -84,7 +84,7 @@ jobs:
           echo "image_latest=${DOCKERHUB_IMAGE_NAME}:dev-latest" >> "$GITHUB_OUTPUT"
 
       - name: Build and push backend image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: backend
           file: backend/Dockerfile
@@ -102,7 +102,7 @@ jobs:
 
       - name: Resolve App Service name
         id: app
-        uses: azure/cli@v2
+        uses: azure/cli@9f7ce6f37c31b777ec6c6b6d1dfe7db79f497956 # v2.2.0
         with:
           inlineScript: |
             set -euo pipefail
@@ -136,7 +136,7 @@ jobs:
             echo "app_resource_group=${APP_RESOURCE_GROUP}" >> "$GITHUB_OUTPUT"
 
       - name: Configure App Service container image
-        uses: azure/cli@v2
+        uses: azure/cli@9f7ce6f37c31b777ec6c6b6d1dfe7db79f497956 # v2.2.0
         env:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
           DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
@@ -156,7 +156,7 @@ jobs:
               --settings WEBSITES_PORT=8080
 
       - name: Restart App Service
-        uses: azure/cli@v2
+        uses: azure/cli@9f7ce6f37c31b777ec6c6b6d1dfe7db79f497956 # v2.2.0
         with:
           inlineScript: |
             az webapp restart \
@@ -164,7 +164,7 @@ jobs:
               --name "${{ steps.app.outputs.app_name }}"
 
       - name: Verify health through Application Gateway
-        uses: azure/cli@v2
+        uses: azure/cli@9f7ce6f37c31b777ec6c6b6d1dfe7db79f497956 # v2.2.0
         with:
           inlineScript: |
             set -euo pipefail
