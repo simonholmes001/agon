@@ -38,10 +38,8 @@ export function parseShellInput(input: string): ParsedShellInput {
       return { type: 'slash', command: 'params' };
     case 'new':
       return { type: 'slash', command: 'new' };
-    case 'self-update':
-    case 'selfupdate':
     case 'update':
-      return parseSelfUpdate(rawArgs);
+      return parseUpdate(rawArgs);
     case 'show-sessions':
     case 'showsessions':
     case 'sessions':
@@ -177,11 +175,11 @@ function parseSet(args: string[]): ParsedShellInput {
   };
 }
 
-function parseSelfUpdate(args: string[]): ParsedShellInput {
+function parseUpdate(args: string[]): ParsedShellInput {
   if (args.length === 0) {
     return {
       type: 'slash',
-      command: 'self-update',
+      command: 'update',
       check: false
     };
   }
@@ -189,14 +187,14 @@ function parseSelfUpdate(args: string[]): ParsedShellInput {
   if (args.length === 1 && args[0] === '--check') {
     return {
       type: 'slash',
-      command: 'self-update',
+      command: 'update',
       check: true
     };
   }
 
   return {
     type: 'error',
-    message: 'Usage: /self-update [--check]'
+    message: 'Usage: /update [--check]'
   };
 }
 
