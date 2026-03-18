@@ -1,6 +1,6 @@
 import type { SessionResponse } from '../api/types.js';
 import type { SelfUpdateFailureCategory } from '../utils/self-update.js';
-import { parseShellInput } from './parser.js';
+import { extractInlineAttach, parseShellInput } from './parser.js';
 import type { PlainInputRoute } from './router.js';
 
 interface ShellControllerLike {

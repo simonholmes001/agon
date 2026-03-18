@@ -12,17 +12,23 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import Config from '../../src/commands/config';
 
-// Mock ConfigManager
-const mockConfigManager = {
+// vi.mock() is hoisted to before all variable declarations in vitest 4.x,
+// so mockConfigManager must be initialised with vi.hoisted() to be available
+// inside the factory.
+const mockConfigManager = vi.hoisted(() => ({
   load: vi.fn(),
   get: vi.fn(),
   set: vi.fn(),
   getDefaults: vi.fn(),
   getConfigPath: vi.fn()
-};
+}));
 
 vi.mock('../../src/state/config-manager.js', () => ({
-  ConfigManager: vi.fn(() => mockConfigManager)
+  // Regular function (not arrow) required: vitest 4.x invokes the implementation
+  // with `new` when the mock is called as a constructor, and arrow functions
+  // cannot be constructors. Returning mockConfigManager makes `new ConfigManager()`
+  // resolve to the shared mock instance.
+  ConfigManager: vi.fn(function () { return mockConfigManager; })
 }));
 
 // Helper to create command with properly mocked oclif config
