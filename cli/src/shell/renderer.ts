@@ -253,8 +253,9 @@ function createPromptFrame(): PromptFrame {
   const terminalWidth = process.stdout.columns ?? 100;
   // Codex-like wide prompt zone: keep a small side margin, but avoid runaway ultra-wide lines.
   const width = Math.max(72, Math.min(terminalWidth - 4, 180));
-  // Keep the landing zone compact (Codex-style) and rely on viewport scrolling for unlimited input.
-  const inputLineCount = 4;
+  // Keep the landing zone compact (Codex-style): 1 blank above and 1 blank below the prompt so
+  // the `>` marker is vertically centered in the idle input box.
+  const inputLineCount = 3;
   const promptLineOffset = 1;
   const borderLine = chalk.whiteBright('─'.repeat(width));
   const backgroundStart = '\u001b[48;2;63;111;201m';

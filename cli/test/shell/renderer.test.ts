@@ -61,8 +61,16 @@ describe('shell renderer', () => {
     expect(frame.maxInputChars).toBeGreaterThan(0);
     expect(frame.cursorUpLines).toBe(frame.inputLineCount + 1);
     expect(frame.cursorDownFromFirstLine).toBe(frame.inputLineCount + 1);
-    expect(frame.inputLineCount).toBe(4);
+    expect(frame.inputLineCount).toBe(3);
     expect(frame.promptLineOffset).toBe(1);
+  });
+
+  it('centers > prompt vertically in the idle input box (equal blank lines above and below)', () => {
+    const frame = renderPromptBanner(() => {});
+    const blankLinesAbove = frame.promptLineOffset;
+    const blankLinesBelow = frame.inputLineCount - frame.promptLineOffset - 1;
+
+    expect(blankLinesAbove).toBe(blankLinesBelow);
   });
 
   it('builds an active prompt line with an input cursor prefix', () => {
