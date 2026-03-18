@@ -38,6 +38,10 @@ export function parseShellInput(input: string): ParsedShellInput {
       return { type: 'slash', command: 'params' };
     case 'new':
       return { type: 'slash', command: 'new' };
+    case 'self-update':
+    case 'selfupdate':
+    case 'update':
+      return parseSelfUpdate(rawArgs);
     case 'show-sessions':
     case 'showsessions':
     case 'sessions':
@@ -68,6 +72,87 @@ export function parseShellInput(input: string): ParsedShellInput {
   }
 }
 
+export type InlineAttachExtraction =
+  | {
+      type: 'attach';
+      path: string;
+      remainingText: string;
+    }
+  | {
+      type: 'error';
+      message: string;
+    };
+
+export function extractInlineAttach(input: string): InlineAttachExtraction | null {
+  const match = /(?:^|\s)\/(?:attach|image)(?=\s|$)/i.exec(input);
+  if (!match || typeof match.index !== 'number') {
+    return null;
+  }
+
+  const commandMatch = match[0];
+  const leadingWhitespaceLength = commandMatch.length - commandMatch.trimStart().length;
+  const commandStart = match.index + leadingWhitespaceLength;
+  let pathStart = match.index + commandMatch.length;
+
+  while (pathStart < input.length && /\s/.test(input[pathStart] ?? '')) {
+    pathStart += 1;
+  }
+
+  if (pathStart >= input.length) {
+    return {
+      type: 'error',
+      message: 'Usage: /attach <file-path>'
+    };
+  }
+
+  const firstPathChar = input[pathStart];
+  let path = '';
+  let pathEnd = pathStart;
+
+  if (firstPathChar === '"' || firstPathChar === '\'') {
+    const quote = firstPathChar;
+    pathEnd = pathStart + 1;
+    while (pathEnd < input.length) {
+      const char = input[pathEnd];
+      if (char === quote && input[pathEnd - 1] !== '\\') {
+        break;
+      }
+      pathEnd += 1;
+    }
+
+    if (pathEnd >= input.length) {
+      return {
+        type: 'error',
+        message: 'Usage: /attach <file-path>'
+      };
+    }
+
+    path = input.slice(pathStart + 1, pathEnd);
+    pathEnd += 1;
+  } else {
+    while (pathEnd < input.length && !/\s/.test(input[pathEnd] ?? '')) {
+      pathEnd += 1;
+    }
+    path = input.slice(pathStart, pathEnd);
+  }
+
+  const normalizedPath = path.trim();
+  if (!normalizedPath) {
+    return {
+      type: 'error',
+      message: 'Usage: /attach <file-path>'
+    };
+  }
+
+  const remainingText = normalizeInlineMessageText(`${input.slice(0, commandStart)} ${input.slice(pathEnd)}`);
+
+  return {
+    type: 'attach',
+    path: normalizedPath,
+    remainingText
+  };
+}
+
 function parseSet(args: string[]): ParsedShellInput {
   if (args.length < 2) {
     return {
@@ -89,6 +174,29 @@ function parseSet(args: string[]): ParsedShellInput {
     command: 'set',
     key,
     value: args.slice(1).join(' ')
+  };
+}
+
+function parseSelfUpdate(args: string[]): ParsedShellInput {
+  if (args.length === 0) {
+    return {
+      type: 'slash',
+      command: 'self-update',
+      check: false
+    };
+  }
+
+  if (args.length === 1 && args[0] === '--check') {
+    return {
+      type: 'slash',
+      command: 'self-update',
+      check: true
+    };
+  }
+
+  return {
+    type: 'error',
+    message: 'Usage: /self-update [--check]'
   };
 }
 
@@ -242,4 +350,11 @@ function stripMatchingQuotes(value: string): string {
     }
   }
   return value;
+}
+
+function normalizeInlineMessageText(value: string): string {
+  return value
+    .replace(/\s+/g, ' ')
+    .replace(/\s+([.,!?;:])/g, '$1')
+    .trim();
 }
