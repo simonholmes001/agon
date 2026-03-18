@@ -1,5 +1,11 @@
 # @agon_agents/cli
 
+## 0.1.11
+
+### Patch Changes
+
+- Sort `/help` command list alphabetically for predictable lookup
+
 ## 0.1.10
 
 ### Patch Changes
