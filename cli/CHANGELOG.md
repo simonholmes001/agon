@@ -1,5 +1,33 @@
 # @agon_agents/cli
 
+## 0.2.0
+
+### Minor Changes
+
+- Shell UX: Ctrl+C now interrupts the current in-flight operation instead of exiting the session.
+
+  - Pressing Ctrl+C at the idle prompt clears the current input line and prints "Interrupted. Shell still active." — the shell remains open.
+  - Pressing Ctrl+C during active processing (spinner, follow-up polling, debate watch loop) cancels the in-flight operation and returns to the prompt without exiting.
+  - Normal `/exit`, `/quit`, and `/eot` behaviour is unchanged.
+  - Exports `INTERRUPT_SENTINEL`, `raceAbort`, and `isAbortError` utilities from `shell.ts`.
+
+### Patch Changes
+
+- Fix `node bin/run.js shell` error and add prompt history navigation.
+
+  - Remove `src/commands/index.ts` which caused oclif to treat the CLI as a single-command CLI (`SINGLE_COMMAND_CLI_SYMBOL`), making `node bin/run.js shell` fail with `Error: command Symbol(SINGLE_COMMAND_CLI):shell not found`.
+  - Add `clean` script to `build` so stale `dist/commands/index.js` is removed on every rebuild.
+  - Add Up/Down arrow prompt history navigation in the interactive shell: pressing `↑` on empty input loads the previous prompt; `↓` moves forward; at the newest entry `↓` returns to an empty input.
+
+- Fix shell UI: vertically center `>` prompt in the idle input box.
+
+  Reduced `inputLineCount` from 4 to 3 in `createPromptFrame()` so the prompt
+  row sits at equal distance from the top and bottom borders of the input zone
+  (1 blank line above, 1 blank line below), matching the intended Codex-style
+  layout. Multiline wrap and cursor-position behaviour are unaffected.
+
+- Rename in-shell update command from `/self-update` to `/update`. The `/update [--check]` command is now the sole in-session update entry point. The startup banner and `/help` listing have been updated accordingly.
+
 ## 0.1.14
 
 ### Patch Changes
