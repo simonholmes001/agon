@@ -208,10 +208,12 @@ export class AgonAPIClient {
       );
     }
 
-    const [buffer, fileStats] = await Promise.all([
-      readFile(resolvedPath),
-      stat(resolvedPath)
-    ]);
+    let fileStats: Awaited<ReturnType<typeof stat>>;
+    try {
+      fileStats = await stat(resolvedPath);
+    } catch (error) {
+      throw this.mapAttachmentFileError(error, resolvedPath);
+    }
 
     if (!fileStats.isFile()) {
       throw new AgonError(
@@ -219,6 +221,13 @@ export class AgonAPIClient {
         'Attachment path must point to a file.',
         ['Provide a file path, not a directory']
       );
+    }
+
+    let buffer: Buffer;
+    try {
+      buffer = await readFile(resolvedPath);
+    } catch (error) {
+      throw this.mapAttachmentFileError(error, resolvedPath);
     }
 
     const fileName = path.basename(resolvedPath);
@@ -253,6 +262,47 @@ export class AgonAPIClient {
   }
 
   // Helper methods
+
+  private mapAttachmentFileError(error: unknown, filePath: string): Error {
+    const fsError = error as NodeJS.ErrnoException;
+    switch (fsError?.code) {
+      case 'ENOENT':
+        return new AgonError(
+          ErrorCode.INVALID_INPUT,
+          `Attachment file not found: ${filePath}`,
+          [
+            'Check that the path exists on disk',
+            'Use quotes when the path contains spaces'
+          ]
+        );
+      case 'EACCES':
+      case 'EPERM':
+        return new AgonError(
+          ErrorCode.INVALID_INPUT,
+          `Permission denied reading attachment: ${filePath}`,
+          [
+            'Check file permissions and retry',
+            'Choose a file your user account can read'
+          ]
+        );
+      case 'EINVAL':
+      case 'ENAMETOOLONG':
+        return new AgonError(
+          ErrorCode.INVALID_INPUT,
+          `Invalid attachment path: ${filePath}`,
+          ['Provide a valid local file path']
+        );
+      default:
+        if (error instanceof Error) {
+          return error;
+        }
+        return new AgonError(
+          ErrorCode.UNKNOWN,
+          'Failed to read attachment file.',
+          ['Verify the file path and permissions, then retry']
+        );
+    }
+  }
 
   private shouldRetry(error: AxiosError): boolean {
     if (error.code === 'ECONNABORTED') return false; // Request timed out.

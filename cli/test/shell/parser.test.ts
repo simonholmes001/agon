@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseShellInput } from '../../src/shell/parser.js';
+import { extractInlineAttach, parseShellInput } from '../../src/shell/parser.js';
 
 describe('shell parser', () => {
   it('parses plain input', () => {
@@ -214,6 +214,29 @@ describe('shell parser', () => {
     expect(parseShellInput('/unknown')).toEqual({
       type: 'error',
       message: 'Unknown command. Use /help for available commands.'
+    });
+  });
+
+  it('extracts inline /attach from mixed plain input', () => {
+    expect(extractInlineAttach('Please review this CV /attach "./docs/product brief.pdf" and suggest roles.')).toEqual({
+      type: 'attach',
+      path: './docs/product brief.pdf',
+      remainingText: 'Please review this CV and suggest roles.'
+    });
+  });
+
+  it('extracts inline /attach with unquoted paths', () => {
+    expect(extractInlineAttach('Can you check this? /attach ./docs/spec.md')).toEqual({
+      type: 'attach',
+      path: './docs/spec.md',
+      remainingText: 'Can you check this?'
+    });
+  });
+
+  it('returns deterministic error for malformed inline /attach', () => {
+    expect(extractInlineAttach('Please review /attach')).toEqual({
+      type: 'error',
+      message: 'Usage: /attach <file-path>'
     });
   });
 });
