@@ -12,15 +12,45 @@ param workloadName string
 @description('CAF-style naming prefix.')
 param namePrefix string
 
+@description('Optional suffix for Application Gateway resources to support parallel replacement cutovers (for example: v1).')
+@maxLength(20)
+param appGatewayResourceSuffix string = ''
+
 @description('Alert email receiver for action groups.')
 param alertEmail string
 
-@description('Application Gateway WAF mode. Use Detection in dev to avoid blocking legitimate prompt text.')
+@description('Application Gateway SKU name. Use Basic/Standard_v2 for modern SKUs, or Standard_Small/Standard_Medium/Standard_Large for legacy v1.')
 @allowed([
-  'Detection'
-  'Prevention'
+  'Basic'
+  'Standard_Small'
+  'Standard_Medium'
+  'Standard_Large'
+  'Standard_v2'
 ])
-param appGatewayWafMode string = 'Detection'
+param appGatewaySkuName string = 'Basic'
+
+@description('Application Gateway SKU tier. Keep aligned with appGatewaySkuName.')
+@allowed([
+  'Basic'
+  'Standard'
+  'Standard_v2'
+])
+param appGatewaySkuTier string = 'Basic'
+
+@description('Application Gateway instance count for legacy v1 SKUs. Ignored for Basic and Standard_v2.')
+@minValue(1)
+@maxValue(32)
+param appGatewayInstanceCount int = 1
+
+@description('Application Gateway autoscale minimum capacity for Standard_v2.')
+@minValue(0)
+@maxValue(125)
+param appGatewayAutoscaleMinCapacity int = 1
+
+@description('Application Gateway autoscale maximum capacity for Standard_v2.')
+@minValue(1)
+@maxValue(125)
+param appGatewayAutoscaleMaxCapacity int = 2
 
 @description('Application Gateway backend request timeout in seconds.')
 @minValue(1)
@@ -94,8 +124,8 @@ var appInsightsName = 'appi-${namePrefix}'
 var logAnalyticsName = 'log-${namePrefix}'
 var actionGroupName = 'ag-${namePrefix}-ops'
 
-var appGatewayName = 'agw-${namePrefix}'
-var appGatewayPublicIpName = 'pip-${namePrefix}-agw'
+var appGatewayResourceSuffixSegment = empty(appGatewayResourceSuffix) ? '' : '-${appGatewayResourceSuffix}'
+var appGatewayName = 'agw-${namePrefix}${appGatewayResourceSuffixSegment}'
 var frontendIpConfigName = 'feip-public'
 var frontendHttpPortName = 'feport-80'
 var frontendHttpsPortName = 'feport-443'
@@ -110,6 +140,24 @@ var httpRedirectRuleName = 'rule-http-redirect'
 var httpToHttpsRedirectName = 'redirect-http-to-https'
 var appGatewaySslCertificateName = 'agw-cert'
 var enableHttpsListener = !empty(appGatewaySslCertificatePfxBase64) && !empty(appGatewaySslCertificatePassword)
+var normalizedAppGatewaySkuTier = toLower(appGatewaySkuTier)
+var isModernAppGatewaySku = endsWith(normalizedAppGatewaySkuTier, '_v2')
+var isLegacyV1Sku = !isModernAppGatewaySku
+var appGatewayPublicIpName = isModernAppGatewaySku
+  ? 'pip-${namePrefix}-agw${appGatewayResourceSuffixSegment}'
+  : 'pip-${namePrefix}-agw-v1${appGatewayResourceSuffixSegment}'
+var appGatewaySku = isLegacyV1Sku
+  ? {
+      name: appGatewaySkuName
+      tier: appGatewaySkuTier
+      capacity: appGatewayInstanceCount
+    }
+  : {
+      name: appGatewaySkuName
+      tier: appGatewaySkuTier
+    }
+var appGatewayPublicIpSkuName = isModernAppGatewaySku ? 'Standard' : 'Basic'
+var appGatewayPublicIpAllocationMethod = isModernAppGatewaySku ? 'Static' : 'Dynamic'
 var frontendPorts = enableHttpsListener
   ? [
       {
@@ -203,54 +251,57 @@ var redirectConfigurations = enableHttpsListener
       }
     ]
   : []
+var httpRedirectRuleProperties = {
+  ruleType: 'Basic'
+  httpListener: {
+    id: resourceId('Microsoft.Network/applicationGateways/httpListeners', appGatewayName, httpListenerName)
+  }
+  redirectConfiguration: {
+    id: resourceId('Microsoft.Network/applicationGateways/redirectConfigurations', appGatewayName, httpToHttpsRedirectName)
+  }
+  priority: 90
+}
+var httpsRequestRoutingRuleProperties = {
+  ruleType: 'Basic'
+  httpListener: {
+    id: resourceId('Microsoft.Network/applicationGateways/httpListeners', appGatewayName, httpsListenerName)
+  }
+  backendAddressPool: {
+    id: resourceId('Microsoft.Network/applicationGateways/backendAddressPools', appGatewayName, backendPoolName)
+  }
+  backendHttpSettings: {
+    id: resourceId('Microsoft.Network/applicationGateways/backendHttpSettingsCollection', appGatewayName, backendHttpSettingsName)
+  }
+  priority: 100
+}
+var defaultRequestRoutingRuleProperties = {
+  ruleType: 'Basic'
+  httpListener: {
+    id: resourceId('Microsoft.Network/applicationGateways/httpListeners', appGatewayName, httpListenerName)
+  }
+  backendAddressPool: {
+    id: resourceId('Microsoft.Network/applicationGateways/backendAddressPools', appGatewayName, backendPoolName)
+  }
+  backendHttpSettings: {
+    id: resourceId('Microsoft.Network/applicationGateways/backendHttpSettingsCollection', appGatewayName, backendHttpSettingsName)
+  }
+  priority: 100
+}
 var requestRoutingRules = enableHttpsListener
   ? [
       {
         name: httpRedirectRuleName
-        properties: {
-          ruleType: 'Basic'
-          priority: 90
-          httpListener: {
-            id: resourceId('Microsoft.Network/applicationGateways/httpListeners', appGatewayName, httpListenerName)
-          }
-          redirectConfiguration: {
-            id: resourceId('Microsoft.Network/applicationGateways/redirectConfigurations', appGatewayName, httpToHttpsRedirectName)
-          }
-        }
+        properties: httpRedirectRuleProperties
       }
       {
         name: httpsRequestRoutingRuleName
-        properties: {
-          ruleType: 'Basic'
-          priority: 100
-          httpListener: {
-            id: resourceId('Microsoft.Network/applicationGateways/httpListeners', appGatewayName, httpsListenerName)
-          }
-          backendAddressPool: {
-            id: resourceId('Microsoft.Network/applicationGateways/backendAddressPools', appGatewayName, backendPoolName)
-          }
-          backendHttpSettings: {
-            id: resourceId('Microsoft.Network/applicationGateways/backendHttpSettingsCollection', appGatewayName, backendHttpSettingsName)
-          }
-        }
+        properties: httpsRequestRoutingRuleProperties
       }
     ]
   : [
       {
         name: requestRoutingRuleName
-        properties: {
-          ruleType: 'Basic'
-          priority: 100
-          httpListener: {
-            id: resourceId('Microsoft.Network/applicationGateways/httpListeners', appGatewayName, httpListenerName)
-          }
-          backendAddressPool: {
-            id: resourceId('Microsoft.Network/applicationGateways/backendAddressPools', appGatewayName, backendPoolName)
-          }
-          backendHttpSettings: {
-            id: resourceId('Microsoft.Network/applicationGateways/backendHttpSettingsCollection', appGatewayName, backendHttpSettingsName)
-          }
-        }
+        properties: defaultRequestRoutingRuleProperties
       }
     ]
 
@@ -432,15 +483,98 @@ resource appServicePrivateDnsZoneGroup 'Microsoft.Network/privateEndpoints/priva
   }
 }
 
+var appGatewayBaseProperties = {
+  sku: appGatewaySku
+  gatewayIPConfigurations: [
+    {
+      name: 'gwipc-main'
+      properties: {
+        subnet: {
+          id: appGatewaySubnetId
+        }
+      }
+    }
+  ]
+  frontendIPConfigurations: [
+    {
+      name: frontendIpConfigName
+      properties: {
+        publicIPAddress: {
+          id: appGatewayPublicIp.id
+        }
+      }
+    }
+  ]
+  frontendPorts: frontendPorts
+  backendAddressPools: [
+    {
+      name: backendPoolName
+      properties: {
+        backendAddresses: [
+          {
+            fqdn: appService.properties.defaultHostName
+          }
+        ]
+      }
+    }
+  ]
+  backendHttpSettingsCollection: [
+    {
+      name: backendHttpSettingsName
+      properties: {
+        protocol: 'Https'
+        port: 443
+        requestTimeout: appGatewayRequestTimeoutSeconds
+        hostName: appService.properties.defaultHostName
+        pickHostNameFromBackendAddress: false
+        probe: {
+          id: resourceId('Microsoft.Network/applicationGateways/probes', appGatewayName, probeName)
+        }
+      }
+    }
+  ]
+  probes: [
+    {
+      name: probeName
+      properties: {
+        protocol: 'Https'
+        path: '/health'
+        interval: 30
+        timeout: 30
+        unhealthyThreshold: 3
+        pickHostNameFromBackendHttpSettings: true
+        match: {
+          statusCodes: [
+            '200-399'
+          ]
+        }
+      }
+    }
+  ]
+  sslCertificates: sslCertificates
+  httpListeners: httpListeners
+  redirectConfigurations: redirectConfigurations
+  requestRoutingRules: requestRoutingRules
+}
+var appGatewayAutoscaleProperties = endsWith(normalizedAppGatewaySkuTier, '_v2')
+  ? {
+      autoscaleConfiguration: {
+        minCapacity: appGatewayAutoscaleMinCapacity
+        maxCapacity: appGatewayAutoscaleMaxCapacity
+      }
+    }
+  : {}
+var appGatewayProperties = union(appGatewayBaseProperties, appGatewayAutoscaleProperties)
+
 resource appGatewayPublicIp 'Microsoft.Network/publicIPAddresses@2023-09-01' = {
   name: appGatewayPublicIpName
   location: location
   tags: tags
   sku: {
-    name: 'Standard'
+    name: appGatewayPublicIpSkuName
   }
   properties: {
-    publicIPAllocationMethod: 'Static'
+    publicIPAllocationMethod: appGatewayPublicIpAllocationMethod
     publicIPAddressVersion: 'IPv4'
   }
 }
@@ -449,92 +583,7 @@ resource appGateway 'Microsoft.Network/applicationGateways@2023-09-01' = {
   name: appGatewayName
   location: location
   tags: tags
-  properties: {
-    sku: {
-      name: 'WAF_v2'
-      tier: 'WAF_v2'
-    }
-    autoscaleConfiguration: {
-      minCapacity: 1
-      maxCapacity: 2
-    }
-    gatewayIPConfigurations: [
-      {
-        name: 'gwipc-main'
-        properties: {
-          subnet: {
-            id: appGatewaySubnetId
-          }
-        }
-      }
-    ]
-    frontendIPConfigurations: [
-      {
-        name: frontendIpConfigName
-        properties: {
-          publicIPAddress: {
-            id: appGatewayPublicIp.id
-          }
-        }
-      }
-    ]
-    frontendPorts: frontendPorts
-    backendAddressPools: [
-      {
-        name: backendPoolName
-        properties: {
-          backendAddresses: [
-            {
-              fqdn: appService.properties.defaultHostName
-            }
-          ]
-        }
-      }
-    ]
-    backendHttpSettingsCollection: [
-      {
-        name: backendHttpSettingsName
-        properties: {
-          protocol: 'Https'
-          port: 443
-          requestTimeout: appGatewayRequestTimeoutSeconds
-          hostName: appService.properties.defaultHostName
-          pickHostNameFromBackendAddress: false
-          probe: {
-            id: resourceId('Microsoft.Network/applicationGateways/probes', appGatewayName, probeName)
-          }
-        }
-      }
-    ]
-    probes: [
-      {
-        name: probeName
-        properties: {
-          protocol: 'Https'
-          path: '/health'
-          interval: 30
-          timeout: 30
-          unhealthyThreshold: 3
-          pickHostNameFromBackendHttpSettings: true
-          match: {
-            statusCodes: [
-              '200-399'
-            ]
-          }
-        }
-      }
-    ]
-    sslCertificates: sslCertificates
-    httpListeners: httpListeners
-    redirectConfigurations: redirectConfigurations
-    requestRoutingRules: requestRoutingRules
-    webApplicationFirewallConfiguration: {
-      enabled: true
-      firewallMode: appGatewayWafMode
-      ruleSetType: 'OWASP'
-      ruleSetVersion: '3.2'
-    }
-  }
+  properties: appGatewayProperties
 }
 
 resource actionGroup 'Microsoft.Insights/actionGroups@2023-01-01' = {

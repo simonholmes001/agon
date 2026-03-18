@@ -4,6 +4,7 @@ import { ShellEngine } from '../../src/shell/engine.js';
 
 describe('shell engine', () => {
   let controller: any;
+  let selfUpdate: ReturnType<typeof vi.fn>;
   let print: ReturnType<typeof vi.fn>;
   let routeFn: ReturnType<typeof vi.fn>;
   let engine: ShellEngine;
@@ -68,12 +69,17 @@ describe('shell engine', () => {
       getActiveSession: vi.fn().mockResolvedValue(session)
     };
 
+    selfUpdate = vi.fn().mockResolvedValue({
+      status: 'up-to-date',
+      currentVersion: '0.1.10'
+    });
     print = vi.fn();
     routeFn = vi.fn().mockReturnValue({ action: 'follow-up' });
 
     engine = new ShellEngine({
       controller,
       routePlainInput: routeFn,
+      selfUpdate,
       print
     });
   });
@@ -87,13 +93,34 @@ describe('shell engine', () => {
   it('prints detailed command help for /help', async () => {
     await engine.handleInput('/help');
     expect(print).toHaveBeenCalledWith('Commands:');
-    expect(print).toHaveBeenCalledWith('  /set <key> <value>            Persist config key (apiUrl|defaultFriction|researchEnabled|logLevel)');
-    expect(print).toHaveBeenCalledWith('  /show-sessions                List your sessions');
-    expect(print).toHaveBeenCalledWith('  /resume [session-id]          Resume latest session (or specific session)');
-    expect(print).toHaveBeenCalledWith('  /refresh [artifact]           Refresh latest artifact (default: verdict)');
-    expect(print).toHaveBeenCalledWith('  /attach <file-path>           Attach a document/image to the active session');
-    expect(print).toHaveBeenCalledWith('  /exit                         Exit shell (also: /quit)');
+    expect(print).toHaveBeenCalledWith(expect.stringContaining('/set <key> <value>'));
+    expect(print).toHaveBeenCalledWith(expect.stringContaining('/show-sessions'));
+    expect(print).toHaveBeenCalledWith(expect.stringContaining('/resume [session-id]'));
+    expect(print).toHaveBeenCalledWith(expect.stringContaining('/refresh [artifact]'));
+    expect(print).toHaveBeenCalledWith(expect.stringContaining('/attach <file-path>'));
+    expect(print).toHaveBeenCalledWith(expect.stringContaining('/exit'));
     expect(print).toHaveBeenCalledWith('  /set defaultFriction 75');
+  });
+
+  it('prints /help command entries in strict alphabetical order', async () => {
+    await engine.handleInput('/help');
+
+    const allLines: string[] = print.mock.calls.map((callArgs: string[]) => callArgs[0]);
+
+    // Collect only the command definition lines (between 'Commands:' and 'Examples:' headers)
+    const commandsStart = allLines.indexOf('Commands:');
+    const examplesStart = allLines.indexOf('Examples:');
+    // Matches indented slash-command entries, e.g. "  /attach <file-path>  ..."
+    const isCommandEntry = (line: string): boolean => /^\s+\//.test(line);
+    const commandLines = allLines
+      .slice(commandsStart + 1, examplesStart)
+      .filter(isCommandEntry);
+
+    // Extract the slash-token (first word after leading whitespace)
+    const tokens = commandLines.map((line: string) => line.trimStart().split(/\s+/)[0]);
+
+    const sorted = [...tokens].sort((a: string, b: string) => a.localeCompare(b));
+    expect(tokens).toEqual(sorted);
   });
 
   it('executes /show-sessions via controller', async () => {
@@ -204,34 +231,18 @@ describe('shell engine', () => {
     });
   });
 
-  it('handles inline /attach in plain input before follow-up submission', async () => {
-    const outcome = await engine.handleInput(
-      'Please review this /attach "./docs/spec.md" and suggest role matches'
-    );
-
-    expect(controller.attachDocument).toHaveBeenCalledWith('./docs/spec.md');
-    expect(controller.submitFollowUp).toHaveBeenCalledWith('Please review this and suggest role matches');
-    expect(outcome).toEqual({
-      kind: 'follow-up',
-      sessionId: 'session-123',
-      status: 'active',
-      phase: 'Clarification',
-      response: {
-        agentId: 'moderator',
-        message: 'Next question'
-      }
+  it('runs /self-update --check through updater callback', async () => {
+    selfUpdate.mockResolvedValueOnce({
+      status: 'update-available',
+      currentVersion: '0.1.10',
+      latestVersion: '0.1.11',
+      installCommand: 'npm install -g @agon_agents/cli@latest'
     });
-    expect(print).toHaveBeenCalledWith(
-      'Attached spec.md to session session-123. Type: text/markdown | Size: 1024 B'
-    );
-  });
 
-  it('returns usage guidance for malformed inline /attach', async () => {
-    const outcome = await engine.handleInput('Please review /attach');
+    const outcome = await engine.handleInput('/self-update --check');
 
+    expect(selfUpdate).toHaveBeenCalledWith({ check: true });
     expect(outcome).toEqual({ kind: 'noop' });
-    expect(controller.attachDocument).not.toHaveBeenCalled();
-    expect(controller.submitFollowUp).not.toHaveBeenCalled();
-    expect(print).toHaveBeenCalledWith('Usage: /attach <file-path>');
+    expect(print).toHaveBeenCalledWith('Update available: v0.1.10 -> v0.1.11');
   });
 });

@@ -13,12 +13,12 @@ on:
 permissions:
   contents: read
   id-token: write
+  # Required to push supply-chain attestations (SBOM + provenance) to Docker Hub
+  # via the docker/build-push-action attestation support.
+  attestations: write
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
-  APP_RESOURCE_GROUP: rg-agon-dev-frc-app
-  APP_NAME_PREFIX: app-agon-dev-frc-
-  AGW_PUBLIC_IP_NAME: pip-agon-dev-frc-agw
 
 concurrency:
   group: backend-dev-deploy
@@ -33,10 +33,10 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v5
         with:
           dotnet-version: 9.0.x
 
@@ -69,10 +69,14 @@ jobs:
           fi
 
       - name: Docker Hub login
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # Buildx is required to generate SBOM and provenance attestations.
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2 # v3.10.0
 
       - name: Set image tags
         id: image
@@ -87,7 +91,7 @@ jobs:
           echo "image_latest=${DOCKERHUB_IMAGE_NAME}:dev-latest" >> "$GITHUB_OUTPUT"
 
       - name: Build and push backend image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: backend
           file: backend/Dockerfile
@@ -95,9 +99,16 @@ jobs:
           tags: |
             ${{ steps.image.outputs.image_sha }}
             ${{ steps.image.outputs.image_latest }}
+          # Supply-chain attestations — resolves Docker Scout warnings:
+          #   • "Missing supply chain attestation(s)"
+          # provenance=mode=max records the full build provenance (git source,
+          # build inputs, runner info) as an OCI attestation attached to the image.
+          # sbom=true generates a CycloneDX SBOM listing every package in the image.
+          provenance: mode=max
+          sbom: true
 
       - name: Login to Azure (OIDC)
-        uses: azure/login@v2
+        uses: azure/login@v3
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
@@ -105,31 +116,69 @@ jobs:
 
       - name: Resolve App Service name
         id: app
-        uses: azure/cli@v2
+        uses: azure/cli@9f7ce6f37c31b777ec6c6b6d1dfe7db79f497956 # v2.2.0
         with:
           inlineScript: |
-            APP_NAME=$(az webapp list \
-              --resource-group "${APP_RESOURCE_GROUP}" \
-              --query "[?starts_with(name, '${APP_NAME_PREFIX}')].name | [0]" \
-              --output tsv)
+            set -euo pipefail
+            APP_NAME=""
+            APP_RESOURCE_GROUP=""
 
-            if [ -z "${APP_NAME}" ] || [ "${APP_NAME}" = "null" ]; then
-              echo "No App Service found in ${APP_RESOURCE_GROUP} matching prefix ${APP_NAME_PREFIX}"
+            resolve_app() {
+              local base_query="$1"
+              local name
+              local rg
+              name=$(az webapp list --query "${base_query} | [0].name" --output tsv)
+              rg=$(az webapp list --query "${base_query} | [0].resourceGroup" --output tsv)
+              if [ -n "${name}" ] && [ "${name}" != "null" ] && [ -n "${rg}" ] && [ "${rg}" != "null" ]; then
+                APP_NAME="${name}"
+                APP_RESOURCE_GROUP="${rg}"
+                return 0
+              fi
+              return 1
+            }
+
+            for attempt in $(seq 1 20); do
+              if resolve_app "[?tags.environment=='dev' && tags.workload=='agon' && contains(resourceGroup, '-swc-')]"; then
+                break
+              fi
+
+              if resolve_app "[?tags.environment=='dev' && tags.workload=='agon']"; then
+                break
+              fi
+
+              if resolve_app "[?starts_with(name, 'app-agon-dev-') && contains(resourceGroup, '-swc-')]"; then
+                break
+              fi
+
+              if resolve_app "[?starts_with(name, 'app-agon-dev-')]"; then
+                break
+              fi
+
+              echo "Attempt ${attempt}/20: no App Service found yet, waiting for infra readiness..."
+              sleep 30
+            done
+
+            if [ -z "${APP_NAME}" ] || [ -z "${APP_RESOURCE_GROUP}" ]; then
+              echo "No dev App Service found for workload 'agon' after waiting 10 minutes."
+              echo "Current web apps in subscription:"
+              az webapp list --query "[].{name:name,resourceGroup:resourceGroup}" --output table
               exit 1
             fi
 
             echo "Resolved app service: ${APP_NAME}"
+            echo "Resolved app resource group: ${APP_RESOURCE_GROUP}"
             echo "app_name=${APP_NAME}" >> "$GITHUB_OUTPUT"
+            echo "app_resource_group=${APP_RESOURCE_GROUP}" >> "$GITHUB_OUTPUT"
 
       - name: Configure App Service container image
-        uses: azure/cli@v2
+        uses: azure/cli@9f7ce6f37c31b777ec6c6b6d1dfe7db79f497956 # v2.2.0
         env:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
           DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
         with:
           inlineScript: |
             az webapp config container set \
-              --resource-group "${APP_RESOURCE_GROUP}" \
+              --resource-group "${{ steps.app.outputs.app_resource_group }}" \
               --name "${{ steps.app.outputs.app_name }}" \
               --container-image-name "${{ steps.image.outputs.image_sha }}" \
               --container-registry-url "https://index.docker.io" \
@@ -137,25 +186,54 @@ jobs:
               --container-registry-password "${DOCKERHUB_TOKEN}"
 
             az webapp config appsettings set \
-              --resource-group "${APP_RESOURCE_GROUP}" \
+              --resource-group "${{ steps.app.outputs.app_resource_group }}" \
               --name "${{ steps.app.outputs.app_name }}" \
               --settings WEBSITES_PORT=8080
 
       - name: Restart App Service
-        uses: azure/cli@v2
+        uses: azure/cli@9f7ce6f37c31b777ec6c6b6d1dfe7db79f497956 # v2.2.0
         with:
           inlineScript: |
             az webapp restart \
-              --resource-group "${APP_RESOURCE_GROUP}" \
+              --resource-group "${{ steps.app.outputs.app_resource_group }}" \
               --name "${{ steps.app.outputs.app_name }}"
 
       - name: Verify health through Application Gateway
-        uses: azure/cli@v2
+        uses: azure/cli@9f7ce6f37c31b777ec6c6b6d1dfe7db79f497956 # v2.2.0
         with:
           inlineScript: |
+            set -euo pipefail
+            APP_RG="${{ steps.app.outputs.app_resource_group }}"
+            AGW_NAME=$(az network application-gateway list \
+              --resource-group "${APP_RG}" \
+              --query "[?tags.environment=='dev' && tags.workload=='agon'].name | [0]" \
+              --output tsv)
+
+            if [ -z "${AGW_NAME}" ] || [ "${AGW_NAME}" = "null" ]; then
+              AGW_NAME=$(az network application-gateway list \
+                --resource-group "${APP_RG}" \
+                --query "[?starts_with(name, 'agw-agon-dev-')].name | [0]" \
+                --output tsv)
+            fi
+
+            if [ -z "${AGW_NAME}" ] || [ "${AGW_NAME}" = "null" ]; then
+              echo "Failed to resolve Application Gateway in ${APP_RG}."
+              exit 1
+            fi
+
+            AGW_PIP_ID=$(az network application-gateway show \
+              --resource-group "${APP_RG}" \
+              --name "${AGW_NAME}" \
+              --query "frontendIPConfigurations[0].publicIPAddress.id" \
+              --output tsv)
+
+            if [ -z "${AGW_PIP_ID}" ] || [ "${AGW_PIP_ID}" = "null" ]; then
+              echo "Failed to resolve Application Gateway public IP reference."
+              exit 1
+            fi
+
             AGW_IP=$(az network public-ip show \
-              --resource-group "${APP_RESOURCE_GROUP}" \
-              --name "${AGW_PUBLIC_IP_NAME}" \
+              --ids "${AGW_PIP_ID}" \
               --query ipAddress \
               --output tsv)
 

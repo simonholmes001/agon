@@ -1,7 +1,7 @@
 targetScope = 'subscription'
 
 @description('Primary Azure region for the dev environment.')
-param location string = 'francecentral'
+param location string = 'swedencentral'
 
 @description('Environment short name.')
 @allowed([
@@ -13,7 +13,7 @@ param environment string = 'dev'
 param workloadName string = 'agon'
 
 @description('CAF-style naming prefix.')
-param namePrefix string = 'agon-dev-frc'
+param namePrefix string = 'agon-dev-swc'
 
 @description('Alert email receiver for action groups.')
 param alertEmail string = 'simonholmesabc@gmail.com'
@@ -59,12 +59,45 @@ param postgresSubnetPrefix string = '10.42.3.0/24'
 @description('Application Gateway dedicated subnet prefix.')
 param appGatewaySubnetPrefix string = '10.42.4.0/24'
 
-@description('Application Gateway WAF mode for this environment.')
+@description('Application Gateway dedicated subnet prefix for Basic/legacy (v1 family) SKUs.')
+param appGatewayV1SubnetPrefix string = '10.42.5.0/24'
+
+@description('Optional suffix for Application Gateway resources to support parallel replacement cutovers (for example: v1).')
+@maxLength(20)
+param appGatewayResourceSuffix string = ''
+
+@description('Application Gateway SKU name. Use Basic/Standard_v2 for modern SKUs, or Standard_Small/Standard_Medium/Standard_Large for legacy v1.')
 @allowed([
-  'Detection'
-  'Prevention'
+  'Basic'
+  'Standard_Small'
+  'Standard_Medium'
+  'Standard_Large'
+  'Standard_v2'
 ])
-param appGatewayWafMode string = 'Detection'
+param appGatewaySkuName string = 'Basic'
+
+@description('Application Gateway SKU tier. Keep aligned with appGatewaySkuName.')
+@allowed([
+  'Basic'
+  'Standard'
+  'Standard_v2'
+])
+param appGatewaySkuTier string = 'Basic'
+
+@description('Application Gateway instance count for legacy v1 SKUs. Ignored for Basic and Standard_v2.')
+@minValue(1)
+@maxValue(32)
+param appGatewayInstanceCount int = 1
+
+@description('Application Gateway autoscale minimum capacity for Standard_v2.')
+@minValue(0)
+@maxValue(125)
+param appGatewayAutoscaleMinCapacity int = 1
+
+@description('Application Gateway autoscale maximum capacity for Standard_v2.')
+@minValue(1)
+@maxValue(125)
+param appGatewayAutoscaleMaxCapacity int = 2
 
 @description('Application Gateway backend request timeout in seconds.')
 @minValue(1)
@@ -101,6 +134,9 @@ var netResourceGroupName = 'rg-${namePrefix}-net'
 var appResourceGroupName = 'rg-${namePrefix}-app'
 var dataResourceGroupName = 'rg-${namePrefix}-data'
 var appServiceName = 'app-${namePrefix}-${take(uniqueString(subscription().id, rgApp.id, namePrefix, environment), 12)}'
+var normalizedAppGatewaySkuTier = toLower(appGatewaySkuTier)
+var isModernAppGatewayTier = endsWith(normalizedAppGatewaySkuTier, '_v2')
+var isParallelAppGatewayDeployment = !empty(appGatewayResourceSuffix)
 
 resource rgNet 'Microsoft.Resources/resourceGroups@2023-07-01' = {
   name: netResourceGroupName
@@ -133,6 +169,7 @@ module network './modules/network-dev.bicep' = {
     privateEndpointSubnetPrefix: privateEndpointSubnetPrefix
     postgresSubnetPrefix: postgresSubnetPrefix
     appGatewaySubnetPrefix: appGatewaySubnetPrefix
+    appGatewayV1SubnetPrefix: appGatewayV1SubnetPrefix
   }
 }
 
@@ -169,7 +206,12 @@ module appEdge './modules/app-edge-dev.bicep' = {
     workloadName: workloadName
     namePrefix: namePrefix
     alertEmail: alertEmail
-    appGatewayWafMode: appGatewayWafMode
+    appGatewayResourceSuffix: appGatewayResourceSuffix
+    appGatewaySkuName: appGatewaySkuName
+    appGatewaySkuTier: appGatewaySkuTier
+    appGatewayInstanceCount: appGatewayInstanceCount
+    appGatewayAutoscaleMinCapacity: appGatewayAutoscaleMinCapacity
+    appGatewayAutoscaleMaxCapacity: appGatewayAutoscaleMaxCapacity
     appGatewayRequestTimeoutSeconds: appGatewayRequestTimeoutSeconds
     authEnabled: authEnabled
     jwtAuthority: jwtAuthority
@@ -177,7 +219,9 @@ module appEdge './modules/app-edge-dev.bicep' = {
     appGatewaySslCertificatePfxBase64: appGatewaySslCertificatePfxBase64
     appGatewaySslCertificatePassword: appGatewaySslCertificatePassword
     appSubnetId: network.outputs.appSubnetId
-    appGatewaySubnetId: network.outputs.appGatewaySubnetId
+    appGatewaySubnetId: isParallelAppGatewayDeployment
+      ? network.outputs.appGatewayV1SubnetId
+      : (isModernAppGatewayTier ? network.outputs.appGatewaySubnetId : network.outputs.appGatewayV1SubnetId)
     privateEndpointSubnetId: network.outputs.privateEndpointSubnetId
     appServicePrivateDnsZoneId: network.outputs.appServicePrivateDnsZoneId
     postgresServerName: data.outputs.postgresqlServerName

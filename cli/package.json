@@ -1,6 +1,6 @@
 {
   "name": "@agon_agents/cli",
-  "version": "0.1.9",
+  "version": "0.1.11",
   "description": "CLI tool for Agon - AI-powered strategy debate platform",
   "author": "Simon Holmes",
   "license": "MIT",

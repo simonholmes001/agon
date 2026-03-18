@@ -38,6 +38,10 @@ export function parseShellInput(input: string): ParsedShellInput {
       return { type: 'slash', command: 'params' };
     case 'new':
       return { type: 'slash', command: 'new' };
+    case 'self-update':
+    case 'selfupdate':
+    case 'update':
+      return parseSelfUpdate(rawArgs);
     case 'show-sessions':
     case 'showsessions':
     case 'sessions':
@@ -170,6 +174,29 @@ function parseSet(args: string[]): ParsedShellInput {
     command: 'set',
     key,
     value: args.slice(1).join(' ')
+  };
+}
+
+function parseSelfUpdate(args: string[]): ParsedShellInput {
+  if (args.length === 0) {
+    return {
+      type: 'slash',
+      command: 'self-update',
+      check: false
+    };
+  }
+
+  if (args.length === 1 && args[0] === '--check') {
+    return {
+      type: 'slash',
+      command: 'self-update',
+      check: true
+    };
+  }
+
+  return {
+    type: 'error',
+    message: 'Usage: /self-update [--check]'
   };
 }
 

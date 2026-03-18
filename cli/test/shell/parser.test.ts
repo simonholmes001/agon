@@ -59,6 +59,20 @@ describe('shell parser', () => {
     });
   });
 
+  it('parses /self-update and /update alias', () => {
+    expect(parseShellInput('/self-update')).toEqual({
+      type: 'slash',
+      command: 'self-update',
+      check: false
+    });
+
+    expect(parseShellInput('/update --check')).toEqual({
+      type: 'slash',
+      command: 'self-update',
+      check: true
+    });
+  });
+
   it('parses /show-sessions', () => {
     expect(parseShellInput('/show-sessions')).toEqual({
       type: 'slash',
@@ -179,6 +193,13 @@ describe('shell parser', () => {
     expect(parseShellInput('/attach')).toEqual({
       type: 'error',
       message: 'Usage: /attach <file-path>'
+    });
+  });
+
+  it('returns deterministic error for malformed /self-update', () => {
+    expect(parseShellInput('/self-update now')).toEqual({
+      type: 'error',
+      message: 'Usage: /self-update [--check]'
     });
   });
 

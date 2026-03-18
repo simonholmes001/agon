@@ -13,7 +13,7 @@ jobs:
     if: github.event_name == 'pull_request'
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -23,7 +23,7 @@ jobs:
           set -euo pipefail
 
           BASE_REF="${{ github.base_ref }}"
-          git fetch origin "${BASE_REF}" --depth=1
+          git fetch origin "${BASE_REF}"
 
           CHANGED_FILES="$(git diff --name-only "origin/${BASE_REF}"...HEAD)"
           echo "Changed files:"
@@ -53,10 +53,10 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Setup Node.js
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@v6
         with:
           node-version: 20
           cache: npm
@@ -78,7 +78,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Check for .NET solution
         id: check
@@ -93,7 +93,7 @@ jobs:
 
       - name: Setup .NET
         if: steps.check.outputs.exists == 'true'
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v5
         with:
           dotnet-version: 9.0.x
 
