@@ -205,8 +205,9 @@ public class TruthMapRepository : ITruthMapRepository
     }
 
     /// <summary>
-    /// Agent patch payloads can represent open questions as strings or with alternate field names.
+    /// Agent patch payloads can represent open questions in many shapes.
     /// Normalize to the strict OpenQuestion shape expected by the TruthMap model.
+    /// Entries that cannot be normalized are removed so they cannot break deserialization.
     /// </summary>
     private static void NormalizeOpenQuestions(JsonObject root)
     {
@@ -215,33 +216,45 @@ public class TruthMapRepository : ITruthMapRepository
             return;
         }
 
-        for (var i = 0; i < questions.Count; i++)
+        for (var i = 0; i < questions.Count;)
         {
             var entry = questions[i];
             if (entry is null)
             {
+                questions.RemoveAt(i);
                 continue;
             }
 
-            if (entry is JsonValue scalarValue && scalarValue.TryGetValue<string>(out var textValue))
+            if (entry is JsonValue scalarValue)
             {
-                questions[i] = BuildNormalizedOpenQuestion(
-                    id: null,
-                    text: textValue,
-                    blocking: false,
-                    raisedBy: null);
+                if (scalarValue.TryGetValue<string>(out var textValue) && !string.IsNullOrWhiteSpace(textValue))
+                {
+                    questions[i] = BuildNormalizedOpenQuestion(
+                        id: null,
+                        text: textValue,
+                        blocking: false,
+                        raisedBy: null);
+                    i++;
+                    continue;
+                }
+
+                // Non-string scalar (number/bool/etc.) is not a valid OpenQuestion payload.
+                questions.RemoveAt(i);
                 continue;
             }
 
             if (entry is not JsonObject questionObject)
             {
+                questions.RemoveAt(i);
                 continue;
             }
 
             var id = ReadString(questionObject, "id");
             var text = ReadString(questionObject, "text")
                 ?? ReadString(questionObject, "question")
-                ?? ReadString(questionObject, "prompt");
+                ?? ReadString(questionObject, "prompt")
+                ?? ReadString(questionObject, "description")
+                ?? ReadString(questionObject, "content");
             var blocking = ReadBool(questionObject, "blocking")
                 ?? ReadBool(questionObject, "is_blocking")
                 ?? false;
@@ -252,11 +265,13 @@ public class TruthMapRepository : ITruthMapRepository
 
             if (string.IsNullOrWhiteSpace(text))
             {
-                // Keep existing object untouched if it has no usable textual value.
+                // Unknown object shape: drop it instead of keeping invalid state.
+                questions.RemoveAt(i);
                 continue;
             }
 
             questions[i] = BuildNormalizedOpenQuestion(id, text, blocking, raisedBy);
+            i++;
         }
     }
 

@@ -249,6 +249,46 @@ namespace Agon.Infrastructure.Tests.Persistence;
     }
 
     [Fact]
+    public async Task ApplyPatchAsync_WithMalformedOpenQuestionObject_DropsInvalidEntry()
+    {
+        // Arrange
+        var sessionId = Guid.NewGuid();
+        var patch = new TruthMapPatch(
+            [
+                new PatchOperation(PatchOp.Add, "/open_questions/0", new
+                {
+                    title = "Unsupported key should not crash deserialization",
+                    priority = "high"
+                })
+            ],
+            new PatchMeta("moderator", 1, "Add malformed open question object", sessionId)
+        );
+
+        // Act
+        var updated = await _repository.ApplyPatchAsync(sessionId, patch);
+
+        // Assert
+        updated.OpenQuestions.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ApplyPatchAsync_WithNonStringOpenQuestionScalar_DropsInvalidEntry()
+    {
+        // Arrange
+        var sessionId = Guid.NewGuid();
+        var patch = new TruthMapPatch(
+            [new PatchOperation(PatchOp.Add, "/open_questions/0", 42)],
+            new PatchMeta("moderator", 1, "Add malformed open question scalar", sessionId)
+        );
+
+        // Act
+        var updated = await _repository.ApplyPatchAsync(sessionId, patch);
+
+        // Assert
+        updated.OpenQuestions.Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task GetImpactSetAsync_ReturnsTransitiveDependents()
     {
         // Arrange

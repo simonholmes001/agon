@@ -4,6 +4,7 @@ using Agon.Application.Services;
 using Agon.Domain.Sessions;
 using Agon.Domain.TruthMap;
 using Microsoft.Extensions.Logging;
+using System.Text.Json;
 
 namespace Agon.Application.Orchestration;
 
@@ -18,6 +19,18 @@ namespace Agon.Application.Orchestration;
 /// </summary>
 public sealed class AgentRunner : IAgentRunner
 {
+    private const string ModeratorPatchRepairDirective = """
+        Repair your previous response to conform exactly to required structured format.
+        Keep your substantive reasoning, but output strict sections:
+        1) ## MESSAGE with first line exactly STATUS: NEEDS_INFO or STATUS: READY
+        2) ## PATCH with valid JSON matching TruthMapPatch schema.
+        Patch meta must use:
+        - agent: moderator
+        - round: current clarification round
+        - session_id: current session id
+        If you cannot make a valid patch, output an empty ops array with valid meta.
+        """;
+
     private readonly IReadOnlyList<ICouncilAgent> _agents;
     private readonly ITruthMapRepository _truthMapRepository;
     private readonly IEventBroadcaster _broadcaster;
@@ -67,6 +80,21 @@ public sealed class AgentRunner : IAgentRunner
             state.Attachments);
 
         var response = await RunWithTimeoutAsync(moderator, context, cancellationToken);
+        response = await RetryModeratorOnceIfMalformedAsync(
+            moderator,
+            context,
+            state,
+            response,
+            cancellationToken);
+
+        if (response.HasPatch && GetModeratorPatchValidationError(response.Patch!, state) is not null)
+        {
+            // Strict guard: never attempt to apply a moderator patch that fails validation.
+            _logger?.LogWarning(
+                "Moderator patch still invalid after repair attempt. Patch dropped for session {SessionId}.",
+                state.SessionId);
+            response = response with { Patch = null };
+        }
 
         // Apply patches (if any) from the Moderator's response
         if (response.HasPatch)
@@ -95,6 +123,100 @@ public sealed class AgentRunner : IAgentRunner
 
         return response;
     }
+
+    private async Task<AgentResponse> RetryModeratorOnceIfMalformedAsync(
+        ICouncilAgent moderator,
+        AgentContext context,
+        SessionState state,
+        AgentResponse response,
+        CancellationToken cancellationToken)
+    {
+        if (response.TimedOut)
+        {
+            return response;
+        }
+
+        var initialError = GetModeratorResponseValidationError(response, state);
+        if (initialError is null)
+        {
+            return response;
+        }
+
+        _logger?.LogWarning(
+            "Moderator response validation failed for session {SessionId}: {ValidationError}. Retrying once with repair directive.",
+            state.SessionId,
+            initialError);
+
+        var repairContext = context with
+        {
+            MicroDirective = ModeratorPatchRepairDirective
+        };
+
+        var repaired = await RunWithTimeoutAsync(moderator, repairContext, cancellationToken);
+        if (repaired.TimedOut)
+        {
+            _logger?.LogWarning(
+                "Moderator repair retry timed out for session {SessionId}. Using original response.",
+                state.SessionId);
+            return response;
+        }
+
+        var repairedError = GetModeratorResponseValidationError(repaired, state);
+        if (repairedError is not null)
+        {
+            _logger?.LogWarning(
+                "Moderator repair retry still invalid for session {SessionId}: {ValidationError}.",
+                state.SessionId,
+                repairedError);
+
+            // Keep repaired MESSAGE if any, but drop malformed patch.
+            return repaired with { Patch = null };
+        }
+
+        return repaired;
+    }
+
+    private static string? GetModeratorResponseValidationError(AgentResponse response, SessionState state)
+    {
+        var hasPatchHeader = ContainsPatchHeader(response.RawOutput);
+
+        if (hasPatchHeader && response.Patch is null)
+        {
+            return "PATCH section present but could not be parsed.";
+        }
+
+        if (response.Patch is null)
+        {
+            return null;
+        }
+
+        return GetModeratorPatchValidationError(response.Patch, state);
+    }
+
+    private static string? GetModeratorPatchValidationError(TruthMapPatch patch, SessionState state)
+    {
+        if (!string.Equals(patch.Meta.Agent, Domain.Agents.AgentId.Moderator, StringComparison.Ordinal))
+        {
+            return $"Patch meta.agent must be '{Domain.Agents.AgentId.Moderator}'.";
+        }
+
+        if (patch.Meta.SessionId != state.SessionId)
+        {
+            return "Patch meta.session_id does not match session.";
+        }
+
+        if (patch.Meta.Round != state.ClarificationRoundCount)
+        {
+            return "Patch meta.round does not match clarification round.";
+        }
+
+        var validation = Domain.TruthMap.PatchValidator.Validate(patch, state.TruthMap);
+        return validation.IsValid ? null : validation.Reason ?? "Patch failed validation.";
+    }
+
+    private static bool ContainsPatchHeader(string? rawOutput) =>
+        !string.IsNullOrWhiteSpace(rawOutput)
+        && rawOutput.Contains("## PATCH", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Runs the dedicated post-delivery assistant for follow-up Q&A and revisions.
@@ -393,11 +515,25 @@ public sealed class AgentRunner : IAgentRunner
                 continue;
             }
 
-            state.TruthMap = await _truthMapRepository.ApplyPatchAsync(
-                state.SessionId, patch, cancellationToken);
+            try
+            {
+                state.TruthMap = await _truthMapRepository.ApplyPatchAsync(
+                    state.SessionId, patch, cancellationToken);
 
-            await _broadcaster.SendTruthMapPatchAsync(
-                state.SessionId, patch, state.TruthMap.Version, cancellationToken);
+                await _broadcaster.SendTruthMapPatchAsync(
+                    state.SessionId, patch, state.TruthMap.Version, cancellationToken);
+            }
+            catch (Exception ex) when (
+                ex is JsonException
+                || ex is InvalidOperationException
+                || ex is NotSupportedException)
+            {
+                // Do not fail the whole request on malformed agent patch payloads.
+                _logger?.LogWarning(
+                    ex,
+                    "Patch from agent {AgentId} failed at apply-time and was skipped.",
+                    response.AgentId);
+            }
         }
     }
 
