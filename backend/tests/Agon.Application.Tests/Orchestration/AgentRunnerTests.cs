@@ -473,7 +473,7 @@ public class AgentRunnerTests
         var repo = StubRepo();
         var patch = new TruthMapPatch(
             [new PatchOperation(PatchOp.Add, "/topics/-", "New Topic")],
-            new PatchMeta(AgentId.Moderator, 1, "Moderator patch", SessionId));
+            new PatchMeta(AgentId.Moderator, 0, "Moderator patch", SessionId));
         var moderatorResponse = new AgentResponse(
             AgentId.Moderator,
             "READY",
@@ -512,7 +512,7 @@ public class AgentRunnerTests
 
         var patch = new TruthMapPatch(
             [new PatchOperation(PatchOp.Add, "/open_questions/0", "Who is the primary target?")],
-            new PatchMeta(AgentId.Moderator, 1, "Moderator patch", SessionId));
+            new PatchMeta(AgentId.Moderator, 0, "Moderator patch", SessionId));
 
         var moderatorResponse = new AgentResponse(
             AgentId.Moderator,
