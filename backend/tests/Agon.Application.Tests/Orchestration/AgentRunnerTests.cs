@@ -540,6 +540,103 @@ public class AgentRunnerTests
         await repo.Received(1).ApplyPatchAsync(SessionId, patch, Arg.Any<CancellationToken>());
     }
 
+    [Fact]
+    public async Task RunModeratorAsync_WithInvalidModeratorPatch_ShouldRetryOnceAndApplyRepairedPatch()
+    {
+        // Arrange
+        var repo = StubRepo();
+        var capturedContexts = new List<AgentContext>();
+
+        var badPatch = new TruthMapPatch(
+            [new PatchOperation(PatchOp.Add, "/open_questions/0", "Need more detail")],
+            new PatchMeta(AgentId.Moderator, 99, "bad meta round", SessionId));
+
+        var goodPatch = new TruthMapPatch(
+            [new PatchOperation(PatchOp.Add, "/open_questions/0", "Who is the primary user?")],
+            new PatchMeta(AgentId.Moderator, 1, "repaired patch", SessionId));
+
+        var moderator = Substitute.For<ICouncilAgent>();
+        moderator.AgentId.Returns(AgentId.Moderator);
+        moderator.ModelProvider.Returns("fake/model");
+        moderator.RunAsync(Arg.Do<AgentContext>(ctx => capturedContexts.Add(ctx)), Arg.Any<CancellationToken>())
+            .Returns(
+                Task.FromResult(new AgentResponse(
+                    AgentId.Moderator,
+                    "STATUS: NEEDS_INFO\nInitial malformed patch.",
+                    badPatch,
+                    100,
+                    false,
+                    "## MESSAGE\nSTATUS: NEEDS_INFO\n\n## PATCH\n```json\n{...}\n```")),
+                Task.FromResult(new AgentResponse(
+                    AgentId.Moderator,
+                    "STATUS: NEEDS_INFO\nRepaired structured response.",
+                    goodPatch,
+                    120,
+                    false,
+                    "## MESSAGE\nSTATUS: NEEDS_INFO\n\n## PATCH\n```json\n{...}\n```")));
+
+        var runner = BuildRunner([moderator], repo: repo);
+        var state = BuildSessionState();
+        state.Phase = SessionPhase.Clarification;
+        state.ClarificationRoundCount = 1;
+
+        // Act
+        await runner.RunModeratorAsync(state, CancellationToken.None);
+
+        // Assert
+        await moderator.Received(2).RunAsync(Arg.Any<AgentContext>(), Arg.Any<CancellationToken>());
+        capturedContexts.Should().HaveCount(2);
+        capturedContexts[1].MicroDirective.Should().Contain("Repair your previous response");
+        await repo.Received(1).ApplyPatchAsync(SessionId, goodPatch, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task RunModeratorAsync_WhenRetryAlsoInvalid_ShouldDropPatchAndNotThrow()
+    {
+        // Arrange
+        var repo = StubRepo();
+
+        var invalidPatch1 = new TruthMapPatch(
+            [new PatchOperation(PatchOp.Add, "/open_questions/0", "First invalid")],
+            new PatchMeta(AgentId.Moderator, 42, "invalid", SessionId));
+        var invalidPatch2 = new TruthMapPatch(
+            [new PatchOperation(PatchOp.Add, "/open_questions/0", "Second invalid")],
+            new PatchMeta(AgentId.Moderator, 43, "still invalid", SessionId));
+
+        var moderator = Substitute.For<ICouncilAgent>();
+        moderator.AgentId.Returns(AgentId.Moderator);
+        moderator.ModelProvider.Returns("fake/model");
+        moderator.RunAsync(Arg.Any<AgentContext>(), Arg.Any<CancellationToken>())
+            .Returns(
+                Task.FromResult(new AgentResponse(
+                    AgentId.Moderator,
+                    "STATUS: NEEDS_INFO\nInitial response.",
+                    invalidPatch1,
+                    100,
+                    false,
+                    "## MESSAGE\nSTATUS: NEEDS_INFO\n\n## PATCH\n```json\n{...}\n```")),
+                Task.FromResult(new AgentResponse(
+                    AgentId.Moderator,
+                    "STATUS: NEEDS_INFO\nRetry response.",
+                    invalidPatch2,
+                    110,
+                    false,
+                    "## MESSAGE\nSTATUS: NEEDS_INFO\n\n## PATCH\n```json\n{...}\n```")));
+
+        var runner = BuildRunner([moderator], repo: repo);
+        var state = BuildSessionState();
+        state.Phase = SessionPhase.Clarification;
+        state.ClarificationRoundCount = 1;
+
+        // Act
+        var act = async () => await runner.RunModeratorAsync(state, CancellationToken.None);
+
+        // Assert
+        await act.Should().NotThrowAsync();
+        await moderator.Received(2).RunAsync(Arg.Any<AgentContext>(), Arg.Any<CancellationToken>());
+        await repo.DidNotReceive().ApplyPatchAsync(Arg.Any<Guid>(), Arg.Any<TruthMapPatch>(), Arg.Any<CancellationToken>());
+    }
+
     // ── Post-delivery follow-up tests ────────────────────────────────────────
 
     [Fact]
