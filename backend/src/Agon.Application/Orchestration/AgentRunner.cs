@@ -22,7 +22,7 @@ public sealed class AgentRunner : IAgentRunner
     private const string ModeratorPatchRepairDirective = """
         Repair your previous response to conform exactly to required structured format.
         Keep your substantive reasoning, but output strict sections:
-        1) ## MESSAGE with first line exactly STATUS: NEEDS_INFO or STATUS: READY
+        1) ## MESSAGE with first line exactly STATUS: DIRECT_ANSWER, STATUS: NEEDS_INFO, or STATUS: READY
         2) ## PATCH with valid JSON matching TruthMapPatch schema.
         Patch meta must use:
         - agent: moderator

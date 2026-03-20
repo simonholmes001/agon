@@ -22,8 +22,17 @@ namespace Agon.Application.Orchestration;
 public sealed class Orchestrator : IOrchestrator
 {
     private static readonly Regex ModeratorStatusRegex = new(
-        @"^\s*(?:status|clarification_status)\s*[:=]\s*(READY|NEEDS_INFO)\b",
+        @"^\s*(?:status|clarification_status)\s*[:=]\s*(DIRECT_ANSWER|READY|NEEDS_INFO)\b",
         RegexOptions.Multiline | RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex AnalysisIntentRegex = new(
+        @"\b(prd|product requirements?|debate brief|architecture|roadmap|mvp|spec(?:ification)?|analysis|analy[sz]e|evaluate|compare|implementation|implement|build|design|tech stack|user stor(?:y|ies))\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex SimpleMetaQueryRegex = new(
+        @"\b(what can you do|how can you help|who are you|what is agon|internal setup|your setup|how do you work|capabilities|command(?:s)?)\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex QuestionLeadRegex = new(
+        @"^\s*(how|what|who|can|could|would|do|does|is|are|where|when)\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private readonly IAgentRunner _agentRunner;
     private readonly ISessionService _sessionService;
@@ -76,6 +85,25 @@ public sealed class Orchestrator : IOrchestrator
             isFirstRound
             && !hasUserClarificationMessages
             && decision.Status == ModeratorDecisionStatus.Ready;
+        var shouldTreatReadyAsDirectAnswer =
+            decision.Status == ModeratorDecisionStatus.Ready
+            && ShouldHandleAsSimpleMetaQuery(state);
+
+        if (shouldTreatReadyAsDirectAnswer)
+        {
+            _logger?.LogInformation(
+                "Session {SessionId}: Moderator returned READY for a simple/meta query. Treating as DIRECT_ANSWER and suppressing debate chain.",
+                state.SessionId);
+            decision = new ModeratorDecision(ModeratorDecisionStatus.DirectAnswer);
+        }
+
+        if (decision.Status == ModeratorDecisionStatus.DirectAnswer)
+        {
+            _logger?.LogInformation(
+                "Session {SessionId}: Direct-answer path selected. Remaining in Clarification phase.",
+                state.SessionId);
+            return;
+        }
 
         if (decision.Status == ModeratorDecisionStatus.Ready && !shouldForceClarificationRound)
         {
@@ -185,24 +213,67 @@ public sealed class Orchestrator : IOrchestrator
             var rawStatus = statusMatch.Groups[1].Value.Trim().ToUpperInvariant();
             return rawStatus switch
             {
+                "DIRECT_ANSWER" => new ModeratorDecision(ModeratorDecisionStatus.DirectAnswer),
                 "READY" => new ModeratorDecision(ModeratorDecisionStatus.Ready),
                 "NEEDS_INFO" => new ModeratorDecision(ModeratorDecisionStatus.NeedsInfo),
                 _ => new ModeratorDecision(ModeratorDecisionStatus.Unknown)
             };
         }
 
-        // Backward-compatible fallback for legacy prompts while rollout converges.
-        if (message.Contains("READY", StringComparison.OrdinalIgnoreCase))
+        return new ModeratorDecision(ModeratorDecisionStatus.Unknown);
+    }
+
+    private static bool ShouldHandleAsSimpleMetaQuery(SessionState state)
+    {
+        var latestInput = GetLatestUserInput(state);
+        if (string.IsNullOrWhiteSpace(latestInput))
         {
-            return new ModeratorDecision(ModeratorDecisionStatus.Ready);
+            return false;
         }
 
-        return new ModeratorDecision(ModeratorDecisionStatus.Unknown);
+        if (LooksLikeAnalysisRequest(latestInput))
+        {
+            return false;
+        }
+
+        return LooksLikeSimpleMetaQuery(latestInput);
+    }
+
+    private static string GetLatestUserInput(SessionState state)
+    {
+        if (state.UserMessages.Count > 0)
+        {
+            return state.UserMessages[^1].Content;
+        }
+
+        return state.Idea ?? string.Empty;
+    }
+
+    private static bool LooksLikeAnalysisRequest(string input) =>
+        AnalysisIntentRegex.IsMatch(input);
+
+    private static bool LooksLikeSimpleMetaQuery(string input)
+    {
+        var trimmed = input.Trim();
+        if (trimmed.Length is < 4 or > 280)
+        {
+            return false;
+        }
+
+        var looksLikeQuestion = trimmed.Contains('?') || QuestionLeadRegex.IsMatch(trimmed);
+        if (!looksLikeQuestion)
+        {
+            return false;
+        }
+
+        return SimpleMetaQueryRegex.IsMatch(trimmed)
+            || trimmed.Contains("agon", StringComparison.OrdinalIgnoreCase);
     }
 
     private enum ModeratorDecisionStatus
     {
         Unknown,
+        DirectAnswer,
         NeedsInfo,
         Ready
     }
