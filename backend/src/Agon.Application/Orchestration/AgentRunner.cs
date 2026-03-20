@@ -5,6 +5,7 @@ using Agon.Domain.Sessions;
 using Agon.Domain.TruthMap;
 using Microsoft.Extensions.Logging;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace Agon.Application.Orchestration;
 
@@ -30,6 +31,25 @@ public sealed class AgentRunner : IAgentRunner
         - session_id: current session id
         If you cannot make a valid patch, output an empty ops array with valid meta.
         """;
+    private const string ModeratorDirectAnswerDirective = """
+        The latest user input is a simple/meta question about Agon itself.
+        Do NOT ask clarification questions.
+        Provide a direct, concise, user-facing explanation.
+        First line in MESSAGE must be exactly: STATUS: DIRECT_ANSWER
+        PATCH must be valid JSON with empty ops and correct moderator meta.
+        """;
+    private static readonly Regex ModeratorStatusRegex = new(
+        @"^\s*(?:status|clarification_status)\s*[:=]\s*(DIRECT_ANSWER|READY|NEEDS_INFO)\b",
+        RegexOptions.Multiline | RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex AnalysisIntentRegex = new(
+        @"\b(prd|product requirements?|debate brief|architecture|roadmap|mvp|spec(?:ification)?|analysis|analy[sz]e|evaluate|compare|implementation|implement|build|design|tech stack|user stor(?:y|ies))\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex SimpleMetaQueryRegex = new(
+        @"\b(what can you do|how can you help|who are you|what is agon|internal setup|your setup|how do you work|capabilities|command(?:s)?)\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex QuestionLeadRegex = new(
+        @"^\s*(how|what|who|can|could|would|do|does|is|are|where|when)\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private readonly IReadOnlyList<ICouncilAgent> _agents;
     private readonly ITruthMapRepository _truthMapRepository;
@@ -79,7 +99,19 @@ public sealed class AgentRunner : IAgentRunner
             false, // Research tools not used during clarification
             state.Attachments);
 
+        var simpleMetaQuery = ShouldHandleAsSimpleMetaQuery(state);
+        if (simpleMetaQuery)
+        {
+            context = context with { MicroDirective = ModeratorDirectAnswerDirective };
+        }
+
         var response = await RunWithTimeoutAsync(moderator, context, cancellationToken);
+        response = await RetryModeratorOnceForSimpleMetaQueryAsync(
+            moderator,
+            context,
+            simpleMetaQuery,
+            response,
+            cancellationToken);
         response = await RetryModeratorOnceIfMalformedAsync(
             moderator,
             context,
@@ -122,6 +154,32 @@ public sealed class AgentRunner : IAgentRunner
         }
 
         return response;
+    }
+
+    private async Task<AgentResponse> RetryModeratorOnceForSimpleMetaQueryAsync(
+        ICouncilAgent moderator,
+        AgentContext context,
+        bool simpleMetaQuery,
+        AgentResponse response,
+        CancellationToken cancellationToken)
+    {
+        if (!simpleMetaQuery || response.TimedOut)
+        {
+            return response;
+        }
+
+        var status = ParseModeratorStatus(response.Message);
+        if (status is "DIRECT_ANSWER" or "READY")
+        {
+            return response;
+        }
+
+        _logger?.LogInformation(
+            "Moderator returned {Status} for simple/meta query. Retrying once with enforced direct-answer directive.",
+            status ?? "UNKNOWN");
+
+        var retryContext = context with { MicroDirective = ModeratorDirectAnswerDirective };
+        return await RunWithTimeoutAsync(moderator, retryContext, cancellationToken);
     }
 
     private async Task<AgentResponse> RetryModeratorOnceIfMalformedAsync(
@@ -217,6 +275,61 @@ public sealed class AgentRunner : IAgentRunner
     private static bool ContainsPatchHeader(string? rawOutput) =>
         !string.IsNullOrWhiteSpace(rawOutput)
         && rawOutput.Contains("## PATCH", StringComparison.OrdinalIgnoreCase);
+
+    private static string? ParseModeratorStatus(string message)
+    {
+        if (string.IsNullOrWhiteSpace(message))
+        {
+            return null;
+        }
+
+        var match = ModeratorStatusRegex.Match(message);
+        return match.Success ? match.Groups[1].Value.Trim().ToUpperInvariant() : null;
+    }
+
+    private static bool ShouldHandleAsSimpleMetaQuery(SessionState state)
+    {
+        var latestInput = GetLatestUserInput(state);
+        if (string.IsNullOrWhiteSpace(latestInput))
+        {
+            return false;
+        }
+
+        if (AnalysisIntentRegex.IsMatch(latestInput))
+        {
+            return false;
+        }
+
+        return LooksLikeSimpleMetaQuery(latestInput);
+    }
+
+    private static string GetLatestUserInput(SessionState state)
+    {
+        if (state.UserMessages.Count > 0)
+        {
+            return state.UserMessages[^1].Content;
+        }
+
+        return state.Idea ?? string.Empty;
+    }
+
+    private static bool LooksLikeSimpleMetaQuery(string input)
+    {
+        var trimmed = input.Trim();
+        if (trimmed.Length is < 4 or > 280)
+        {
+            return false;
+        }
+
+        var looksLikeQuestion = trimmed.Contains('?') || QuestionLeadRegex.IsMatch(trimmed);
+        if (!looksLikeQuestion)
+        {
+            return false;
+        }
+
+        return SimpleMetaQueryRegex.IsMatch(trimmed)
+            || trimmed.Contains("agon", StringComparison.OrdinalIgnoreCase);
+    }
 
     /// <summary>
     /// Runs the dedicated post-delivery assistant for follow-up Q&A and revisions.

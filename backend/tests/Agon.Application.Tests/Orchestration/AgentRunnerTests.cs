@@ -637,6 +637,48 @@ public class AgentRunnerTests
         await repo.DidNotReceive().ApplyPatchAsync(Arg.Any<Guid>(), Arg.Any<TruthMapPatch>(), Arg.Any<CancellationToken>());
     }
 
+    [Fact]
+    public async Task RunModeratorAsync_SimpleMetaQuery_WithNeedsInfoFirst_ShouldRetryForDirectAnswer()
+    {
+        // Arrange
+        var repo = StubRepo();
+        var capturedContexts = new List<AgentContext>();
+
+        var moderator = Substitute.For<ICouncilAgent>();
+        moderator.AgentId.Returns(AgentId.Moderator);
+        moderator.ModelProvider.Returns("fake/model");
+        moderator.RunAsync(Arg.Do<AgentContext>(ctx => capturedContexts.Add(ctx)), Arg.Any<CancellationToken>())
+            .Returns(
+                Task.FromResult(new AgentResponse(
+                    AgentId.Moderator,
+                    "STATUS: NEEDS_INFO\nWhat are you trying to build?",
+                    null,
+                    80,
+                    false,
+                    null)),
+                Task.FromResult(new AgentResponse(
+                    AgentId.Moderator,
+                    "STATUS: DIRECT_ANSWER\nAgon uses a moderator plus a council of analysis agents, then synthesis.",
+                    null,
+                    90,
+                    false,
+                    null)));
+
+        var runner = BuildRunner([moderator], repo: repo);
+        var state = BuildSessionState(idea: "Hi, can you tell me how Agon works with different agents and LLMs?");
+        state.Phase = SessionPhase.Clarification;
+
+        // Act
+        var response = await runner.RunModeratorAsync(state, CancellationToken.None);
+
+        // Assert
+        await moderator.Received(2).RunAsync(Arg.Any<AgentContext>(), Arg.Any<CancellationToken>());
+        capturedContexts.Should().HaveCount(2);
+        capturedContexts[0].MicroDirective.Should().Contain("simple/meta question");
+        capturedContexts[1].MicroDirective.Should().Contain("STATUS: DIRECT_ANSWER");
+        response.Message.Should().Contain("STATUS: DIRECT_ANSWER");
+    }
+
     // ── Post-delivery follow-up tests ────────────────────────────────────────
 
     [Fact]
@@ -707,9 +749,9 @@ public class AgentRunnerTests
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    private static SessionState BuildSessionState(int frictionLevel = 50, int round = 1)
+    private static SessionState BuildSessionState(int frictionLevel = 50, int round = 1, string idea = "")
     {
-        var state = SessionState.Create(SessionId, frictionLevel, false, EmptyMap());
+        var state = SessionState.Create(SessionId, Guid.Empty, idea, frictionLevel, false, EmptyMap());
         state.CurrentRound = round;
         return state;
     }
