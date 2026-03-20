@@ -188,6 +188,11 @@ export function getVisiblePromptValue(value: string, maxInputChars: number): str
   return `…${value.slice(-(maxInputChars - 1))}`;
 }
 
+export function formatElapsedTimer(startMs: number): string {
+  const elapsed = Math.floor((Date.now() - startMs) / 1000);
+  return `[${elapsed}s]`;
+}
+
 export function buildShimmerText(text: string, tick: number): string {
   if (text.length === 0) {
     return '';
