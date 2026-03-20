@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
+  CTRL_C_EXIT_SENTINEL,
   INTERRUPT_SENTINEL,
   isAbortError,
   isExitInput,
-  raceAbort
+  raceAbort,
+  selectCtrlCSentinel
 } from '../../src/commands/shell.js';
 
 describe('Ctrl+C interrupt handling', () => {
@@ -20,6 +22,44 @@ describe('Ctrl+C interrupt handling', () => {
 
     it('is the ASCII ETX character (Ctrl+C)', () => {
       expect(INTERRUPT_SENTINEL).toBe('\x03');
+    });
+
+    it('is distinct from CTRL_C_EXIT_SENTINEL', () => {
+      expect(INTERRUPT_SENTINEL).not.toBe(CTRL_C_EXIT_SENTINEL);
+    });
+  });
+
+  describe('CTRL_C_EXIT_SENTINEL', () => {
+    it('is not treated as an exit command (handled separately by the main loop)', () => {
+      expect(isExitInput(CTRL_C_EXIT_SENTINEL)).toBe(false);
+    });
+
+    it('is distinct from /quit, /exit, and /eot', () => {
+      expect(CTRL_C_EXIT_SENTINEL).not.toBe('/quit');
+      expect(CTRL_C_EXIT_SENTINEL).not.toBe('/exit');
+      expect(CTRL_C_EXIT_SENTINEL).not.toBe('/eot');
+    });
+
+    it('is distinct from INTERRUPT_SENTINEL', () => {
+      expect(CTRL_C_EXIT_SENTINEL).not.toBe(INTERRUPT_SENTINEL);
+    });
+  });
+
+  describe('selectCtrlCSentinel — Ctrl+C sentinel selection by input content', () => {
+    it('returns CTRL_C_EXIT_SENTINEL when the input zone is empty', () => {
+      expect(selectCtrlCSentinel('')).toBe(CTRL_C_EXIT_SENTINEL);
+    });
+
+    it('returns INTERRUPT_SENTINEL when the input zone has content', () => {
+      expect(selectCtrlCSentinel('hello')).toBe(INTERRUPT_SENTINEL);
+    });
+
+    it('returns INTERRUPT_SENTINEL for single-character input', () => {
+      expect(selectCtrlCSentinel('a')).toBe(INTERRUPT_SENTINEL);
+    });
+
+    it('returns INTERRUPT_SENTINEL for whitespace-only input (input is not empty)', () => {
+      expect(selectCtrlCSentinel(' ')).toBe(INTERRUPT_SENTINEL);
     });
   });
 

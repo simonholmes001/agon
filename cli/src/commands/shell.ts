@@ -38,16 +38,31 @@ import {
 } from '../utils/self-update.js';
 
 /**
- * Sentinel value returned from promptForInput when the user presses Ctrl+C.
- * The main loop treats this as "interrupt current operation and stay in shell"
- * rather than exiting the session.
+ * Sentinel value returned from promptForInput when the user presses Ctrl+C
+ * while the input zone is non-empty. The main loop treats this as
+ * "interrupt current operation and stay in shell" rather than exiting.
  */
 export const INTERRUPT_SENTINEL = '\x03';
 
 /**
- * Races a promise against an AbortSignal. If the signal fires before the
- * promise settles, an AbortError is thrown.
+ * Sentinel value returned from promptForInput when the user presses Ctrl+C
+ * while the input zone is empty. The main loop treats this as a request to
+ * exit the shell session entirely.
  */
+export const CTRL_C_EXIT_SENTINEL = '\x1C';
+
+/**
+ * Returns the appropriate sentinel for a Ctrl+C keypress based on whether
+ * the current input zone value is empty.
+ *
+ * - Empty input → CTRL_C_EXIT_SENTINEL (exit the shell)
+ * - Non-empty input → INTERRUPT_SENTINEL (interrupt only, stay in shell)
+ */
+export function selectCtrlCSentinel(inputValue: string): typeof CTRL_C_EXIT_SENTINEL | typeof INTERRUPT_SENTINEL {
+  return inputValue.length === 0 ? CTRL_C_EXIT_SENTINEL : INTERRUPT_SENTINEL;
+}
+
+
 export function raceAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
   if (signal.aborted) {
     return Promise.reject(new DOMException('Aborted', 'AbortError'));
@@ -159,6 +174,11 @@ export default class Shell extends Command {
       while (true) {
         const promptFrame = renderPromptBanner((line) => this.log(line));
         const rawInput = await this.promptForInput(promptFrame);
+
+        if (rawInput === CTRL_C_EXIT_SENTINEL) {
+          this.log(chalk.dim('Exiting shell.'));
+          return;
+        }
 
         if (rawInput === INTERRUPT_SENTINEL) {
           this.log(chalk.dim('Interrupted. Shell still active.'));
@@ -432,7 +452,7 @@ export default class Shell extends Command {
         const keySequence = key?.sequence;
 
         if (isCtrl && keyName === 'c') {
-          finish(INTERRUPT_SENTINEL);
+          finish(selectCtrlCSentinel(value));
           return;
         }
 
