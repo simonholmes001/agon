@@ -35,6 +35,7 @@
   - [Web Application](#web-application-in-development)
   - [iOS Application](#ios-application-in-development)
   - [Local Deployment (Developer Runbook)](#local-deployment-developer-runbook)
+  - [Worktree-Based Local Testing (Feature Branch)](#worktree-based-local-testing-feature-branch)
 - [Repository Structure](#repository-structure)
 - [Development Guide](#for-developers)
   - [Developer Setup Guide (Infrastructure)](infrastructure/DEV-SETUP.md)
@@ -356,6 +357,83 @@ docker compose down
 cd /Users/simonholmes/Projects/Applications/Agon
 DOTNET_CLI_HOME=/tmp dotnet test backend/Agon.sln --verbosity minimal
 npm --prefix cli test
+```
+
+### Worktree-Based Local Testing (Feature Branch)
+[Back to top](#top)
+
+Use this flow when you want to test a feature branch in isolation without disturbing your current working tree. Steps 1–5 of the [Local Deployment (Developer Runbook)](#local-deployment-developer-runbook) still apply for starting/stopping data services and running the full test suite; this section covers only the worktree-specific setup.
+
+**Placeholders** — replace these throughout:
+
+| Placeholder | Example |
+|---|---|
+| `<name_of_feature_branch>` | `feature/my-new-feature` |
+| `<name_of_worktree>` | `agon-my-new-feature` |
+
+#### Step 1 — Start local dependencies (from the main repo)
+
+```bash
+# From the main repo's backend directory
+cd backend
+docker compose up -d postgres redis
+```
+
+#### Step 2 — Fetch the feature branch and create a worktree
+
+Run these from the **Agon repository root** (not from inside any existing worktree):
+
+```bash
+git fetch origin <name_of_feature_branch>
+git worktree add .worktrees/<name_of_worktree> <name_of_feature_branch>
+```
+
+**Concrete example:**
+
+```bash
+git fetch origin feature/my-new-feature
+git worktree add .worktrees/agon-my-new-feature feature/my-new-feature
+```
+
+#### Step 3 — Run the backend from the worktree (Terminal 1)
+
+Navigate to the worktree from the **Agon repository root** (the worktree was created at `.worktrees/<name_of_worktree>` in [Step 2](#step-2--fetch-the-feature-branch-and-create-a-worktree)):
+
+```bash
+cd .worktrees/<name_of_worktree>/backend
+dotnet run --project src/Agon.Api/Agon.Api.csproj
+```
+
+**Concrete example:**
+
+```bash
+cd .worktrees/agon-my-new-feature/backend
+dotnet run --project src/Agon.Api/Agon.Api.csproj
+```
+
+#### Step 4 — Run the CLI from the worktree (Terminal 2)
+
+```bash
+cd .worktrees/<name_of_worktree>/cli
+npm install
+npm run build
+AGON_API_URL=http://localhost:5000 node bin/run.js
+```
+
+**Concrete example:**
+
+```bash
+cd .worktrees/agon-my-new-feature/cli
+npm install
+npm run build
+AGON_API_URL=http://localhost:5000 node bin/run.js
+```
+
+#### Step 5 — Clean up the worktree when done
+
+```bash
+# From the Agon repository root
+git worktree remove .worktrees/<name_of_worktree>
 ```
 
 ---
