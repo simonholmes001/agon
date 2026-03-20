@@ -193,6 +193,14 @@ export default class Shell extends Command {
 
         if (isExitInput(trimmed)) {
           this.log(chalk.dim('Exiting shell.'));
+          try {
+            const activeSession = await controller.getActiveSession();
+            if (activeSession) {
+              this.log(chalk.dim(buildExitResumeHint(activeSession.id)));
+            }
+          } catch {
+            // Best-effort: ignore errors in the exit path
+          }
           return;
         }
 
@@ -895,4 +903,8 @@ function formatBytes(bytes: number): string {
 export function isExitInput(inputText: string): boolean {
   const trimmed = inputText.trim().toLowerCase();
   return trimmed === '/exit' || trimmed === '/quit' || trimmed === '/eot';
+}
+
+export function buildExitResumeHint(sessionId: string): string {
+  return `To continue this session, run: agon resume ${sessionId}`;
 }
