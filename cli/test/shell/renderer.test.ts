@@ -1,9 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import {
   buildShimmerText,
   buildActivePrompt,
   buildPromptInputLine,
   buildPromptInputLineWithCursor,
+  formatElapsedTimer,
   getPromptCursorPosition,
   getVisiblePromptValue,
   renderMessagePanel,
@@ -152,5 +153,44 @@ describe('shell renderer', () => {
 
     expect(cursorSegment).toContain('  > hello');
     expect(cursorSegment).not.toContain('  > hello world');
+  });
+});
+
+describe('formatElapsedTimer', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('returns [0s] immediately after startMs', () => {
+    const startMs = Date.now();
+    expect(formatElapsedTimer(startMs)).toBe('[0s]');
+  });
+
+  it('returns [1s] after one second has elapsed', () => {
+    const startMs = Date.now();
+    vi.advanceTimersByTime(1000);
+    expect(formatElapsedTimer(startMs)).toBe('[1s]');
+  });
+
+  it('returns [5s] after five seconds have elapsed', () => {
+    const startMs = Date.now();
+    vi.advanceTimersByTime(5000);
+    expect(formatElapsedTimer(startMs)).toBe('[5s]');
+  });
+
+  it('floors sub-second intervals to the nearest whole second', () => {
+    const startMs = Date.now();
+    vi.advanceTimersByTime(1999);
+    expect(formatElapsedTimer(startMs)).toBe('[1s]');
+  });
+
+  it('returns [12s] after twelve seconds have elapsed', () => {
+    const startMs = Date.now();
+    vi.advanceTimersByTime(12000);
+    expect(formatElapsedTimer(startMs)).toBe('[12s]');
   });
 });

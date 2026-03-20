@@ -17,6 +17,7 @@ import { AgonAPIClient } from '../api/agon-client.js';
 import { SessionManager } from '../state/session-manager.js';
 import { ConfigManager } from '../state/config-manager.js';
 import { renderMarkdown } from '../utils/markdown.js';
+import { formatElapsedTimer } from '../shell/renderer.js';
 
 export default class Start extends Command {
   static override readonly description = 'Start a new strategy debate session';
@@ -303,10 +304,18 @@ export default class Start extends Command {
     const maxWatchDurationMs = getWatchDurationMsFromEnv('AGON_WATCH_MAX_MINUTES', 25);
     const maxIdleDurationMs = getWatchDurationMsFromEnv('AGON_WATCH_MAX_IDLE_MINUTES', 8);
     const maxConsecutiveFailures = 5;
+    let thinkingBaseText = 'Agents are analyzing your idea...';
+    let thinkingStartedAt = Date.now();
     const progressSpinner = ora({
-      text: 'Agents are analyzing your idea...',
+      text: `${thinkingBaseText} ${formatElapsedTimer(thinkingStartedAt)}`,
       color: 'cyan'
     }).start();
+    const timerInterval = setInterval(() => {
+      progressSpinner.text = `${thinkingBaseText} ${formatElapsedTimer(thinkingStartedAt)}`;
+    }, 1000);
+    if (typeof timerInterval.unref === 'function') {
+      timerInterval.unref();
+    }
 
     try {
       while (true) {
@@ -339,7 +348,7 @@ export default class Start extends Command {
         }
 
         await sessionManager.saveSession(session);
-        progressSpinner.text = `Agents are analyzing... (${this.formatPhaseForDisplay(session.phase)})`;
+        thinkingBaseText = `Agents are analyzing... (${this.formatPhaseForDisplay(session.phase)})`;
 
         const agentMessages = messages
           .filter(m => m.agentId !== 'moderator')
@@ -375,6 +384,7 @@ export default class Start extends Command {
           this.log('');
           lastPhase = normalizedPhase;
           lastProgressAt = Date.now();
+          thinkingStartedAt = Date.now();
         }
 
         if (normalizedStatus !== lastStatus) {
@@ -423,12 +433,14 @@ export default class Start extends Command {
         }
 
         if (pausedForOutput) {
+          thinkingStartedAt = Date.now();
           progressSpinner.start();
         }
 
         await new Promise(resolve => setTimeout(resolve, 2500));
       }
     } finally {
+      clearInterval(timerInterval);
       progressSpinner.stop();
     }
   }

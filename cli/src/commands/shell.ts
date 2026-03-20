@@ -19,6 +19,7 @@ import {
   buildActivePrompt,
   buildShimmerText,
   buildPromptInputLineWithCursor,
+  formatElapsedTimer,
   getPromptCursorPosition,
   type PromptFrameContext,
   renderMessagePanel,
@@ -364,11 +365,12 @@ export default class Shell extends Command {
 
   private startSpinnerShimmer(spinner: { text: string }, baseText: string): () => void {
     let tick = 0;
-    spinner.text = buildShimmerText(baseText, tick);
+    const startedAt = Date.now();
+    spinner.text = `${buildShimmerText(baseText, tick)} ${formatElapsedTimer(startedAt)}`;
 
     const interval = setInterval(() => {
       tick += 1;
-      spinner.text = buildShimmerText(baseText, tick);
+      spinner.text = `${buildShimmerText(baseText, tick)} ${formatElapsedTimer(startedAt)}`;
     }, 90);
 
     if (typeof interval.unref === 'function') {
@@ -621,13 +623,14 @@ export default class Shell extends Command {
     const maxConsecutiveFailures = 5;
     let shimmerBase = 'Agents are analyzing your idea...';
     let shimmerTick = 0;
+    let thinkingStartedAt = Date.now();
     const progressSpinner = ora({
-      text: buildShimmerText(shimmerBase, shimmerTick),
+      text: `${buildShimmerText(shimmerBase, shimmerTick)} ${formatElapsedTimer(thinkingStartedAt)}`,
       color: 'cyan'
     }).start();
     const shimmerInterval = setInterval(() => {
       shimmerTick += 1;
-      progressSpinner.text = buildShimmerText(shimmerBase, shimmerTick);
+      progressSpinner.text = `${buildShimmerText(shimmerBase, shimmerTick)} ${formatElapsedTimer(thinkingStartedAt)}`;
     }, 90);
     if (typeof shimmerInterval.unref === 'function') {
       shimmerInterval.unref();
@@ -707,6 +710,7 @@ export default class Shell extends Command {
           this.log('');
           lastPhase = session.phase;
           lastProgressAt = Date.now();
+          thinkingStartedAt = Date.now();
         }
 
         const normalizedStatus = normalizeStatus(session.status);
@@ -753,6 +757,7 @@ export default class Shell extends Command {
         }
 
         if (pausedForOutput) {
+          thinkingStartedAt = Date.now();
           progressSpinner.start();
         }
 
