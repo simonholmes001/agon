@@ -11,9 +11,16 @@ name: Backend Deploy (Dev)
     types: [completed]
     branches: [main]
   workflow_dispatch:
+    inputs:
+      force_without_infra_success:
+        description: 'Allow manual backend deploy without a successful Infrastructure Deploy (Dev) run for this exact commit SHA.'
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
+  actions: read
   id-token: write
   attestations: write
 
@@ -42,6 +49,8 @@ jobs:
       - name: Guard deploy ordering
         id: guard
         shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           if [ "${{ github.event_name }}" = "workflow_run" ]; then
@@ -58,6 +67,27 @@ jobs:
               echo "Skipping push-triggered backend deploy because infrastructure changed in the same push."
               echo "Backend deploy will run automatically after successful Infrastructure Deploy via workflow_run."
               exit 0
+            fi
+          fi
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            FORCE_WITHOUT_INFRA_SUCCESS=$(jq -r '.inputs.force_without_infra_success // "false"' "$GITHUB_EVENT_PATH")
+            INFRA_RUNS_URL="https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/infrastructure-deploy-dev.yaml/runs?head_sha=${GITHUB_SHA}&branch=${GITHUB_REF_NAME}&status=completed&per_page=20"
+
+            INFRA_SUCCESS_COUNT=$(curl --silent --show-error --fail \
+              -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+              -H "Accept: application/vnd.github+json" \
+              "${INFRA_RUNS_URL}" \
+              | jq '[.workflow_runs[] | select(.conclusion == "success")] | length')
+
+            if [ "${INFRA_SUCCESS_COUNT}" -eq 0 ]; then
+              if [ "${FORCE_WITHOUT_INFRA_SUCCESS}" = "true" ]; then
+                echo "::warning::Manual override enabled. Proceeding without a successful Infrastructure Deploy (Dev) run for SHA ${GITHUB_SHA} on branch ${GITHUB_REF_NAME}."
+              else
+                echo "::error::Manual backend deploy is blocked because no successful Infrastructure Deploy (Dev) run exists for SHA ${GITHUB_SHA} on branch ${GITHUB_REF_NAME}."
+                echo "::error::Run Infrastructure Deploy (Dev) first, or rerun this workflow with 'force_without_infra_success=true'."
+                exit 1
+              fi
             fi
           fi
 
