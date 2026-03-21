@@ -233,6 +233,8 @@ module appEdge './modules/app-edge-dev.bicep' = {
     deepSeekSecretUri: data.outputs.deepSeekSecretUri
     documentIntelligenceEndpoint: data.outputs.documentIntelligenceEndpoint
     documentIntelligenceModelId: documentIntelligenceModelId
+    attachmentStorageBlobEndpoint: data.outputs.attachmentStorageBlobEndpoint
+    attachmentContainerName: data.outputs.attachmentContainerName
   }
 }
 
@@ -251,6 +253,16 @@ module documentIntelligenceAccess './modules/document-intelligence-access-dev.bi
   scope: rgData
   params: {
     documentIntelligenceAccountName: data.outputs.documentIntelligenceAccountName
+    principalId: appEdge.outputs.appPrincipalId
+    principalDisplayNameSeed: appServiceName
+  }
+}
+
+module storageAccess './modules/storage-access-dev.bicep' = {
+  name: 'storage-access-dev'
+  scope: rgData
+  params: {
+    storageAccountName: data.outputs.attachmentStorageAccountName
     principalId: appEdge.outputs.appPrincipalId
     principalDisplayNameSeed: appServiceName
   }

@@ -195,6 +195,19 @@ Expected outputs:
 - `attachmentContainerName` (default: `session-attachments`)
 - `attachmentStorageBlobEndpoint`
 
+## Attachment Storage Runtime Modes
+
+Azure App Service deployments use managed identity mode by default via app settings:
+- `Storage__UseManagedIdentity=true`
+- `Storage__AttachmentBlobServiceUri=<attachmentStorageBlobEndpoint>`
+- `Storage__AttachmentContainer=<attachmentContainerName>`
+
+Local development can still use connection-string mode:
+- `ConnectionStrings__BlobStorage` (or `BLOB_STORAGE_CONNECTION_STRING` placeholder source)
+- `Storage__UseManagedIdentity=false`
+
+Misconfiguration is fail-fast when managed identity mode is enabled without a valid blob service URI.
+
 ## Common Errors
 
 ### `AADSTS700213` (no matching federated identity)

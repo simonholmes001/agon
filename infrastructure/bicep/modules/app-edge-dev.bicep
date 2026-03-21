@@ -110,6 +110,12 @@ param documentIntelligenceEndpoint string = ''
 @description('Document Intelligence model ID used by backend attachment extraction.')
 param documentIntelligenceModelId string = 'prebuilt-layout'
 
+@description('Blob service endpoint used by backend attachment storage (managed identity mode).')
+param attachmentStorageBlobEndpoint string = ''
+
+@description('Blob container name used for session attachments.')
+param attachmentContainerName string = 'session-attachments'
+
 var tags = {
   environment: environment
   workload: workloadName
@@ -396,6 +402,18 @@ resource appService 'Microsoft.Web/sites@2023-12-01' = {
         {
           name: 'Redis__Port'
           value: '6380'
+        }
+        {
+          name: 'Storage__UseManagedIdentity'
+          value: 'true'
+        }
+        {
+          name: 'Storage__AttachmentBlobServiceUri'
+          value: attachmentStorageBlobEndpoint
+        }
+        {
+          name: 'Storage__AttachmentContainer'
+          value: attachmentContainerName
         }
         {
           name: 'OPENAI_KEY'
