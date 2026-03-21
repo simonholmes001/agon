@@ -30,6 +30,12 @@ public sealed class Orchestrator : IOrchestrator
     private static readonly Regex SimpleMetaQueryRegex = new(
         @"\b(what can you do|how can you help|who are you|what is agon|internal setup|your setup|how do you work|capabilities|command(?:s)?)\b",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex SelfReferenceRegex = new(
+        @"\b(agon|you|your|this assistant|this tool|this cli)\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex SystemMetaTopicRegex = new(
+        @"\b(agent(?:s)?|llm(?:s)?|model(?:s)?|internal|setup|architecture|capabilit(?:y|ies)|command(?:s)?|work(?:s|ing)?|help)\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex QuestionLeadRegex = new(
         @"^\s*(how|what|who|can|could|would|do|does|is|are|where|when)\b",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
@@ -231,11 +237,6 @@ public sealed class Orchestrator : IOrchestrator
             return false;
         }
 
-        if (LooksLikeAnalysisRequest(latestInput))
-        {
-            return false;
-        }
-
         return LooksLikeSimpleMetaQuery(latestInput);
     }
 
@@ -248,9 +249,6 @@ public sealed class Orchestrator : IOrchestrator
 
         return state.Idea ?? string.Empty;
     }
-
-    private static bool LooksLikeAnalysisRequest(string input) =>
-        AnalysisIntentRegex.IsMatch(input);
 
     private static bool LooksLikeSimpleMetaQuery(string input)
     {
@@ -266,8 +264,22 @@ public sealed class Orchestrator : IOrchestrator
             return false;
         }
 
-        return SimpleMetaQueryRegex.IsMatch(trimmed)
-            || trimmed.Contains("agon", StringComparison.OrdinalIgnoreCase);
+        if (SimpleMetaQueryRegex.IsMatch(trimmed))
+        {
+            return true;
+        }
+
+        var selfReferential = SelfReferenceRegex.IsMatch(trimmed);
+        var systemTopic = SystemMetaTopicRegex.IsMatch(trimmed);
+        var strongProjectSignal = AnalysisIntentRegex.IsMatch(trimmed)
+            && !selfReferential;
+
+        if (strongProjectSignal)
+        {
+            return false;
+        }
+
+        return selfReferential && systemTopic;
     }
 
     private enum ModeratorDecisionStatus

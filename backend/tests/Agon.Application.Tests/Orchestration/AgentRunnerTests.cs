@@ -651,6 +651,13 @@ public class AgentRunnerTests
             .Returns(
                 Task.FromResult(new AgentResponse(
                     AgentId.Moderator,
+                    "ROUTE: DIRECT_ANSWER\nMeta/system question about how Agon works.",
+                    null,
+                    20,
+                    false,
+                    null)),
+                Task.FromResult(new AgentResponse(
+                    AgentId.Moderator,
                     "STATUS: NEEDS_INFO\nWhat are you trying to build?",
                     null,
                     80,
@@ -672,10 +679,61 @@ public class AgentRunnerTests
         var response = await runner.RunModeratorAsync(state, CancellationToken.None);
 
         // Assert
-        await moderator.Received(2).RunAsync(Arg.Any<AgentContext>(), Arg.Any<CancellationToken>());
-        capturedContexts.Should().HaveCount(2);
-        capturedContexts[0].MicroDirective.Should().Contain("simple/meta question");
+        await moderator.Received(3).RunAsync(Arg.Any<AgentContext>(), Arg.Any<CancellationToken>());
+        capturedContexts.Should().HaveCount(3);
+        capturedContexts[0].MicroDirective.Should().Contain("ROUTE: DIRECT_ANSWER");
         capturedContexts[1].MicroDirective.Should().Contain("STATUS: DIRECT_ANSWER");
+        capturedContexts[2].MicroDirective.Should().Contain("STATUS: DIRECT_ANSWER");
+        response.Message.Should().Contain("STATUS: DIRECT_ANSWER");
+    }
+
+    [Fact]
+    public async Task RunModeratorAsync_InternalArchitectureQuestion_ShouldUseLlmRouterToForceDirectAnswer()
+    {
+        // Arrange
+        var repo = StubRepo();
+        var capturedContexts = new List<AgentContext>();
+
+        var moderator = Substitute.For<ICouncilAgent>();
+        moderator.AgentId.Returns(AgentId.Moderator);
+        moderator.ModelProvider.Returns("fake/model");
+        moderator.RunAsync(Arg.Do<AgentContext>(ctx => capturedContexts.Add(ctx)), Arg.Any<CancellationToken>())
+            .Returns(
+                Task.FromResult(new AgentResponse(
+                    AgentId.Moderator,
+                    "ROUTE: DIRECT_ANSWER\nUser is asking about Agon internal architecture and models.",
+                    null,
+                    25,
+                    false,
+                    null)),
+                Task.FromResult(new AgentResponse(
+                    AgentId.Moderator,
+                    "STATUS: NEEDS_INFO\nPlease clarify your context.",
+                    null,
+                    85,
+                    false,
+                    null)),
+                Task.FromResult(new AgentResponse(
+                    AgentId.Moderator,
+                    "STATUS: DIRECT_ANSWER\nAgon uses a moderator for clarification, three council agents for analysis, then synthesis.",
+                    null,
+                    95,
+                    false,
+                    null)));
+
+        var runner = BuildRunner([moderator], repo: repo);
+        var state = BuildSessionState(idea: "Can you explain your internal architecture, what agents you run, and which LLMs are used?");
+        state.Phase = SessionPhase.Clarification;
+
+        // Act
+        var response = await runner.RunModeratorAsync(state, CancellationToken.None);
+
+        // Assert
+        await moderator.Received(3).RunAsync(Arg.Any<AgentContext>(), Arg.Any<CancellationToken>());
+        capturedContexts.Should().HaveCount(3);
+        capturedContexts[0].MicroDirective.Should().Contain("ROUTE: DIRECT_ANSWER");
+        capturedContexts[1].MicroDirective.Should().Contain("STATUS: DIRECT_ANSWER");
+        capturedContexts[2].MicroDirective.Should().Contain("STATUS: DIRECT_ANSWER");
         response.Message.Should().Contain("STATUS: DIRECT_ANSWER");
     }
 

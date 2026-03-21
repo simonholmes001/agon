@@ -38,14 +38,33 @@ public sealed class AgentRunner : IAgentRunner
         First line in MESSAGE must be exactly: STATUS: DIRECT_ANSWER
         PATCH must be valid JSON with empty ops and correct moderator meta.
         """;
+    private const string ModeratorIntentRoutingDirective = """
+        Route the latest user input before answering.
+        Return first line exactly as one of:
+        - ROUTE: DIRECT_ANSWER
+        - ROUTE: FULL_DEBATE
+        Use DIRECT_ANSWER for general/meta questions about Agon itself (capabilities, commands, architecture, models/agents, how it works).
+        Use FULL_DEBATE for product/spec/debate work that should run the full multi-agent chain.
+        Then provide one short reason line.
+        Do not ask clarifying questions.
+        """;
     private static readonly Regex ModeratorStatusRegex = new(
         @"^\s*(?:status|clarification_status)\s*[:=]\s*(DIRECT_ANSWER|READY|NEEDS_INFO)\b",
+        RegexOptions.Multiline | RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex ModeratorRouteRegex = new(
+        @"^\s*route\s*[:=]\s*(DIRECT_ANSWER|FULL_DEBATE)\b",
         RegexOptions.Multiline | RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex AnalysisIntentRegex = new(
         @"\b(prd|product requirements?|debate brief|architecture|roadmap|mvp|spec(?:ification)?|analysis|analy[sz]e|evaluate|compare|implementation|implement|build|design|tech stack|user stor(?:y|ies))\b",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex SimpleMetaQueryRegex = new(
         @"\b(what can you do|how can you help|who are you|what is agon|internal setup|your setup|how do you work|capabilities|command(?:s)?)\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex SelfReferenceRegex = new(
+        @"\b(agon|you|your|this assistant|this tool|this cli)\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex SystemMetaTopicRegex = new(
+        @"\b(agent(?:s)?|llm(?:s)?|model(?:s)?|internal|setup|architecture|capabilit(?:y|ies)|command(?:s)?|work(?:s|ing)?|help)\b",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex QuestionLeadRegex = new(
         @"^\s*(how|what|who|can|could|would|do|does|is|are|where|when)\b",
@@ -99,17 +118,25 @@ public sealed class AgentRunner : IAgentRunner
             false, // Research tools not used during clarification
             state.Attachments);
 
-        var simpleMetaQuery = ShouldHandleAsSimpleMetaQuery(state);
-        if (simpleMetaQuery)
+        var shouldRunIntentRouter = ShouldRunIntentRouter(state);
+        var routeDecision = await DetermineModeratorRouteAsync(
+            moderator,
+            context,
+            state,
+            shouldRunIntentRouter,
+            cancellationToken);
+        var shouldForceDirectAnswer = routeDecision.ShouldForceDirectAnswer;
+
+        if (shouldForceDirectAnswer)
         {
             context = context with { MicroDirective = ModeratorDirectAnswerDirective };
         }
 
         var response = await RunWithTimeoutAsync(moderator, context, cancellationToken);
-        response = await RetryModeratorOnceForSimpleMetaQueryAsync(
+        response = await RetryModeratorOnceForDirectAnswerAsync(
             moderator,
             context,
-            simpleMetaQuery,
+            shouldForceDirectAnswer,
             response,
             cancellationToken);
         response = await RetryModeratorOnceIfMalformedAsync(
@@ -156,30 +183,80 @@ public sealed class AgentRunner : IAgentRunner
         return response;
     }
 
-    private async Task<AgentResponse> RetryModeratorOnceForSimpleMetaQueryAsync(
+    private async Task<AgentResponse> RetryModeratorOnceForDirectAnswerAsync(
         ICouncilAgent moderator,
         AgentContext context,
-        bool simpleMetaQuery,
+        bool shouldForceDirectAnswer,
         AgentResponse response,
         CancellationToken cancellationToken)
     {
-        if (!simpleMetaQuery || response.TimedOut)
+        if (!shouldForceDirectAnswer || response.TimedOut)
         {
             return response;
         }
 
         var status = ParseModeratorStatus(response.Message);
-        if (status is "DIRECT_ANSWER" or "READY")
+        if (status is "DIRECT_ANSWER")
         {
             return response;
         }
 
         _logger?.LogInformation(
-            "Moderator returned {Status} for simple/meta query. Retrying once with enforced direct-answer directive.",
+            "Moderator returned {Status} while direct-answer routing was selected. Retrying once with enforced direct-answer directive.",
             status ?? "UNKNOWN");
 
         var retryContext = context with { MicroDirective = ModeratorDirectAnswerDirective };
         return await RunWithTimeoutAsync(moderator, retryContext, cancellationToken);
+    }
+
+    private async Task<ModeratorRouteDecision> DetermineModeratorRouteAsync(
+        ICouncilAgent moderator,
+        AgentContext context,
+        SessionState state,
+        bool shouldRunIntentRouter,
+        CancellationToken cancellationToken)
+    {
+        if (!shouldRunIntentRouter)
+        {
+            return new ModeratorRouteDecision(false, "router_not_run");
+        }
+
+        try
+        {
+            var routeContext = context with { MicroDirective = ModeratorIntentRoutingDirective };
+            var routeResponse = await RunWithTimeoutAsync(moderator, routeContext, cancellationToken);
+            var route = ParseModeratorRoute(routeResponse.Message);
+
+            if (route == ModeratorRoute.DirectAnswer)
+            {
+                _logger?.LogInformation(
+                    "Moderator intent router selected DIRECT_ANSWER for session {SessionId}.",
+                    state.SessionId);
+                return new ModeratorRouteDecision(true, "llm_router");
+            }
+
+            if (route == ModeratorRoute.FullDebate)
+            {
+                _logger?.LogInformation(
+                    "Moderator intent router selected FULL_DEBATE for session {SessionId}.",
+                    state.SessionId);
+                return new ModeratorRouteDecision(false, "llm_router");
+            }
+        }
+        catch (Exception ex) when (ex is OperationCanceledException or InvalidOperationException)
+        {
+            _logger?.LogWarning(
+                ex,
+                "Moderator intent router failed for session {SessionId}; falling back to deterministic heuristics.",
+                state.SessionId);
+        }
+
+        var fallback = ShouldHandleAsSimpleMetaQuery(state);
+        _logger?.LogInformation(
+            "Moderator intent router fell back to deterministic heuristics (directAnswer={DirectAnswer}) for session {SessionId}.",
+            fallback,
+            state.SessionId);
+        return new ModeratorRouteDecision(fallback, "fallback");
     }
 
     private async Task<AgentResponse> RetryModeratorOnceIfMalformedAsync(
@@ -287,7 +364,28 @@ public sealed class AgentRunner : IAgentRunner
         return match.Success ? match.Groups[1].Value.Trim().ToUpperInvariant() : null;
     }
 
-    private static bool ShouldHandleAsSimpleMetaQuery(SessionState state)
+    private static ModeratorRoute ParseModeratorRoute(string? message)
+    {
+        if (string.IsNullOrWhiteSpace(message))
+        {
+            return ModeratorRoute.Unknown;
+        }
+
+        var routeMatch = ModeratorRouteRegex.Match(message);
+        if (routeMatch.Success)
+        {
+            return routeMatch.Groups[1].Value.Trim().ToUpperInvariant() switch
+            {
+                "DIRECT_ANSWER" => ModeratorRoute.DirectAnswer,
+                "FULL_DEBATE" => ModeratorRoute.FullDebate,
+                _ => ModeratorRoute.Unknown
+            };
+        }
+
+        return ModeratorRoute.Unknown;
+    }
+
+    private static bool ShouldRunIntentRouter(SessionState state)
     {
         var latestInput = GetLatestUserInput(state);
         if (string.IsNullOrWhiteSpace(latestInput))
@@ -295,7 +393,19 @@ public sealed class AgentRunner : IAgentRunner
             return false;
         }
 
-        if (AnalysisIntentRegex.IsMatch(latestInput))
+        var trimmed = latestInput.Trim();
+        if (trimmed.Length is < 4 or > 600)
+        {
+            return false;
+        }
+
+        return trimmed.Contains('?') || QuestionLeadRegex.IsMatch(trimmed);
+    }
+
+    private static bool ShouldHandleAsSimpleMetaQuery(SessionState state)
+    {
+        var latestInput = GetLatestUserInput(state);
+        if (string.IsNullOrWhiteSpace(latestInput))
         {
             return false;
         }
@@ -327,8 +437,22 @@ public sealed class AgentRunner : IAgentRunner
             return false;
         }
 
-        return SimpleMetaQueryRegex.IsMatch(trimmed)
-            || trimmed.Contains("agon", StringComparison.OrdinalIgnoreCase);
+        if (SimpleMetaQueryRegex.IsMatch(trimmed))
+        {
+            return true;
+        }
+
+        var selfReferential = SelfReferenceRegex.IsMatch(trimmed);
+        var systemTopic = SystemMetaTopicRegex.IsMatch(trimmed);
+        var strongProjectSignal = AnalysisIntentRegex.IsMatch(trimmed)
+            && !selfReferential;
+
+        if (strongProjectSignal)
+        {
+            return false;
+        }
+
+        return selfReferential && systemTopic;
     }
 
     /// <summary>
@@ -697,4 +821,13 @@ public sealed class AgentRunner : IAgentRunner
             .Select(id => new AgentMessage(id, lastRoundMessages[id]))
             .ToList();
     }
+
+    private enum ModeratorRoute
+    {
+        Unknown,
+        DirectAnswer,
+        FullDebate
+    }
+
+    private sealed record ModeratorRouteDecision(bool ShouldForceDirectAnswer, string DecisionSource);
 }
