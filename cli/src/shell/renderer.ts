@@ -193,6 +193,11 @@ export function formatElapsedTimer(startMs: number): string {
   return `[${elapsed}s]`;
 }
 
+/** Returns the standard "Ctrl+C to interrupt" hint shown during running operations. */
+export function buildInterruptHint(): string {
+  return chalk.dim('Ctrl+C to interrupt');
+}
+
 export function buildShimmerText(text: string, tick: number): string {
   if (text.length === 0) {
     return '';
