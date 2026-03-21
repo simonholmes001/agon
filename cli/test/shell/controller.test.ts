@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Message, SessionResponse } from '../../src/api/types.js';
 import { ShellController } from '../../src/shell/controller.js';
+import { AgonError, ErrorCode } from '../../src/utils/error-handler.js';
 
 describe('shell controller', () => {
   let apiClient: any;
@@ -258,6 +259,89 @@ describe('shell controller', () => {
     expect(apiClient.uploadAttachment).toHaveBeenCalledWith('session-123', './brief.md');
     expect(result.sessionId).toBe('session-123');
     expect(result.attachment.fileName).toBe('brief.md');
+  });
+
+  it('auto-creates and starts a session when attaching without any active session', async () => {
+    const intakeSession: SessionResponse = {
+      ...baseSession,
+      id: 'session-new',
+      phase: 'Intake'
+    };
+    const clarificationSession: SessionResponse = {
+      ...baseSession,
+      id: 'session-new',
+      phase: 'Clarification'
+    };
+
+    sessionManager.getCurrentSessionId.mockResolvedValue(null);
+    sessionManager.listSessions.mockResolvedValue([]);
+    apiClient.createSession.mockResolvedValue(intakeSession);
+    apiClient.startSession.mockResolvedValue(undefined);
+    apiClient.getSession.mockResolvedValue(clarificationSession);
+    apiClient.uploadAttachment.mockResolvedValue({
+      id: 'att-new',
+      sessionId: 'session-new',
+      fileName: 'brief.md',
+      contentType: 'text/markdown',
+      sizeBytes: 2048,
+      accessUrl: 'https://example.test/brief.md',
+      uploadedAt: '2026-03-16T12:00:00Z',
+      hasExtractedText: true
+    });
+
+    const result = await controller.attachDocument('/tmp/brief.md');
+
+    expect(apiClient.createSession).toHaveBeenCalledWith({
+      idea: 'Discuss attached document: brief.md',
+      friction: 50,
+      researchEnabled: true
+    });
+    expect(apiClient.startSession).toHaveBeenCalledWith('session-new');
+    expect(apiClient.uploadAttachment).toHaveBeenCalledWith('session-new', '/tmp/brief.md');
+    expect(sessionManager.setCurrentSessionId).toHaveBeenCalledWith('session-new');
+    expect(result.sessionId).toBe('session-new');
+  });
+
+  it('recovers from stale session not found by creating a fresh session and retrying attachment', async () => {
+    const intakeSession: SessionResponse = {
+      ...baseSession,
+      id: 'session-fresh',
+      phase: 'Intake'
+    };
+    const clarificationSession: SessionResponse = {
+      ...baseSession,
+      id: 'session-fresh',
+      phase: 'Clarification'
+    };
+
+    sessionManager.getCurrentSessionId.mockResolvedValue('session-stale');
+    apiClient.uploadAttachment
+      .mockRejectedValueOnce(new AgonError(ErrorCode.SESSION_NOT_FOUND, 'Session session-stale not found'))
+      .mockResolvedValueOnce({
+        id: 'att-fresh',
+        sessionId: 'session-fresh',
+        fileName: 'cv.pdf',
+        contentType: 'application/pdf',
+        sizeBytes: 4096,
+        accessUrl: 'https://example.test/cv.pdf',
+        uploadedAt: '2026-03-16T12:00:00Z',
+        hasExtractedText: true
+      });
+    apiClient.createSession.mockResolvedValue(intakeSession);
+    apiClient.startSession.mockResolvedValue(undefined);
+    apiClient.getSession.mockResolvedValue(clarificationSession);
+
+    const result = await controller.attachDocument('/tmp/cv.pdf');
+
+    expect(apiClient.uploadAttachment).toHaveBeenNthCalledWith(1, 'session-stale', '/tmp/cv.pdf');
+    expect(apiClient.createSession).toHaveBeenCalledWith({
+      idea: 'Discuss attached document: cv.pdf',
+      friction: 50,
+      researchEnabled: true
+    });
+    expect(apiClient.startSession).toHaveBeenCalledWith('session-fresh');
+    expect(apiClient.uploadAttachment).toHaveBeenNthCalledWith(2, 'session-fresh', '/tmp/cv.pdf');
+    expect(result.sessionId).toBe('session-fresh');
   });
 
   it('treats /new as awaiting-idea mode and ignores persisted current session', async () => {

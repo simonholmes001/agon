@@ -5,7 +5,9 @@ import {
   isPostDeliveryPhase,
   normalizeStatus
 } from '../utils/session-flow.js';
+import { AgonError, ErrorCode } from '../utils/error-handler.js';
 import type { ShellSettableKey } from './types.js';
+import path from 'node:path';
 
 interface ApiClientLike {
   createSession(request: {
@@ -252,12 +254,24 @@ export class ShellController {
     filePath: string,
     explicitSessionId?: string
   ): Promise<{ sessionId: string; attachment: SessionAttachment }> {
-    const sessionId = await this.resolveSessionId(explicitSessionId);
+    let sessionId = await this.resolveSessionId(explicitSessionId);
     if (!sessionId) {
-      throw new Error('No active session found. Start or resume a session before attaching documents.');
+      sessionId = await this.createSessionForAttachment(filePath);
     }
 
-    const attachment = await this.apiClient.uploadAttachment(sessionId, filePath);
+    let attachment: SessionAttachment;
+    try {
+      attachment = await this.apiClient.uploadAttachment(sessionId, filePath);
+    } catch (error) {
+      // Recover from stale local session pointers by creating a fresh session
+      // and retrying once, enabling true "attach anytime" behavior.
+      if (!explicitSessionId && this.isSessionNotFoundError(error)) {
+        sessionId = await this.createSessionForAttachment(filePath);
+        attachment = await this.apiClient.uploadAttachment(sessionId, filePath);
+      } else {
+        throw error;
+      }
+    }
 
     // Ensure shell remains pinned to this active discussion session.
     this.shellSessionId = sessionId;
@@ -401,5 +415,32 @@ export class ShellController {
     }
 
     return { session: latestSession };
+  }
+
+  private isSessionNotFoundError(error: unknown): boolean {
+    return error instanceof AgonError && error.code === ErrorCode.SESSION_NOT_FOUND;
+  }
+
+  private async createSessionForAttachment(filePath: string): Promise<string> {
+    const config = await this.configManager.load();
+    const fileName = path.basename(filePath);
+    const idea = `Discuss attached document: ${fileName}`;
+
+    const created = await this.apiClient.createSession({
+      idea,
+      friction: config.defaultFriction,
+      researchEnabled: config.researchEnabled
+    });
+
+    await this.sessionManager.saveSession(created);
+    await this.sessionManager.setCurrentSessionId(created.id);
+    this.shellSessionId = created.id;
+    this.awaitingNewIdea = false;
+
+    await this.apiClient.startSession(created.id);
+    const latest = await this.apiClient.getSession(created.id);
+    await this.sessionManager.saveSession(latest);
+
+    return created.id;
   }
 }
