@@ -225,10 +225,18 @@ Both infra workflows now include a preflight warning step to detect this conditi
 - HTTPS edge strategy ADR:
   - `infrastructure/docs/adr-https-edge-endpoint-strategy.md`
 
+## HTTPS Validation and Telemetry Runbooks
+
+- Cutover and rollback:
+  - `infrastructure/runbooks/app-gateway-https-cutover.md`
+- Observability and release-gate queries:
+  - `infrastructure/runbooks/app-gateway-https-observability.md`
+
 ## Security Posture (Dev Baseline)
 
 - Internet ingress through Application Gateway only
 - Public ingress should be HTTPS-first (HTTP kept only for redirect during migration)
+- App Gateway diagnostics are enabled to Log Analytics for TLS/redirect verification and troubleshooting
 - App Service public network access disabled
 - App Service reachable privately via Private Endpoint from Application Gateway subnet
 - Key Vault/Redis/PostgreSQL on private networking paths
