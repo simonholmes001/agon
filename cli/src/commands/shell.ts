@@ -26,7 +26,8 @@ import {
   renderMessagePanel,
   renderPromptBanner,
   renderShellHeader,
-  renderStatusLine
+  renderStatusLine,
+  styleAttachmentToken
 } from '../shell/renderer.js';
 import { PromptHistory } from '../shell/history.js';
 import { renderMarkdown } from '../utils/markdown.js';
@@ -307,8 +308,11 @@ export default class Shell extends Command {
       case 'status':
         this.log(`Session ${outcome.sessionId} | status=${outcome.status} | phase=${outcome.phase}`);
         return;
-      case 'attachment':
-        this.log(chalk.green(`✓ Attached ${outcome.fileName} to session ${outcome.sessionId}`));
+      case 'attachment': {
+        const attachedLine = chalk.green('✓ Attached ')
+          + styleAttachmentToken(outcome.fileName)
+          + chalk.green(` to session ${outcome.sessionId}`);
+        this.log(attachedLine);
         this.log(chalk.dim(`Type: ${outcome.contentType} | Size: ${formatBytes(outcome.sizeBytes)}`));
         if (outcome.hasExtractedText) {
           this.log(chalk.dim('Document text extracted and added to agent context.'));
@@ -316,6 +320,7 @@ export default class Shell extends Command {
           this.log(chalk.dim('No text extraction available; file metadata/link still added to context.'));
         }
         return;
+      }
       case 'artifact':
         if (outcome.raw) {
           this.log(outcome.content);
