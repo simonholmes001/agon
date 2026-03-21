@@ -40,6 +40,9 @@ param redisPrivateDnsZoneId string
 @description('Private DNS zone ID for Cognitive Services private endpoint.')
 param cognitiveServicesPrivateDnsZoneId string
 
+@description('Private DNS zone ID for Blob Storage private endpoint.')
+param blobPrivateDnsZoneId string
+
 @secure()
 param openAiApiKey string
 
@@ -62,6 +65,8 @@ var keyVaultName = 'kv-${replace(namePrefix, '-', '')}-${take(uniqueString(resou
 var postgresServerName = 'psql-${namePrefix}-${take(uniqueString(resourceGroup().id), 6)}'
 var redisName = 'redis-${namePrefix}-${take(uniqueString(resourceGroup().id), 6)}'
 var documentIntelligenceName = 'docint-${namePrefix}-${take(uniqueString(resourceGroup().id), 6)}'
+var attachmentStorageAccountName = toLower('st${take(replace(namePrefix, '-', ''), 11)}${take(uniqueString(resourceGroup().id), 11)}')
+var attachmentContainerName = 'session-attachments'
 var hasOpenAiKey = !empty(openAiApiKey)
 var hasAnthropicKey = !empty(anthropicApiKey)
 var hasGoogleKey = !empty(googleApiKey)
@@ -204,6 +209,33 @@ resource documentIntelligence 'Microsoft.CognitiveServices/accounts@2023-05-01' 
   }
 }
 
+resource attachmentStorage 'Microsoft.Storage/storageAccounts@2023-05-01' = {
+  name: attachmentStorageAccountName
+  location: location
+  tags: tags
+  sku: {
+    name: 'Standard_LRS'
+  }
+  kind: 'StorageV2'
+  properties: {
+    publicNetworkAccess: 'Disabled'
+    allowBlobPublicAccess: false
+    supportsHttpsTrafficOnly: true
+    minimumTlsVersion: 'TLS1_2'
+    networkAcls: {
+      defaultAction: 'Deny'
+      bypass: 'AzureServices'
+    }
+  }
+}
+
+resource attachmentContainer 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-05-01' = {
+  name: '${attachmentStorage.name}/default/${attachmentContainerName}'
+  properties: {
+    publicAccess: 'None'
+  }
+}
+
 resource redisPrivateEndpoint 'Microsoft.Network/privateEndpoints@2023-11-01' = {
   name: 'pep-${redis.name}'
   location: location
@@ -248,6 +280,28 @@ resource documentIntelligencePrivateEndpoint 'Microsoft.Network/privateEndpoints
   }
 }
 
+resource attachmentStoragePrivateEndpoint 'Microsoft.Network/privateEndpoints@2023-11-01' = {
+  name: 'pep-${attachmentStorage.name}'
+  location: location
+  tags: tags
+  properties: {
+    subnet: {
+      id: privateEndpointSubnetId
+    }
+    privateLinkServiceConnections: [
+      {
+        name: 'attachmentStorageConnection'
+        properties: {
+          privateLinkServiceId: attachmentStorage.id
+          groupIds: [
+            'blob'
+          ]
+        }
+      }
+    ]
+  }
+}
+
 resource redisPrivateDnsZoneGroup 'Microsoft.Network/privateEndpoints/privateDnsZoneGroups@2023-11-01' = {
   parent: redisPrivateEndpoint
   name: 'default'
@@ -272,6 +326,21 @@ resource documentIntelligencePrivateDnsZoneGroup 'Microsoft.Network/privateEndpo
         name: 'cognitive-zone'
         properties: {
           privateDnsZoneId: cognitiveServicesPrivateDnsZoneId
+        }
+      }
+    ]
+  }
+}
+
+resource attachmentStoragePrivateDnsZoneGroup 'Microsoft.Network/privateEndpoints/privateDnsZoneGroups@2023-11-01' = {
+  parent: attachmentStoragePrivateEndpoint
+  name: 'default'
+  properties: {
+    privateDnsZoneConfigs: [
+      {
+        name: 'blob-zone'
+        properties: {
+          privateDnsZoneId: blobPrivateDnsZoneId
         }
       }
     ]
@@ -318,6 +387,10 @@ output redisHostName string = redis.properties.hostName
 output documentIntelligenceAccountName string = documentIntelligence.name
 output documentIntelligenceId string = documentIntelligence.id
 output documentIntelligenceEndpoint string = 'https://${documentIntelligence.name}.cognitiveservices.azure.com'
+output attachmentStorageAccountName string = attachmentStorage.name
+output attachmentStorageAccountId string = attachmentStorage.id
+output attachmentStorageBlobEndpoint string = attachmentStorage.properties.primaryEndpoints.blob
+output attachmentContainerName string = attachmentContainerName
 output openAiSecretUri string = hasOpenAiKey ? openAiSecret!.properties.secretUri : ''
 output anthropicSecretUri string = hasAnthropicKey ? anthropicSecret!.properties.secretUri : ''
 output googleSecretUri string = hasGoogleKey ? googleSecret!.properties.secretUri : ''

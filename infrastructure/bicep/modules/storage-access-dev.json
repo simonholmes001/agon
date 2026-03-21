@@ -1,0 +1,47 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "_generator": {
+      "name": "bicep",
+      "version": "0.41.2.15936",
+      "templateHash": "14658391224115835077"
+    }
+  },
+  "parameters": {
+    "storageAccountName": {
+      "type": "string",
+      "metadata": {
+        "description": "Target storage account name for attachment blobs."
+      }
+    },
+    "principalId": {
+      "type": "string",
+      "metadata": {
+        "description": "Principal ID (managed identity object ID) that should access blob data plane."
+      }
+    },
+    "principalDisplayNameSeed": {
+      "type": "string",
+      "metadata": {
+        "description": "Stable seed used to generate deterministic role assignment names."
+      }
+    }
+  },
+  "variables": {
+    "storageBlobDataContributorRoleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'ba92f5b4-2d11-453d-a403-e96b0029c9fe')]"
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Authorization/roleAssignments",
+      "apiVersion": "2022-04-01",
+      "scope": "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName'))]",
+      "name": "[guid(resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName')), parameters('principalDisplayNameSeed'), variables('storageBlobDataContributorRoleDefinitionId'))]",
+      "properties": {
+        "roleDefinitionId": "[variables('storageBlobDataContributorRoleDefinitionId')]",
+        "principalId": "[parameters('principalId')]",
+        "principalType": "ServicePrincipal"
+      }
+    }
+  ]
+}
