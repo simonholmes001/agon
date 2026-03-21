@@ -1,5 +1,11 @@
 # @agon_agents/cli
 
+## 0.4.3
+
+### Patch Changes
+
+- Enable true "attach anytime" behavior by auto-creating a session when none is active, and by recovering from stale session pointers when upload returns SESSION_NOT_FOUND.
+
 ## 0.4.2
 
 ### Patch Changes
