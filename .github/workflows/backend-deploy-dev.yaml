@@ -315,11 +315,40 @@ jobs:
               STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${HEALTH_URL}" || true)
               if [ "${STATUS}" = "200" ]; then
                 echo "Backend is healthy via Application Gateway."
-                exit 0
+                break
               fi
               echo "Attempt ${i}/30: status=${STATUS}, waiting..."
               sleep 20
             done
 
-            echo "Backend failed health check through Application Gateway."
-            exit 1
+            if [ "${STATUS}" != "200" ]; then
+              echo "Backend failed health check through Application Gateway."
+              exit 1
+            fi
+
+            if [ -n "${AGON_API_HOSTNAME:-}" ]; then
+              HTTP_HEALTH_URL="http://${AGON_API_HOSTNAME}/health"
+              EXPECTED_REDIRECT_PREFIX="https://${AGON_API_HOSTNAME}/"
+              echo "Validating HTTP to HTTPS redirect behavior at ${HTTP_HEALTH_URL}"
+
+              REDIRECT_OK="false"
+              for i in {1..15}; do
+                RESPONSE=$(curl -s -o /dev/null -w "%{http_code} %{redirect_url}" "${HTTP_HEALTH_URL}" || true)
+                REDIRECT_STATUS=$(printf "%s" "${RESPONSE}" | awk '{print $1}')
+                REDIRECT_URL=$(printf "%s" "${RESPONSE}" | cut -d' ' -f2-)
+
+                if [[ "${REDIRECT_STATUS}" =~ ^30[1278]$ ]] && [[ "${REDIRECT_URL}" == ${EXPECTED_REDIRECT_PREFIX}* ]]; then
+                  REDIRECT_OK="true"
+                  echo "HTTP redirect verified: ${REDIRECT_STATUS} -> ${REDIRECT_URL}"
+                  break
+                fi
+
+                echo "Redirect attempt ${i}/15: status=${REDIRECT_STATUS}, location=${REDIRECT_URL}"
+                sleep 10
+              done
+
+              if [ "${REDIRECT_OK}" != "true" ]; then
+                echo "HTTP to HTTPS redirect validation failed for ${HTTP_HEALTH_URL}."
+                exit 1
+              fi
+            fi

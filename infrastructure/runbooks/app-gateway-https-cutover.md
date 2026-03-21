@@ -67,6 +67,9 @@ agon status
 1. Monitor backend health and error rates.
 2. Watch App Gateway access/error logs and backend probe health.
 3. Track CLI command success/error rates.
+4. Confirm CI deployment checks continue to pass for:
+   - HTTPS health (`https://<host>/health`)
+   - HTTP redirect (`http://<host>/health` -> HTTPS)
 
 ## Rollback
 

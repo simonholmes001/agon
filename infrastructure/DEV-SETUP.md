@@ -155,6 +155,7 @@ Optional (required for HTTPS edge listener rollout):
   - Trigger: push/merge to `main` (backend paths), or manual dispatch
   - Runs backend tests, builds and pushes Docker image to Docker Hub, deploys container to App Service, verifies `/health` through Application Gateway
   - Health check prefers `https://$AGON_API_HOSTNAME/health` when hostname is configured, otherwise falls back to legacy HTTP IP check
+  - When hostname is configured, workflow also enforces HTTP->HTTPS redirect validation
   - Also triggers when App Service edge IaC changes (`main.bicep` / `app-edge-dev.bicep`) so container runtime settings are reapplied automatically
 
 ## Legacy Front Door Cleanup (if previously deployed)
@@ -218,6 +219,11 @@ az cognitiveservices account purge \
 ```
 
 Both infra workflows now include a preflight warning step to detect this condition before `what-if`/deploy.
+
+## Architecture Decisions
+
+- HTTPS edge strategy ADR:
+  - `infrastructure/docs/adr-https-edge-endpoint-strategy.md`
 
 ## Security Posture (Dev Baseline)
 
