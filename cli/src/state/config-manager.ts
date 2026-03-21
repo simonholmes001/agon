@@ -19,7 +19,8 @@ import { stringify as yamlStringify } from 'yaml';
 import * as path from 'node:path';
 import * as os from 'node:os';
 
-const DEFAULT_HOSTED_API_URL = 'http://4.225.205.12';
+const LEGACY_HOSTED_API_URL = 'http://4.225.205.12';
+const DEFAULT_HOSTED_API_URL = resolveHostedApiUrlFromEnvironment();
 
 // Configuration schema
 const ConfigSchema = z.object({
@@ -166,14 +167,43 @@ export class ConfigManager {
 
 function resolveDefaultApiUrl(): string {
   const envUrl = process.env.AGON_API_URL?.trim();
-  if (!envUrl) {
-    return DEFAULT_HOSTED_API_URL;
+  if (envUrl) {
+    try {
+      new URL(envUrl);
+      return envUrl;
+    } catch {
+      // Fall through to hosted defaults when AGON_API_URL is invalid.
+    }
   }
 
-  try {
-    new URL(envUrl);
-    return envUrl;
-  } catch {
-    return DEFAULT_HOSTED_API_URL;
+  return DEFAULT_HOSTED_API_URL;
+}
+
+function resolveHostedApiUrlFromEnvironment(): string {
+  const hostedUrl = process.env.AGON_HOSTED_API_URL?.trim();
+  if (hostedUrl) {
+    try {
+      new URL(hostedUrl);
+      return hostedUrl;
+    } catch {
+      // Fall through to hostname-based resolution.
+    }
   }
+
+  const hostedHostname = process.env.AGON_API_HOSTNAME?.trim();
+  if (hostedHostname) {
+    const normalizedHostname = hostedHostname
+      .replace(/^https?:\/\//i, '')
+      .replace(/\/+$/, '');
+
+    const httpsUrl = `https://${normalizedHostname}`;
+    try {
+      new URL(httpsUrl);
+      return httpsUrl;
+    } catch {
+      // Fall through to legacy fallback.
+    }
+  }
+
+  return LEGACY_HOSTED_API_URL;
 }

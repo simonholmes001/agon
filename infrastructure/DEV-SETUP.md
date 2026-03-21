@@ -43,6 +43,8 @@ Naming follows Azure CAF guidance:
 - `appGatewayResourceSuffix`: `` (empty for primary gateway names)
 - `appGatewaySkuName`: `Basic` (default in this branch)
 - `appGatewaySkuTier`: `Basic` (default in this branch)
+- `appGatewayPublicHostName`: optional but recommended (for HTTPS listener + host validation)
+- `appGatewaySslPolicyName`: `AppGwSslPolicy20220101S` (default)
 
 ## One-Time Azure Identity Setup (OIDC)
 
@@ -127,6 +129,13 @@ Optional (written into Key Vault during deploy):
 - `GEMINI_KEY`
 - `DEEPSEEK_KEY`
 
+Optional (required for HTTPS edge listener rollout):
+
+- `APP_GATEWAY_SSL_CERTIFICATE_PFX_BASE64` (base64-encoded PFX for listener cert)
+- `APP_GATEWAY_SSL_CERTIFICATE_PASSWORD`
+- `AGON_API_HOSTNAME` (public API FQDN bound to the certificate, for example `api-dev.example.com`)
+- `APP_GATEWAY_SSL_POLICY_NAME` (optional override; defaults to `AppGwSslPolicy20220101S`)
+
 Notes:
 - `BLOB_STORAGE_CONNECTION_STRING` is now deployed to Key Vault and referenced by App Service as `BLOB_STORAGE_CONNECTION_STRING`.
 - Attachment container remains controlled via `Storage__AttachmentContainer` (default: `session-attachments`).
@@ -150,6 +159,8 @@ Notes:
 - `.github/workflows/backend-deploy-dev.yaml`
   - Trigger: push/merge to `main` (backend paths), or manual dispatch
   - Runs backend tests, builds and pushes Docker image to Docker Hub, deploys container to App Service, verifies `/health` through Application Gateway
+  - Health check prefers `https://$AGON_API_HOSTNAME/health` when hostname is configured, otherwise falls back to legacy HTTP IP check
+  - When hostname is configured, workflow also enforces HTTP->HTTPS redirect validation
   - Also triggers when App Service edge IaC changes (`main.bicep` / `app-edge-dev.bicep`) so container runtime settings are reapplied automatically
 
 ## Legacy Front Door Cleanup (if previously deployed)
@@ -248,9 +259,23 @@ az cognitiveservices account purge \
 
 Both infra workflows now include a preflight warning step to detect this condition before `what-if`/deploy.
 
+## Architecture Decisions
+
+- HTTPS edge strategy ADR:
+  - `infrastructure/docs/adr-https-edge-endpoint-strategy.md`
+
+## HTTPS Validation and Telemetry Runbooks
+
+- Cutover and rollback:
+  - `infrastructure/runbooks/app-gateway-https-cutover.md`
+- Observability and release-gate queries:
+  - `infrastructure/runbooks/app-gateway-https-observability.md`
+
 ## Security Posture (Dev Baseline)
 
 - Internet ingress through Application Gateway only
+- Public ingress should be HTTPS-first (HTTP kept only for redirect during migration)
+- App Gateway diagnostics are enabled to Log Analytics for TLS/redirect verification and troubleshooting
 - App Service public network access disabled
 - App Service reachable privately via Private Endpoint from Application Gateway subnet
 - Key Vault/Redis/PostgreSQL on private networking paths

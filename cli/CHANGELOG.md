@@ -108,6 +108,12 @@
 
 - Rename in-shell update command from `/self-update` to `/update`. The `/update [--check]` command is now the sole in-session update entry point. The startup banner and `/help` listing have been updated accordingly.
 
+- Add hosted endpoint resolution precedence for HTTPS migration:
+
+  - Keep `AGON_API_URL` as the highest-priority runtime override.
+  - Add `AGON_HOSTED_API_URL` (full URL) and `AGON_API_HOSTNAME` (`https://<hostname>`) as hosted defaults.
+  - Preserve legacy fallback behavior for environments not yet migrated to hostname-based HTTPS.
+
 ## 0.1.14
 
 ### Patch Changes

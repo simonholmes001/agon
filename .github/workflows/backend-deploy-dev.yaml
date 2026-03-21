@@ -11,9 +11,16 @@ name: Backend Deploy (Dev)
     types: [completed]
     branches: [main]
   workflow_dispatch:
+    inputs:
+      force_without_infra_success:
+        description: 'Allow manual backend deploy without a successful Infrastructure Deploy (Dev) run for this exact commit SHA.'
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
+  actions: read
   id-token: write
   attestations: write
 
@@ -42,6 +49,8 @@ jobs:
       - name: Guard deploy ordering
         id: guard
         shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           if [ "${{ github.event_name }}" = "workflow_run" ]; then
@@ -58,6 +67,27 @@ jobs:
               echo "Skipping push-triggered backend deploy because infrastructure changed in the same push."
               echo "Backend deploy will run automatically after successful Infrastructure Deploy via workflow_run."
               exit 0
+            fi
+          fi
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            FORCE_WITHOUT_INFRA_SUCCESS=$(jq -r '.inputs.force_without_infra_success // "false"' "$GITHUB_EVENT_PATH")
+            INFRA_RUNS_URL="https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/infrastructure-deploy-dev.yaml/runs?head_sha=${GITHUB_SHA}&branch=${GITHUB_REF_NAME}&status=completed&per_page=20"
+
+            INFRA_SUCCESS_COUNT=$(curl --silent --show-error --fail \
+              -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+              -H "Accept: application/vnd.github+json" \
+              "${INFRA_RUNS_URL}" \
+              | jq '[.workflow_runs[] | select(.conclusion == "success")] | length')
+
+            if [ "${INFRA_SUCCESS_COUNT}" -eq 0 ]; then
+              if [ "${FORCE_WITHOUT_INFRA_SUCCESS}" = "true" ]; then
+                echo "::warning::Manual override enabled. Proceeding without a successful Infrastructure Deploy (Dev) run for SHA ${GITHUB_SHA} on branch ${GITHUB_REF_NAME}."
+              else
+                echo "::error::Manual backend deploy is blocked because no successful Infrastructure Deploy (Dev) run exists for SHA ${GITHUB_SHA} on branch ${GITHUB_REF_NAME}."
+                echo "::error::Run Infrastructure Deploy (Dev) first, or rerun this workflow with 'force_without_infra_success=true'."
+                exit 1
+              fi
             fi
           fi
 
@@ -257,59 +287,98 @@ jobs:
       - name: Verify health through Application Gateway
         if: steps.guard.outputs.deploy == 'true'
         uses: azure/cli@9f7ce6f37c31b777ec6c6b6d1dfe7db79f497956 # v2.2.0
+        env:
+          AGON_API_HOSTNAME: ${{ secrets.AGON_API_HOSTNAME }}
         with:
           inlineScript: |
             set -euo pipefail
             APP_RG="${{ steps.app.outputs.app_resource_group }}"
-            AGW_NAME=$(az network application-gateway list \
-              --resource-group "${APP_RG}" \
-              --query "[?tags.environment=='dev' && tags.workload=='agon'].name | [0]" \
-              --output tsv)
-
-            if [ -z "${AGW_NAME}" ] || [ "${AGW_NAME}" = "null" ]; then
+            HEALTH_URL=""
+            if [ -n "${AGON_API_HOSTNAME:-}" ]; then
+              HEALTH_URL="https://${AGON_API_HOSTNAME}/health"
+              echo "Checking health over HTTPS host endpoint: ${HEALTH_URL}"
+            else
+              echo "::warning::AGON_API_HOSTNAME secret not set. Falling back to legacy HTTP IP health check."
               AGW_NAME=$(az network application-gateway list \
                 --resource-group "${APP_RG}" \
-                --query "[?starts_with(name, 'agw-agon-dev-')].name | [0]" \
+                --query "[?tags.environment=='dev' && tags.workload=='agon'].name | [0]" \
                 --output tsv)
+
+              if [ -z "${AGW_NAME}" ] || [ "${AGW_NAME}" = "null" ]; then
+                AGW_NAME=$(az network application-gateway list \
+                  --resource-group "${APP_RG}" \
+                  --query "[?starts_with(name, 'agw-agon-dev-')].name | [0]" \
+                  --output tsv)
+              fi
+
+              if [ -z "${AGW_NAME}" ] || [ "${AGW_NAME}" = "null" ]; then
+                echo "Failed to resolve Application Gateway in ${APP_RG}."
+                exit 1
+              fi
+
+              AGW_PIP_ID=$(az network application-gateway show \
+                --resource-group "${APP_RG}" \
+                --name "${AGW_NAME}" \
+                --query "frontendIPConfigurations[0].publicIPAddress.id" \
+                --output tsv)
+
+              if [ -z "${AGW_PIP_ID}" ] || [ "${AGW_PIP_ID}" = "null" ]; then
+                echo "Failed to resolve Application Gateway public IP reference."
+                exit 1
+              fi
+
+              AGW_IP=$(az network public-ip show \
+                --ids "${AGW_PIP_ID}" \
+                --query ipAddress \
+                --output tsv)
+
+              if [ -z "${AGW_IP}" ] || [ "${AGW_IP}" = "null" ]; then
+                echo "Failed to resolve Application Gateway public IP."
+                exit 1
+              fi
+
+              HEALTH_URL="http://${AGW_IP}/health"
+              echo "Checking health at ${HEALTH_URL}"
             fi
-
-            if [ -z "${AGW_NAME}" ] || [ "${AGW_NAME}" = "null" ]; then
-              echo "Failed to resolve Application Gateway in ${APP_RG}."
-              exit 1
-            fi
-
-            AGW_PIP_ID=$(az network application-gateway show \
-              --resource-group "${APP_RG}" \
-              --name "${AGW_NAME}" \
-              --query "frontendIPConfigurations[0].publicIPAddress.id" \
-              --output tsv)
-
-            if [ -z "${AGW_PIP_ID}" ] || [ "${AGW_PIP_ID}" = "null" ]; then
-              echo "Failed to resolve Application Gateway public IP reference."
-              exit 1
-            fi
-
-            AGW_IP=$(az network public-ip show \
-              --ids "${AGW_PIP_ID}" \
-              --query ipAddress \
-              --output tsv)
-
-            if [ -z "${AGW_IP}" ] || [ "${AGW_IP}" = "null" ]; then
-              echo "Failed to resolve Application Gateway public IP."
-              exit 1
-            fi
-
-            echo "Checking health at http://${AGW_IP}/health"
 
             for i in {1..30}; do
-              STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://${AGW_IP}/health" || true)
+              STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${HEALTH_URL}" || true)
               if [ "${STATUS}" = "200" ]; then
                 echo "Backend is healthy via Application Gateway."
-                exit 0
+                break
               fi
               echo "Attempt ${i}/30: status=${STATUS}, waiting..."
               sleep 20
             done
 
-            echo "Backend failed health check through Application Gateway."
-            exit 1
+            if [ "${STATUS}" != "200" ]; then
+              echo "Backend failed health check through Application Gateway."
+              exit 1
+            fi
+
+            if [ -n "${AGON_API_HOSTNAME:-}" ]; then
+              HTTP_HEALTH_URL="http://${AGON_API_HOSTNAME}/health"
+              EXPECTED_REDIRECT_PREFIX="https://${AGON_API_HOSTNAME}/"
+              echo "Validating HTTP to HTTPS redirect behavior at ${HTTP_HEALTH_URL}"
+
+              REDIRECT_OK="false"
+              for i in {1..15}; do
+                RESPONSE=$(curl -s -o /dev/null -w "%{http_code} %{redirect_url}" "${HTTP_HEALTH_URL}" || true)
+                REDIRECT_STATUS=$(printf "%s" "${RESPONSE}" | awk '{print $1}')
+                REDIRECT_URL=$(printf "%s" "${RESPONSE}" | cut -d' ' -f2-)
+
+                if [[ "${REDIRECT_STATUS}" =~ ^30[1278]$ ]] && [[ "${REDIRECT_URL}" == ${EXPECTED_REDIRECT_PREFIX}* ]]; then
+                  REDIRECT_OK="true"
+                  echo "HTTP redirect verified: ${REDIRECT_STATUS} -> ${REDIRECT_URL}"
+                  break
+                fi
+
+                echo "Redirect attempt ${i}/15: status=${REDIRECT_STATUS}, location=${REDIRECT_URL}"
+                sleep 10
+              done
+
+              if [ "${REDIRECT_OK}" != "true" ]; then
+                echo "HTTP to HTTPS redirect validation failed for ${HTTP_HEALTH_URL}."
+                exit 1
+              fi
+            fi

@@ -74,6 +74,12 @@ param appGatewaySslCertificatePfxBase64 string = ''
 @secure()
 param appGatewaySslCertificatePassword string = ''
 
+@description('Optional public DNS host name for the Application Gateway HTTPS listener (for example: api-dev.example.com).')
+param appGatewayPublicHostName string = ''
+
+@description('Predefined Application Gateway TLS policy name used when HTTPS listener is enabled.')
+param appGatewaySslPolicyName string = 'AppGwSslPolicy20220101S'
+
 @description('App Service VNet integration subnet resource ID.')
 param appSubnetId string
 
@@ -149,6 +155,12 @@ var httpRedirectRuleName = 'rule-http-redirect'
 var httpToHttpsRedirectName = 'redirect-http-to-https'
 var appGatewaySslCertificateName = 'agw-cert'
 var enableHttpsListener = !empty(appGatewaySslCertificatePfxBase64) && !empty(appGatewaySslCertificatePassword)
+var hasPublicHostName = !empty(appGatewayPublicHostName)
+var httpsListenerAdditionalProperties = hasPublicHostName
+  ? {
+      hostName: appGatewayPublicHostName
+    }
+  : {}
 var normalizedAppGatewaySkuTier = toLower(appGatewaySkuTier)
 var isModernAppGatewaySku = endsWith(normalizedAppGatewaySkuTier, '_v2')
 var isLegacyV1Sku = !isModernAppGatewaySku
@@ -217,18 +229,21 @@ var httpListeners = enableHttpsListener
       }
       {
         name: httpsListenerName
-        properties: {
-          frontendIPConfiguration: {
-            id: resourceId('Microsoft.Network/applicationGateways/frontendIPConfigurations', appGatewayName, frontendIpConfigName)
-          }
-          frontendPort: {
-            id: resourceId('Microsoft.Network/applicationGateways/frontendPorts', appGatewayName, frontendHttpsPortName)
-          }
-          protocol: 'Https'
-          sslCertificate: {
-            id: resourceId('Microsoft.Network/applicationGateways/sslCertificates', appGatewayName, appGatewaySslCertificateName)
-          }
-        }
+        properties: union(
+          {
+            frontendIPConfiguration: {
+              id: resourceId('Microsoft.Network/applicationGateways/frontendIPConfigurations', appGatewayName, frontendIpConfigName)
+            }
+            frontendPort: {
+              id: resourceId('Microsoft.Network/applicationGateways/frontendPorts', appGatewayName, frontendHttpsPortName)
+            }
+            protocol: 'Https'
+            sslCertificate: {
+              id: resourceId('Microsoft.Network/applicationGateways/sslCertificates', appGatewayName, appGatewaySslCertificateName)
+            }
+          },
+          httpsListenerAdditionalProperties
+        )
       }
     ]
   : [
@@ -589,7 +604,15 @@ var appGatewayAutoscaleProperties = endsWith(normalizedAppGatewaySkuTier, '_v2')
       }
     }
   : {}
-var appGatewayProperties = union(appGatewayBaseProperties, appGatewayAutoscaleProperties)
+var appGatewaySslPolicyProperties = enableHttpsListener
+  ? {
+      sslPolicy: {
+        policyType: 'Predefined'
+        policyName: appGatewaySslPolicyName
+      }
+    }
+  : {}
+var appGatewayProperties = union(appGatewayBaseProperties, appGatewayAutoscaleProperties, appGatewaySslPolicyProperties)
 
 resource appGatewayPublicIp 'Microsoft.Network/publicIPAddresses@2023-09-01' = {
   name: appGatewayPublicIpName
@@ -609,6 +632,26 @@ resource appGateway 'Microsoft.Network/applicationGateways@2023-09-01' = {
   location: location
   tags: tags
   properties: appGatewayProperties
+}
+
+resource appGatewayDiagnosticSettings 'Microsoft.Insights/diagnosticSettings@2021-05-01-preview' = {
+  name: 'diag-${appGatewayName}'
+  scope: appGateway
+  properties: {
+    workspaceId: logAnalytics.id
+    logs: [
+      {
+        categoryGroup: 'allLogs'
+        enabled: true
+      }
+    ]
+    metrics: [
+      {
+        category: 'AllMetrics'
+        enabled: true
+      }
+    ]
+  }
 }
 
 resource actionGroup 'Microsoft.Insights/actionGroups@2023-01-01' = {
@@ -670,3 +713,6 @@ output appServiceDefaultHostName string = appService.properties.defaultHostName
 output appPrincipalId string = appService.identity.principalId
 output appGatewayName string = appGateway.name
 output appGatewayPublicIpAddress string = appGatewayPublicIp.properties.ipAddress
+output appGatewayPreferredApiUrl string = enableHttpsListener && hasPublicHostName
+  ? 'https://${appGatewayPublicHostName}'
+  : 'http://${appGatewayPublicIp.properties.ipAddress}'

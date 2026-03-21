@@ -131,6 +131,12 @@ param appGatewaySslCertificatePfxBase64 string = ''
 @secure()
 param appGatewaySslCertificatePassword string = ''
 
+@description('Optional public DNS host name for the Application Gateway HTTPS listener (for example: api-dev.example.com).')
+param appGatewayPublicHostName string = ''
+
+@description('Predefined Application Gateway TLS policy name used when HTTPS listener is enabled.')
+param appGatewaySslPolicyName string = 'AppGwSslPolicy20220101S'
+
 var commonTags = {
   environment: environment
   workload: workloadName
@@ -227,6 +233,8 @@ module appEdge './modules/app-edge-dev.bicep' = {
     jwtAudience: jwtAudience
     appGatewaySslCertificatePfxBase64: appGatewaySslCertificatePfxBase64
     appGatewaySslCertificatePassword: appGatewaySslCertificatePassword
+    appGatewayPublicHostName: appGatewayPublicHostName
+    appGatewaySslPolicyName: appGatewaySslPolicyName
     appSubnetId: network.outputs.appSubnetId
     appGatewaySubnetId: isParallelAppGatewayDeployment
       ? network.outputs.appGatewayV1SubnetId
@@ -303,6 +311,7 @@ output dataResourceGroup string = rgData.name
 output appServiceName string = appEdge.outputs.appServiceName
 output appServiceDefaultHostName string = appEdge.outputs.appServiceDefaultHostName
 output appGatewayPublicIpAddress string = appEdge.outputs.appGatewayPublicIpAddress
+output appGatewayPreferredApiUrl string = appEdge.outputs.appGatewayPreferredApiUrl
 output keyVaultName string = data.outputs.keyVaultName
 output postgresqlServerName string = data.outputs.postgresqlServerName
 output redisCacheName string = data.outputs.redisCacheName

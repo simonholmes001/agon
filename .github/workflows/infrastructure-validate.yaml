@@ -55,6 +55,9 @@ jobs:
         shell: bash
         env:
           AZURE_POSTGRES_ADMIN_PASSWORD: ${{ secrets.AZURE_POSTGRES_ADMIN_PASSWORD }}
+          APP_GATEWAY_SSL_CERTIFICATE_PFX_BASE64: ${{ secrets.APP_GATEWAY_SSL_CERTIFICATE_PFX_BASE64 }}
+          APP_GATEWAY_SSL_CERTIFICATE_PASSWORD: ${{ secrets.APP_GATEWAY_SSL_CERTIFICATE_PASSWORD }}
+          AGON_API_HOSTNAME: ${{ secrets.AGON_API_HOSTNAME }}
           BLOB_STORAGE_CONNECTION_STRING: ${{ secrets.BLOB_STORAGE_CONNECTION_STRING }}
         run: |
           set -euo pipefail
@@ -64,6 +67,21 @@ jobs:
           fi
           if [ -z "${BLOB_STORAGE_CONNECTION_STRING:-}" ]; then
             echo "::error::Missing BLOB_STORAGE_CONNECTION_STRING secret."
+            exit 1
+          fi
+
+          if [ -n "${APP_GATEWAY_SSL_CERTIFICATE_PFX_BASE64:-}" ] && [ -z "${APP_GATEWAY_SSL_CERTIFICATE_PASSWORD:-}" ]; then
+            echo "::error::Missing APP_GATEWAY_SSL_CERTIFICATE_PASSWORD while APP_GATEWAY_SSL_CERTIFICATE_PFX_BASE64 is set."
+            exit 1
+          fi
+
+          if [ -n "${APP_GATEWAY_SSL_CERTIFICATE_PASSWORD:-}" ] && [ -z "${APP_GATEWAY_SSL_CERTIFICATE_PFX_BASE64:-}" ]; then
+            echo "::error::Missing APP_GATEWAY_SSL_CERTIFICATE_PFX_BASE64 while APP_GATEWAY_SSL_CERTIFICATE_PASSWORD is set."
+            exit 1
+          fi
+
+          if [ -n "${APP_GATEWAY_SSL_CERTIFICATE_PFX_BASE64:-}" ] && [ -z "${AGON_API_HOSTNAME:-}" ]; then
+            echo "::error::Missing AGON_API_HOSTNAME. HTTPS listener what-if requires a public hostname for certificate validation."
             exit 1
           fi
 
@@ -93,6 +111,10 @@ jobs:
         uses: azure/cli@9f7ce6f37c31b777ec6c6b6d1dfe7db79f497956 # v2.2.0
         env:
           AZURE_POSTGRES_ADMIN_PASSWORD: ${{ secrets.AZURE_POSTGRES_ADMIN_PASSWORD }}
+          APP_GATEWAY_SSL_CERTIFICATE_PFX_BASE64: ${{ secrets.APP_GATEWAY_SSL_CERTIFICATE_PFX_BASE64 }}
+          APP_GATEWAY_SSL_CERTIFICATE_PASSWORD: ${{ secrets.APP_GATEWAY_SSL_CERTIFICATE_PASSWORD }}
+          AGON_API_HOSTNAME: ${{ secrets.AGON_API_HOSTNAME }}
+          APP_GATEWAY_SSL_POLICY_NAME: ${{ secrets.APP_GATEWAY_SSL_POLICY_NAME }}
           BLOB_STORAGE_CONNECTION_STRING: ${{ secrets.BLOB_STORAGE_CONNECTION_STRING }}
         with:
           inlineScript: |
@@ -103,4 +125,8 @@ jobs:
               --template-file infrastructure/bicep/main.bicep \
               --parameters @infrastructure/bicep/parameters/dev.parameters.json \
               --parameters postgresAdminPassword="$AZURE_POSTGRES_ADMIN_PASSWORD" \
+              --parameters appGatewaySslCertificatePfxBase64="${APP_GATEWAY_SSL_CERTIFICATE_PFX_BASE64:-}" \
+              --parameters appGatewaySslCertificatePassword="${APP_GATEWAY_SSL_CERTIFICATE_PASSWORD:-}" \
+              --parameters appGatewayPublicHostName="${AGON_API_HOSTNAME:-}" \
+              --parameters appGatewaySslPolicyName="${APP_GATEWAY_SSL_POLICY_NAME:-AppGwSslPolicy20220101S}" \
               --parameters blobStorageConnectionString="${BLOB_STORAGE_CONNECTION_STRING:-}"
