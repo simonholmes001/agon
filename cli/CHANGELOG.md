@@ -1,5 +1,11 @@
 # @agon_agents/cli
 
+## 0.4.2
+
+### Patch Changes
+
+- Align hosted endpoint resolution for HTTPS edge migration by adding `AGON_HOSTED_API_URL` and `AGON_API_HOSTNAME` fallbacks, while preserving `AGON_API_URL` as the highest-priority override.
+
 ## 0.4.1
 
 ### Patch Changes
