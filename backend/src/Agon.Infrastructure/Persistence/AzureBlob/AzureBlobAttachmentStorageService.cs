@@ -13,6 +13,8 @@ public sealed class AzureBlobAttachmentStorageService : IAttachmentStorageServic
 {
     private readonly BlobContainerClient _container;
     private readonly StorageSharedKeyCredential? _sharedKeyCredential;
+    private readonly SemaphoreSlim _containerInitializationLock = new(1, 1);
+    private int _containerInitialized;
 
     public AzureBlobAttachmentStorageService(string connectionString, string containerName)
     {
@@ -26,7 +28,6 @@ public sealed class AzureBlobAttachmentStorageService : IAttachmentStorageServic
         }
 
         _container = new BlobContainerClient(connectionString, containerName);
-        _container.CreateIfNotExists(PublicAccessType.None);
         _sharedKeyCredential = TryBuildSharedKey(connectionString);
     }
 
@@ -36,6 +37,8 @@ public sealed class AzureBlobAttachmentStorageService : IAttachmentStorageServic
         string contentType,
         CancellationToken cancellationToken = default)
     {
+        await EnsureContainerExistsAsync(cancellationToken);
+
         var blobClient = _container.GetBlobClient(blobName);
         await blobClient.UploadAsync(
             content,
@@ -52,6 +55,30 @@ public sealed class AzureBlobAttachmentStorageService : IAttachmentStorageServic
         var accessUrl = GenerateReadOnlySasUrl(blobClient) ?? blobUri;
 
         return new AttachmentUploadResult(blobName, blobUri, accessUrl);
+    }
+
+    private async Task EnsureContainerExistsAsync(CancellationToken cancellationToken)
+    {
+        if (Volatile.Read(ref _containerInitialized) == 1)
+        {
+            return;
+        }
+
+        await _containerInitializationLock.WaitAsync(cancellationToken);
+        try
+        {
+            if (_containerInitialized == 1)
+            {
+                return;
+            }
+
+            await _container.CreateIfNotExistsAsync(PublicAccessType.None, cancellationToken: cancellationToken);
+            Interlocked.Exchange(ref _containerInitialized, 1);
+        }
+        finally
+        {
+            _containerInitializationLock.Release();
+        }
     }
 
     private string? GenerateReadOnlySasUrl(BlobClient blobClient)

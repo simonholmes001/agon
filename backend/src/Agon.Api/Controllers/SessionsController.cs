@@ -20,6 +20,10 @@ public class SessionsController : ControllerBase
 {
     private const long MaxAttachmentSizeBytes = 25 * 1024 * 1024; // 25 MB
     private const int AttachmentPreviewChars = 500;
+    private const string AttachmentStorageNotConfiguredCode = "ATTACHMENT_STORAGE_NOT_CONFIGURED";
+    private const string AttachmentStorageUnavailableCode = "ATTACHMENT_STORAGE_UNAVAILABLE";
+    private const string AttachmentMetadataNotConfiguredCode = "ATTACHMENT_METADATA_NOT_CONFIGURED";
+    private const string AttachmentMetadataUnavailableCode = "ATTACHMENT_METADATA_UNAVAILABLE";
 
     private readonly ISessionService _sessionService;
     private readonly IAttachmentStorageService? _attachmentStorage;
@@ -363,10 +367,10 @@ public class SessionsController : ControllerBase
     {
         if (_attachmentStorage is null)
         {
-            return StatusCode(StatusCodes.Status503ServiceUnavailable, new
-            {
-                error = "Attachment storage is not configured."
-            });
+            return AttachmentServiceUnavailable(
+                AttachmentStorageNotConfiguredCode,
+                "Attachment storage is not configured.",
+                "Set ConnectionStrings:BlobStorage and restart the backend.");
         }
 
         if (request.File is null || request.File.Length == 0)
@@ -399,18 +403,59 @@ public class SessionsController : ControllerBase
         }
 
         var blobName = $"{id:N}/{DateTimeOffset.UtcNow:yyyyMMddHHmmssfff}-{Guid.NewGuid():N}-{safeFileName}";
-        await using var uploadStream = new MemoryStream(fileBytes, writable: false);
-        var uploaded = await _attachmentStorage.UploadAsync(
-            blobName,
-            uploadStream,
-            contentType,
-            cancellationToken);
+        AttachmentUploadResult uploaded;
+        try
+        {
+            await using var uploadStream = new MemoryStream(fileBytes, writable: false);
+            uploaded = await _attachmentStorage.UploadAsync(
+                blobName,
+                uploadStream,
+                contentType,
+                cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(
+                ex,
+                "Attachment upload failed for session {SessionId}. ErrorCode={ErrorCode}, FileName={FileName}, ContentType={ContentType}, SizeBytes={SizeBytes}",
+                id,
+                AttachmentStorageUnavailableCode,
+                safeFileName,
+                contentType,
+                request.File.Length);
+            return AttachmentServiceUnavailable(
+                AttachmentStorageUnavailableCode,
+                "Attachment storage is temporarily unavailable.",
+                "Verify blob storage connectivity and retry.");
+        }
 
-        var extractedText = await _attachmentTextExtractor.ExtractAsync(
-            fileBytes,
-            safeFileName,
-            contentType,
-            cancellationToken);
+        string? extractedText = null;
+        try
+        {
+            extractedText = await _attachmentTextExtractor.ExtractAsync(
+                fileBytes,
+                safeFileName,
+                contentType,
+                cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Attachment text extraction failed for session {SessionId}. Category=AttachmentExtractionFailed, FileName={FileName}, ContentType={ContentType}, SizeBytes={SizeBytes}",
+                id,
+                safeFileName,
+                contentType,
+                request.File.Length);
+        }
 
         var attachment = new SessionAttachment(
             AttachmentId: Guid.NewGuid(),
@@ -432,11 +477,32 @@ public class SessionsController : ControllerBase
         }
         catch (InvalidOperationException ex)
         {
-            _logger.LogWarning(ex, "Attachment metadata persistence is not configured.");
-            return StatusCode(StatusCodes.Status503ServiceUnavailable, new
-            {
-                error = "Attachment metadata persistence is not configured."
-            });
+            _logger.LogWarning(
+                ex,
+                "Attachment metadata persistence is not configured for session {SessionId}. ErrorCode={ErrorCode}",
+                id,
+                AttachmentMetadataNotConfiguredCode);
+            return AttachmentServiceUnavailable(
+                AttachmentMetadataNotConfiguredCode,
+                "Attachment metadata persistence is not configured.",
+                "Enable attachment repository persistence and retry.");
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(
+                ex,
+                "Attachment metadata persistence failed for session {SessionId}. ErrorCode={ErrorCode}, FileName={FileName}",
+                id,
+                AttachmentMetadataUnavailableCode,
+                safeFileName);
+            return AttachmentServiceUnavailable(
+                AttachmentMetadataUnavailableCode,
+                "Attachment metadata persistence is temporarily unavailable.",
+                "Check database connectivity and retry.");
         }
 
         _logger.LogInformation(
@@ -610,6 +676,16 @@ public class SessionsController : ControllerBase
             sb.AppendLine($"  Status: {assumption.Status} | Validation: {assumption.ValidationStep}\n");
         }
         return sb.ToString();
+    }
+
+    private ObjectResult AttachmentServiceUnavailable(string errorCode, string message, string hint)
+    {
+        return StatusCode(StatusCodes.Status503ServiceUnavailable, new
+        {
+            errorCode,
+            error = message,
+            hint
+        });
     }
 
     private static SessionResponse MapToResponse(Application.Models.SessionState sessionState)
