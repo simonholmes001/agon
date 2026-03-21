@@ -767,6 +767,80 @@ public class OrchestratorTests
     }
 
     [Fact]
+    public async Task RunModeratorAsync_WithDirectAnswerStatus_ShouldNotAdvanceOrIncrement()
+    {
+        var runner = Substitute.For<IAgentRunner>();
+        var moderatorResponse = new AgentResponse(
+            AgentId.Moderator,
+            "STATUS: DIRECT_ANSWER\nAgon can help with planning, coding, writing, and analysis.",
+            null,
+            70,
+            false,
+            null);
+
+        runner.RunModeratorAsync(Arg.Any<SessionState>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(moderatorResponse));
+
+        var sessionService = StubSessionService();
+        var orchestrator = BuildOrchestrator(
+            runner: runner,
+            sessionService: sessionService);
+
+        var state = BuildState(SessionPhase.Clarification);
+        state.ClarificationRoundCount = 2;
+
+        await orchestrator.RunModeratorAsync(state, CancellationToken.None);
+
+        state.ClarificationRoundCount.Should().Be(2);
+        await sessionService.DidNotReceive().AdvancePhaseAsync(
+            state,
+            SessionPhase.AnalysisRound,
+            Arg.Any<CancellationToken>());
+        await sessionService.DidNotReceive().RecordRoundSnapshotAsync(
+            state,
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task RunModeratorAsync_WithReadyButSimpleMetaQuery_ShouldSuppressDebateChain()
+    {
+        var runner = Substitute.For<IAgentRunner>();
+        var moderatorResponse = new AgentResponse(
+            AgentId.Moderator,
+            "STATUS: READY\nAgon can help with planning, coding, writing, and analysis.",
+            null,
+            80,
+            false,
+            null);
+
+        runner.RunModeratorAsync(Arg.Any<SessionState>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(moderatorResponse));
+
+        var sessionService = StubSessionService();
+        var orchestrator = BuildOrchestrator(
+            runner: runner,
+            sessionService: sessionService);
+
+        var state = BuildState(SessionPhase.Clarification);
+        state.ClarificationRoundCount = 1;
+        state.UserMessages.Add(new UserMessage(
+            "How can Agon help me?",
+            DateTimeOffset.UtcNow,
+            1));
+
+        await orchestrator.RunModeratorAsync(state, CancellationToken.None);
+
+        state.ClarificationRoundCount.Should().Be(1);
+        await sessionService.DidNotReceive().AdvancePhaseAsync(
+            state,
+            SessionPhase.AnalysisRound,
+            Arg.Any<CancellationToken>());
+        await sessionService.DidNotReceive().RecordRoundSnapshotAsync(
+            state,
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task RunModeratorAsync_ReadyOnFirstRoundWithoutUserMessages_ShouldNotAdvance()
     {
         var runner = Substitute.For<IAgentRunner>();
