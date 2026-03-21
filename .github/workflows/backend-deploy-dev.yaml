@@ -364,8 +364,12 @@ jobs:
               REDIRECT_OK="false"
               for i in {1..15}; do
                 RESPONSE=$(curl -s -o /dev/null -w "%{http_code} %{redirect_url}" "${HTTP_HEALTH_URL}" || true)
-                REDIRECT_STATUS=$(printf "%s" "${RESPONSE}" | awk '{print $1}')
-                REDIRECT_URL=$(printf "%s" "${RESPONSE}" | cut -d' ' -f2-)
+                REDIRECT_STATUS="${RESPONSE%% *}"
+                if [ "${RESPONSE}" = "${REDIRECT_STATUS}" ]; then
+                  REDIRECT_URL=""
+                else
+                  REDIRECT_URL="${RESPONSE#* }"
+                fi
 
                 if [[ "${REDIRECT_STATUS}" =~ ^30[1278]$ ]] && [[ "${REDIRECT_URL}" == ${EXPECTED_REDIRECT_PREFIX}* ]]; then
                   REDIRECT_OK="true"
