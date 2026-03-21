@@ -1,4 +1,5 @@
 using Agon.Application.Interfaces;
+using Azure.Core;
 using Azure.Storage;
 using Azure.Storage.Blobs;
 using Azure.Storage.Blobs.Models;
@@ -29,6 +30,30 @@ public sealed class AzureBlobAttachmentStorageService : IAttachmentStorageServic
 
         _container = new BlobContainerClient(connectionString, containerName);
         _sharedKeyCredential = TryBuildSharedKey(connectionString);
+    }
+
+    public AzureBlobAttachmentStorageService(Uri blobServiceUri, string containerName, TokenCredential credential)
+    {
+        if (blobServiceUri is null)
+        {
+            throw new ArgumentNullException(nameof(blobServiceUri));
+        }
+        if (!blobServiceUri.IsAbsoluteUri)
+        {
+            throw new ArgumentException("Blob service URI must be absolute.", nameof(blobServiceUri));
+        }
+        if (string.IsNullOrWhiteSpace(containerName))
+        {
+            throw new ArgumentException("Blob container name is required.", nameof(containerName));
+        }
+        if (credential is null)
+        {
+            throw new ArgumentNullException(nameof(credential));
+        }
+
+        var blobServiceClient = new BlobServiceClient(blobServiceUri, credential);
+        _container = blobServiceClient.GetBlobContainerClient(containerName);
+        _sharedKeyCredential = null;
     }
 
     public async Task<AttachmentUploadResult> UploadAsync(

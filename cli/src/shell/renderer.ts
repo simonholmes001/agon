@@ -56,9 +56,40 @@ export function renderMessagePanel(
   print(border('━'.repeat(78)));
   print(border.bold(title));
   print('');
-  print(renderMarkdown(markdown));
+  print(highlightAttachmentRefs(renderMarkdown(markdown)));
   print(border('━'.repeat(78)));
   print('');
+}
+
+/** Warm amber used as the canonical accent for all attachment token references. */
+const attachmentAccent = chalk.bold.rgb(248, 197, 71);
+
+/**
+ * Regex that matches both Codex-style bracketed tokens and bare file paths:
+ *   Group 1 – `[Image …]`, `[File …]`, `[Attachment …]`
+ *   Group 2 – paths starting with `./`, `../`, or `/` (not `/ ` + space)
+ */
+const attachmentRefPattern = /(\[(?:Image|File|Attachment)\s+[^\]\n]+\])|((?:\.\.?\/|\/(?!\s))[a-zA-Z0-9_\-./?&=#@:+%]+)/gi;
+
+/**
+ * Style a single attachment token (file path or Codex-style image/file
+ * reference) with the canonical attachment accent color.
+ */
+export function styleAttachmentToken(token: string): string {
+  return attachmentAccent(token);
+}
+
+/**
+ * Scan rendered text for attachment references and apply the canonical accent
+ * color to each match. Recognises:
+ *   - Codex-style bracketed tokens: `[Image ref]`, `[File ref]`, `[Attachment ref]`
+ *   - File-system paths beginning with `./`, `../`, or `/` (not `/ `)
+ *
+ * Intended as a post-processing step on rendered message-panel text so that
+ * attachment references are immediately visually distinct from surrounding prose.
+ */
+export function highlightAttachmentRefs(text: string): string {
+  return text.replace(attachmentRefPattern, (match) => styleAttachmentToken(match));
 }
 
 export interface PromptFrameContext {
@@ -186,6 +217,16 @@ export function getVisiblePromptValue(value: string, maxInputChars: number): str
   }
 
   return `…${value.slice(-(maxInputChars - 1))}`;
+}
+
+export function formatElapsedTimer(startMs: number): string {
+  const elapsed = Math.floor((Date.now() - startMs) / 1000);
+  return `[${elapsed}s]`;
+}
+
+/** Returns the standard "Ctrl+C to interrupt" hint shown during running operations. */
+export function buildInterruptHint(): string {
+  return chalk.dim('Ctrl+C to interrupt');
 }
 
 export function buildShimmerText(text: string, tick: number): string {

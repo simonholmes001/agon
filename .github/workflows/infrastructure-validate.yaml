@@ -33,6 +33,7 @@ jobs:
             az bicep build --file infrastructure/bicep/modules/data-dev.bicep
             az bicep build --file infrastructure/bicep/modules/app-edge-dev.bicep
             az bicep build --file infrastructure/bicep/modules/keyvault-access-dev.bicep
+            az bicep build --file infrastructure/bicep/modules/storage-access-dev.bicep
 
   what-if-dev:
     name: Dev What-If (subscription scope)

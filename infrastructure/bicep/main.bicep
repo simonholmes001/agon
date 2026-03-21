@@ -197,6 +197,7 @@ module data './modules/data-dev.bicep' = {
     keyVaultPrivateDnsZoneId: network.outputs.keyVaultPrivateDnsZoneId
     redisPrivateDnsZoneId: network.outputs.redisPrivateDnsZoneId
     cognitiveServicesPrivateDnsZoneId: network.outputs.cognitiveServicesPrivateDnsZoneId
+    blobPrivateDnsZoneId: network.outputs.blobPrivateDnsZoneId
     openAiApiKey: openAiApiKey
     anthropicApiKey: anthropicApiKey
     googleApiKey: googleApiKey
@@ -242,6 +243,8 @@ module appEdge './modules/app-edge-dev.bicep' = {
     attachmentContainerName: attachmentContainerName
     documentIntelligenceEndpoint: data.outputs.documentIntelligenceEndpoint
     documentIntelligenceModelId: documentIntelligenceModelId
+    attachmentStorageBlobEndpoint: data.outputs.attachmentStorageBlobEndpoint
+    attachmentContainerName: data.outputs.attachmentContainerName
   }
 }
 
@@ -260,6 +263,16 @@ module documentIntelligenceAccess './modules/document-intelligence-access-dev.bi
   scope: rgData
   params: {
     documentIntelligenceAccountName: data.outputs.documentIntelligenceAccountName
+    principalId: appEdge.outputs.appPrincipalId
+    principalDisplayNameSeed: appServiceName
+  }
+}
+
+module storageAccess './modules/storage-access-dev.bicep' = {
+  name: 'storage-access-dev'
+  scope: rgData
+  params: {
+    storageAccountName: data.outputs.attachmentStorageAccountName
     principalId: appEdge.outputs.appPrincipalId
     principalDisplayNameSeed: appServiceName
   }
@@ -295,3 +308,7 @@ output keyVaultName string = data.outputs.keyVaultName
 output postgresqlServerName string = data.outputs.postgresqlServerName
 output redisCacheName string = data.outputs.redisCacheName
 output documentIntelligenceAccountName string = data.outputs.documentIntelligenceAccountName
+output attachmentStorageAccountName string = data.outputs.attachmentStorageAccountName
+output attachmentStorageAccountId string = data.outputs.attachmentStorageAccountId
+output attachmentStorageBlobEndpoint string = data.outputs.attachmentStorageBlobEndpoint
+output attachmentContainerName string = data.outputs.attachmentContainerName
