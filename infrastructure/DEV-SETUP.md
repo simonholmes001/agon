@@ -112,6 +112,7 @@ Required:
 - `AZURE_TENANT_ID`
 - `AZURE_SUBSCRIPTION_ID`
 - `AZURE_POSTGRES_ADMIN_PASSWORD`
+- `BLOB_STORAGE_CONNECTION_STRING`
 
 Required for backend container deployment (Docker Hub):
 
@@ -125,6 +126,10 @@ Optional (written into Key Vault during deploy):
 - `CLAUDE_KEY`
 - `GEMINI_KEY`
 - `DEEPSEEK_KEY`
+
+Notes:
+- `BLOB_STORAGE_CONNECTION_STRING` is now deployed to Key Vault and referenced by App Service as `BLOB_STORAGE_CONNECTION_STRING`.
+- Attachment container remains controlled via `Storage__AttachmentContainer` (default: `session-attachments`).
 
 ## Where to Find IDs in Azure Portal
 

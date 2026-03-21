@@ -54,10 +54,15 @@ jobs:
         shell: bash
         env:
           AZURE_POSTGRES_ADMIN_PASSWORD: ${{ secrets.AZURE_POSTGRES_ADMIN_PASSWORD }}
+          BLOB_STORAGE_CONNECTION_STRING: ${{ secrets.BLOB_STORAGE_CONNECTION_STRING }}
         run: |
           set -euo pipefail
           if [ -z "${AZURE_POSTGRES_ADMIN_PASSWORD:-}" ]; then
             echo "::error::Missing AZURE_POSTGRES_ADMIN_PASSWORD secret."
+            exit 1
+          fi
+          if [ -z "${BLOB_STORAGE_CONNECTION_STRING:-}" ]; then
+            echo "::error::Missing BLOB_STORAGE_CONNECTION_STRING secret."
             exit 1
           fi
 
@@ -87,6 +92,7 @@ jobs:
         uses: azure/cli@9f7ce6f37c31b777ec6c6b6d1dfe7db79f497956 # v2.2.0
         env:
           AZURE_POSTGRES_ADMIN_PASSWORD: ${{ secrets.AZURE_POSTGRES_ADMIN_PASSWORD }}
+          BLOB_STORAGE_CONNECTION_STRING: ${{ secrets.BLOB_STORAGE_CONNECTION_STRING }}
         with:
           inlineScript: |
             az account show --query "{name:name, subscriptionId:id}" -o table
@@ -95,4 +101,5 @@ jobs:
               --location swedencentral \
               --template-file infrastructure/bicep/main.bicep \
               --parameters @infrastructure/bicep/parameters/dev.parameters.json \
-              --parameters postgresAdminPassword="$AZURE_POSTGRES_ADMIN_PASSWORD"
+              --parameters postgresAdminPassword="$AZURE_POSTGRES_ADMIN_PASSWORD" \
+              --parameters blobStorageConnectionString="${BLOB_STORAGE_CONNECTION_STRING:-}"
