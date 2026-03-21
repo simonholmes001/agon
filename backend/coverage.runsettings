@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!--
+  Coverlet code coverage settings for the Agon backend test suite.
+  
+  Excludes:
+  - Program.cs: Top-level ASP.NET Core startup/DI wiring. Covered by integration tests
+    but excluded from line-by-line analysis as it is pure composition-root infrastructure.
+  - MafCouncilAgent.cs: Wraps the AIAgent abstract class from Microsoft.Agents.AI.
+    AIAgent cannot be substituted (non-virtual methods) so unit testing via NSubstitute
+    is not feasible. End-to-end agent behaviour is covered by integration tests.
+  - AzureBlobAttachmentStorageService.cs: Requires live Azure Blob Storage. Tested via
+    infrastructure integration tests outside the normal CI unit test run.
+  - Migrations/*.cs: EF Core auto-generated migration scripts. Not suitable for unit testing.
+-->
+<RunSettings>
+  <DataCollectionRunSettings>
+    <DataCollectors>
+      <DataCollector friendlyName="XPlat Code Coverage">
+        <Configuration>
+          <ExcludeByFile>
+            **/src/Agon.Api/Program.cs,
+            **/src/Agon.Infrastructure/Agents/MafCouncilAgent.cs,
+            **/src/Agon.Infrastructure/Persistence/AzureBlob/AzureBlobAttachmentStorageService.cs,
+            **/src/Agon.Infrastructure/Migrations/*.cs
+          </ExcludeByFile>
+          <ExcludeByAttribute>ExcludeFromCodeCoverage,GeneratedCode,CompilerGenerated</ExcludeByAttribute>
+          <Include>[Agon.*]*</Include>
+          <Exclude>[*.Tests]*,[*.Integration.Tests]*</Exclude>
+        </Configuration>
+      </DataCollector>
+    </DataCollectors>
+  </DataCollectionRunSettings>
+</RunSettings>

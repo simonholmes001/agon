@@ -1,14 +1,15 @@
+using System.Diagnostics.CodeAnalysis;
 ﻿using Agon.Infrastructure.Persistence.PostgreSQL;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
-
 namespace Agon.Infrastructure.Migrations
 {
     /// <inheritdoc />
     [DbContext(typeof(AgonDbContext))]
     [Migration("20260316120000_AddSessionRuntimeState")]
+    [ExcludeFromCodeCoverage]
     public partial class AddSessionRuntimeState : Migration
     {
         /// <inheritdoc />

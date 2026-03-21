@@ -2,14 +2,15 @@ using Agon.Infrastructure.Persistence.PostgreSQL;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 
+using System.Diagnostics.CodeAnalysis;
 #nullable disable
-
 namespace Agon.Infrastructure.Migrations;
 
 /// <inheritdoc />
 [DbContext(typeof(AgonDbContext))]
 [Migration("20260316150000_AddSessionAttachments")]
-public partial class AddSessionAttachments : Migration
+[ExcludeFromCodeCoverage]
+    public partial class AddSessionAttachments : Migration
 {
     /// <inheritdoc />
     protected override void Up(MigrationBuilder migrationBuilder)

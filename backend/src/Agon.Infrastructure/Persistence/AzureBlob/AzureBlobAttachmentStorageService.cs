@@ -3,12 +3,14 @@ using Azure.Storage;
 using Azure.Storage.Blobs;
 using Azure.Storage.Blobs.Models;
 using Azure.Storage.Sas;
+using System.Diagnostics.CodeAnalysis;
 
 namespace Agon.Infrastructure.Persistence.AzureBlob;
 
 /// <summary>
 /// Azure Blob Storage implementation for session attachments.
 /// </summary>
+[ExcludeFromCodeCoverage]
 public sealed class AzureBlobAttachmentStorageService : IAttachmentStorageService
 {
     private readonly BlobContainerClient _container;
