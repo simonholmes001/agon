@@ -235,6 +235,7 @@ Notes:
 - `agon --self-update` updates the global CLI install from terminal.
 - `/update` runs the same update flow from inside an active shell session.
 - By default, Agon CLI connects to the hosted backend endpoint (no manual `apiUrl` setup required for end users).
+- Endpoint override precedence is: `AGON_API_URL` (explicit runtime override), then `AGON_HOSTED_API_URL`, then `AGON_API_HOSTNAME` as `https://<hostname>`, then legacy fallback.
 - After successful in-shell update, your current session remains usable; restart later to run the newly installed runtime.
 - On startup, Agon checks npm and alerts when a newer stable version is available.
 

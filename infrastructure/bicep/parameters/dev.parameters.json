@@ -59,6 +59,12 @@
     "authEnabled": {
       "value": false
     },
+    "appGatewayPublicHostName": {
+      "value": ""
+    },
+    "appGatewaySslPolicyName": {
+      "value": "AppGwSslPolicy20220101S"
+    },
     "alertEmail": {
       "value": "simonholmesabc@gmail.com"
     },

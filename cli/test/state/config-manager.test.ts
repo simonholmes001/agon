@@ -34,6 +34,84 @@ describe('ConfigManager', () => {
     });
   });
 
+  describe('hosted endpoint resolution precedence', () => {
+    const originalAgonApiUrl = process.env.AGON_API_URL;
+    const originalHostedApiUrl = process.env.AGON_HOSTED_API_URL;
+    const originalApiHostname = process.env.AGON_API_HOSTNAME;
+
+    const setOrDeleteEnv = (key: 'AGON_API_URL' | 'AGON_HOSTED_API_URL' | 'AGON_API_HOSTNAME', value: string | undefined): void => {
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    };
+
+    beforeEach(() => {
+      delete process.env.AGON_API_URL;
+      delete process.env.AGON_HOSTED_API_URL;
+      delete process.env.AGON_API_HOSTNAME;
+      vi.resetModules();
+    });
+
+    afterEach(() => {
+      setOrDeleteEnv('AGON_API_URL', originalAgonApiUrl);
+      setOrDeleteEnv('AGON_HOSTED_API_URL', originalHostedApiUrl);
+      setOrDeleteEnv('AGON_API_HOSTNAME', originalApiHostname);
+      vi.resetModules();
+    });
+
+    it('should prioritize AGON_API_URL over hosted defaults', async () => {
+      process.env.AGON_API_URL = 'https://override.example.com';
+      process.env.AGON_HOSTED_API_URL = 'https://hosted.example.com';
+      process.env.AGON_API_HOSTNAME = 'api.example.com';
+
+      const module = await import('../../src/state/config-manager.js');
+      const defaults = new module.ConfigManager().getDefaults();
+
+      expect(defaults.apiUrl).toBe('https://override.example.com');
+    });
+
+    it('should use AGON_HOSTED_API_URL when AGON_API_URL is not set', async () => {
+      process.env.AGON_HOSTED_API_URL = 'https://hosted.example.com';
+      process.env.AGON_API_HOSTNAME = 'api.example.com';
+
+      const module = await import('../../src/state/config-manager.js');
+      const defaults = new module.ConfigManager().getDefaults();
+
+      expect(defaults.apiUrl).toBe('https://hosted.example.com');
+    });
+
+    it('should derive HTTPS endpoint from AGON_API_HOSTNAME when hosted URL is not set', async () => {
+      process.env.AGON_API_HOSTNAME = 'api.example.com';
+
+      const module = await import('../../src/state/config-manager.js');
+      const defaults = new module.ConfigManager().getDefaults();
+
+      expect(defaults.apiUrl).toBe('https://api.example.com');
+    });
+
+    it('should normalize AGON_API_HOSTNAME when scheme is included', async () => {
+      process.env.AGON_API_HOSTNAME = 'https://api.example.com/';
+
+      const module = await import('../../src/state/config-manager.js');
+      const defaults = new module.ConfigManager().getDefaults();
+
+      expect(defaults.apiUrl).toBe('https://api.example.com');
+    });
+
+    it('should fall back to legacy hosted URL when hosted environment values are invalid', async () => {
+      process.env.AGON_API_URL = 'not-a-url';
+      process.env.AGON_HOSTED_API_URL = 'still-not-a-url';
+      process.env.AGON_API_HOSTNAME = '%%%';
+
+      const module = await import('../../src/state/config-manager.js');
+      const defaults = new module.ConfigManager().getDefaults();
+
+      expect(defaults.apiUrl).toBe('http://4.225.205.12');
+    });
+  });
+
   describe('load configuration', () => {
     it('should merge loaded config with defaults', async () => {
       // This is an integration-style test - in real usage cosmiconfig handles file I/O

@@ -257,52 +257,62 @@ jobs:
       - name: Verify health through Application Gateway
         if: steps.guard.outputs.deploy == 'true'
         uses: azure/cli@9f7ce6f37c31b777ec6c6b6d1dfe7db79f497956 # v2.2.0
+        env:
+          AGON_API_HOSTNAME: ${{ secrets.AGON_API_HOSTNAME }}
         with:
           inlineScript: |
             set -euo pipefail
             APP_RG="${{ steps.app.outputs.app_resource_group }}"
-            AGW_NAME=$(az network application-gateway list \
-              --resource-group "${APP_RG}" \
-              --query "[?tags.environment=='dev' && tags.workload=='agon'].name | [0]" \
-              --output tsv)
-
-            if [ -z "${AGW_NAME}" ] || [ "${AGW_NAME}" = "null" ]; then
+            HEALTH_URL=""
+            if [ -n "${AGON_API_HOSTNAME:-}" ]; then
+              HEALTH_URL="https://${AGON_API_HOSTNAME}/health"
+              echo "Checking health over HTTPS host endpoint: ${HEALTH_URL}"
+            else
+              echo "::warning::AGON_API_HOSTNAME secret not set. Falling back to legacy HTTP IP health check."
               AGW_NAME=$(az network application-gateway list \
                 --resource-group "${APP_RG}" \
-                --query "[?starts_with(name, 'agw-agon-dev-')].name | [0]" \
+                --query "[?tags.environment=='dev' && tags.workload=='agon'].name | [0]" \
                 --output tsv)
+
+              if [ -z "${AGW_NAME}" ] || [ "${AGW_NAME}" = "null" ]; then
+                AGW_NAME=$(az network application-gateway list \
+                  --resource-group "${APP_RG}" \
+                  --query "[?starts_with(name, 'agw-agon-dev-')].name | [0]" \
+                  --output tsv)
+              fi
+
+              if [ -z "${AGW_NAME}" ] || [ "${AGW_NAME}" = "null" ]; then
+                echo "Failed to resolve Application Gateway in ${APP_RG}."
+                exit 1
+              fi
+
+              AGW_PIP_ID=$(az network application-gateway show \
+                --resource-group "${APP_RG}" \
+                --name "${AGW_NAME}" \
+                --query "frontendIPConfigurations[0].publicIPAddress.id" \
+                --output tsv)
+
+              if [ -z "${AGW_PIP_ID}" ] || [ "${AGW_PIP_ID}" = "null" ]; then
+                echo "Failed to resolve Application Gateway public IP reference."
+                exit 1
+              fi
+
+              AGW_IP=$(az network public-ip show \
+                --ids "${AGW_PIP_ID}" \
+                --query ipAddress \
+                --output tsv)
+
+              if [ -z "${AGW_IP}" ] || [ "${AGW_IP}" = "null" ]; then
+                echo "Failed to resolve Application Gateway public IP."
+                exit 1
+              fi
+
+              HEALTH_URL="http://${AGW_IP}/health"
+              echo "Checking health at ${HEALTH_URL}"
             fi
-
-            if [ -z "${AGW_NAME}" ] || [ "${AGW_NAME}" = "null" ]; then
-              echo "Failed to resolve Application Gateway in ${APP_RG}."
-              exit 1
-            fi
-
-            AGW_PIP_ID=$(az network application-gateway show \
-              --resource-group "${APP_RG}" \
-              --name "${AGW_NAME}" \
-              --query "frontendIPConfigurations[0].publicIPAddress.id" \
-              --output tsv)
-
-            if [ -z "${AGW_PIP_ID}" ] || [ "${AGW_PIP_ID}" = "null" ]; then
-              echo "Failed to resolve Application Gateway public IP reference."
-              exit 1
-            fi
-
-            AGW_IP=$(az network public-ip show \
-              --ids "${AGW_PIP_ID}" \
-              --query ipAddress \
-              --output tsv)
-
-            if [ -z "${AGW_IP}" ] || [ "${AGW_IP}" = "null" ]; then
-              echo "Failed to resolve Application Gateway public IP."
-              exit 1
-            fi
-
-            echo "Checking health at http://${AGW_IP}/health"
 
             for i in {1..30}; do
-              STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://${AGW_IP}/health" || true)
+              STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${HEALTH_URL}" || true)
               if [ "${STATUS}" = "200" ]; then
                 echo "Backend is healthy via Application Gateway."
                 exit 0

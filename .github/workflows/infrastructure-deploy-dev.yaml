@@ -41,10 +41,28 @@ jobs:
         shell: bash
         env:
           AZURE_POSTGRES_ADMIN_PASSWORD: ${{ secrets.AZURE_POSTGRES_ADMIN_PASSWORD }}
+          APP_GATEWAY_SSL_CERTIFICATE_PFX_BASE64: ${{ secrets.APP_GATEWAY_SSL_CERTIFICATE_PFX_BASE64 }}
+          APP_GATEWAY_SSL_CERTIFICATE_PASSWORD: ${{ secrets.APP_GATEWAY_SSL_CERTIFICATE_PASSWORD }}
+          AGON_API_HOSTNAME: ${{ secrets.AGON_API_HOSTNAME }}
         run: |
           set -euo pipefail
           if [ -z "${AZURE_POSTGRES_ADMIN_PASSWORD:-}" ]; then
             echo "::error::Missing AZURE_POSTGRES_ADMIN_PASSWORD secret."
+            exit 1
+          fi
+
+          if [ -n "${APP_GATEWAY_SSL_CERTIFICATE_PFX_BASE64:-}" ] && [ -z "${APP_GATEWAY_SSL_CERTIFICATE_PASSWORD:-}" ]; then
+            echo "::error::Missing APP_GATEWAY_SSL_CERTIFICATE_PASSWORD while APP_GATEWAY_SSL_CERTIFICATE_PFX_BASE64 is set."
+            exit 1
+          fi
+
+          if [ -n "${APP_GATEWAY_SSL_CERTIFICATE_PASSWORD:-}" ] && [ -z "${APP_GATEWAY_SSL_CERTIFICATE_PFX_BASE64:-}" ]; then
+            echo "::error::Missing APP_GATEWAY_SSL_CERTIFICATE_PFX_BASE64 while APP_GATEWAY_SSL_CERTIFICATE_PASSWORD is set."
+            exit 1
+          fi
+
+          if [ -n "${APP_GATEWAY_SSL_CERTIFICATE_PFX_BASE64:-}" ] && [ -z "${AGON_API_HOSTNAME:-}" ]; then
+            echo "::error::Missing AGON_API_HOSTNAME. HTTPS listener deployments require a public hostname for certificate validation."
             exit 1
           fi
 
@@ -89,6 +107,10 @@ jobs:
           CLAUDE_KEY: ${{ secrets.CLAUDE_KEY }}
           GEMINI_KEY: ${{ secrets.GEMINI_KEY }}
           DEEPSEEK_KEY: ${{ secrets.DEEPSEEK_KEY }}
+          APP_GATEWAY_SSL_CERTIFICATE_PFX_BASE64: ${{ secrets.APP_GATEWAY_SSL_CERTIFICATE_PFX_BASE64 }}
+          APP_GATEWAY_SSL_CERTIFICATE_PASSWORD: ${{ secrets.APP_GATEWAY_SSL_CERTIFICATE_PASSWORD }}
+          AGON_API_HOSTNAME: ${{ secrets.AGON_API_HOSTNAME }}
+          APP_GATEWAY_SSL_POLICY_NAME: ${{ secrets.APP_GATEWAY_SSL_POLICY_NAME }}
         with:
           inlineScript: |
             az account show --query "{name:name, subscriptionId:id}" -o table
@@ -101,4 +123,8 @@ jobs:
               --parameters openAiApiKey="${OPENAI_KEY:-}" \
               --parameters anthropicApiKey="${CLAUDE_KEY:-}" \
               --parameters googleApiKey="${GEMINI_KEY:-}" \
-              --parameters deepSeekApiKey="${DEEPSEEK_KEY:-}"
+              --parameters deepSeekApiKey="${DEEPSEEK_KEY:-}" \
+              --parameters appGatewaySslCertificatePfxBase64="${APP_GATEWAY_SSL_CERTIFICATE_PFX_BASE64:-}" \
+              --parameters appGatewaySslCertificatePassword="${APP_GATEWAY_SSL_CERTIFICATE_PASSWORD:-}" \
+              --parameters appGatewayPublicHostName="${AGON_API_HOSTNAME:-}" \
+              --parameters appGatewaySslPolicyName="${APP_GATEWAY_SSL_POLICY_NAME:-AppGwSslPolicy20220101S}"
