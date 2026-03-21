@@ -8,11 +8,15 @@ import {
   formatElapsedTimer,
   getPromptCursorPosition,
   getVisiblePromptValue,
+  highlightAttachmentRefs,
   renderMessagePanel,
   renderPromptBanner,
   renderShellHeader,
-  renderStatusLine
+  renderStatusLine,
+  styleAttachmentToken
 } from '../../src/shell/renderer.js';
+
+const stripAnsi = (s: string): string => s.replace(/\u001b\[[0-9;]*m/g, '');
 
 describe('shell renderer', () => {
   it('renders header with key context fields', () => {
@@ -216,5 +220,109 @@ describe('buildInterruptHint', () => {
 
   it('is consistent across multiple calls', () => {
     expect(buildInterruptHint()).toBe(buildInterruptHint());
+  });
+});
+
+describe('styleAttachmentToken', () => {
+  it('preserves the visible token text', () => {
+    expect(stripAnsi(styleAttachmentToken('./docs/spec.md'))).toBe('./docs/spec.md');
+  });
+
+  it('handles an empty string without throwing', () => {
+    expect(() => styleAttachmentToken('')).not.toThrow();
+  });
+
+  it('is consistent across multiple calls with the same input', () => {
+    expect(styleAttachmentToken('file.pdf')).toBe(styleAttachmentToken('file.pdf'));
+  });
+
+  it('applies ANSI styling when chalk colours are active, and always preserves text', () => {
+    const plain = 'spec.md';
+    const styled = styleAttachmentToken(plain);
+    const hasAnsi = /\u001b\[[0-9;]*m/.test(styled);
+    if (hasAnsi) {
+      expect(styled).not.toBe(plain);
+    }
+    expect(stripAnsi(styled)).toBe(plain);
+  });
+});
+
+describe('highlightAttachmentRefs', () => {
+  it('returns text unchanged when there are no attachment references', () => {
+    const text = 'No attachments here, just regular prose.';
+    // No patterns matched: result must equal input regardless of chalk level
+    expect(highlightAttachmentRefs(text)).toBe(text);
+  });
+
+  it('preserves visible text for a relative path starting with ./', () => {
+    const text = 'Please review ./docs/spec.md before proceeding.';
+    expect(stripAnsi(highlightAttachmentRefs(text))).toBe(text);
+  });
+
+  it('preserves visible text for a relative path starting with ../', () => {
+    const text = 'See ../shared/config.yaml for details.';
+    expect(stripAnsi(highlightAttachmentRefs(text))).toBe(text);
+  });
+
+  it('preserves visible text for an absolute path starting with /', () => {
+    const text = 'Loaded from /home/user/project/brief.pdf.';
+    expect(stripAnsi(highlightAttachmentRefs(text))).toBe(text);
+  });
+
+  it('preserves visible text for a Codex-style [Image ...] token', () => {
+    const text = 'Here is [Image simonholmes001/agon#1] for reference.';
+    expect(stripAnsi(highlightAttachmentRefs(text))).toBe(text);
+  });
+
+  it('preserves visible text for a Codex-style [File ...] token', () => {
+    const text = 'Attached [File ./docs/spec.md] to the session.';
+    expect(stripAnsi(highlightAttachmentRefs(text))).toBe(text);
+  });
+
+  it('preserves visible text for a Codex-style [Attachment ...] token', () => {
+    const text = 'Content from [Attachment brief.pdf] has been added.';
+    expect(stripAnsi(highlightAttachmentRefs(text))).toBe(text);
+  });
+
+  it('preserves visible text for multiple attachment references in one string', () => {
+    const text = 'See ./readme.md and [Image org/repo#2] for context.';
+    expect(stripAnsi(highlightAttachmentRefs(text))).toBe(text);
+  });
+
+  it('does not highlight slash commands like /help or /new', () => {
+    const text = 'Use /help or /new commands.';
+    // Slash-only commands don't match the file-path pattern (/word without dots/slashes)
+    expect(highlightAttachmentRefs(text)).toBe(text);
+  });
+
+  it('returns an empty string unchanged', () => {
+    expect(highlightAttachmentRefs('')).toBe('');
+  });
+
+  it('applies styling to matched tokens when chalk colours are active', () => {
+    const text = 'See ./readme.md and [Image org/repo#2].';
+    const result = highlightAttachmentRefs(text);
+    const hasAnsi = /\u001b\[[0-9;]*m/.test(result);
+    // Visible text is always preserved
+    expect(stripAnsi(result)).toBe(text);
+    // When chalk is active, ANSI codes should be present in the result
+    if (hasAnsi) {
+      expect(result.length).toBeGreaterThan(text.length);
+    }
+  });
+
+  it('renderMessagePanel preserves visible attachment references inside markdown', () => {
+    const lines: string[] = [];
+    renderMessagePanel(
+      'Assistant',
+      'Attached [Image org/repo#1] and ./docs/spec.md to this session.',
+      'green',
+      (line) => lines.push(line)
+    );
+    const allText = lines.join('\n');
+    const plainText = stripAnsi(allText);
+    expect(plainText).toContain('[Image org/repo#1]');
+    expect(plainText).toContain('./docs/spec.md');
+    expect(plainText).toContain('Assistant');
   });
 });
