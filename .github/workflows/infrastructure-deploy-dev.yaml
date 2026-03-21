@@ -44,10 +44,15 @@ jobs:
           APP_GATEWAY_SSL_CERTIFICATE_PFX_BASE64: ${{ secrets.APP_GATEWAY_SSL_CERTIFICATE_PFX_BASE64 }}
           APP_GATEWAY_SSL_CERTIFICATE_PASSWORD: ${{ secrets.APP_GATEWAY_SSL_CERTIFICATE_PASSWORD }}
           AGON_API_HOSTNAME: ${{ secrets.AGON_API_HOSTNAME }}
+          BLOB_STORAGE_CONNECTION_STRING: ${{ secrets.BLOB_STORAGE_CONNECTION_STRING }}
         run: |
           set -euo pipefail
           if [ -z "${AZURE_POSTGRES_ADMIN_PASSWORD:-}" ]; then
             echo "::error::Missing AZURE_POSTGRES_ADMIN_PASSWORD secret."
+            exit 1
+          fi
+          if [ -z "${BLOB_STORAGE_CONNECTION_STRING:-}" ]; then
+            echo "::error::Missing BLOB_STORAGE_CONNECTION_STRING secret."
             exit 1
           fi
 
@@ -98,11 +103,13 @@ jobs:
             az bicep build --file infrastructure/bicep/modules/data-dev.bicep
             az bicep build --file infrastructure/bicep/modules/app-edge-dev.bicep
             az bicep build --file infrastructure/bicep/modules/keyvault-access-dev.bicep
+            az bicep build --file infrastructure/bicep/modules/storage-access-dev.bicep
 
       - name: Deploy dev infrastructure (subscription scope)
         uses: azure/cli@9f7ce6f37c31b777ec6c6b6d1dfe7db79f497956 # v2.2.0
         env:
           AZURE_POSTGRES_ADMIN_PASSWORD: ${{ secrets.AZURE_POSTGRES_ADMIN_PASSWORD }}
+          BLOB_STORAGE_CONNECTION_STRING: ${{ secrets.BLOB_STORAGE_CONNECTION_STRING }}
           OPENAI_KEY: ${{ secrets.OPENAI_KEY }}
           CLAUDE_KEY: ${{ secrets.CLAUDE_KEY }}
           GEMINI_KEY: ${{ secrets.GEMINI_KEY }}
@@ -127,4 +134,5 @@ jobs:
               --parameters appGatewaySslCertificatePfxBase64="${APP_GATEWAY_SSL_CERTIFICATE_PFX_BASE64:-}" \
               --parameters appGatewaySslCertificatePassword="${APP_GATEWAY_SSL_CERTIFICATE_PASSWORD:-}" \
               --parameters appGatewayPublicHostName="${AGON_API_HOSTNAME:-}" \
-              --parameters appGatewaySslPolicyName="${APP_GATEWAY_SSL_POLICY_NAME:-AppGwSslPolicy20220101S}"
+              --parameters appGatewaySslPolicyName="${APP_GATEWAY_SSL_POLICY_NAME:-AppGwSslPolicy20220101S}" \
+              --parameters blobStorageConnectionString="${BLOB_STORAGE_CONNECTION_STRING:-}"

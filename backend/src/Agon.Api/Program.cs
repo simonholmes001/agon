@@ -62,6 +62,9 @@ var agonConfig = builder.Configuration.GetSection(AgonConfiguration.SectionName)
 var attachmentProcessingConfig = builder.Configuration
     .GetSection(AttachmentProcessingConfiguration.SectionName)
     .Get<AttachmentProcessingConfiguration>() ?? new();
+var storageConfig = builder.Configuration
+    .GetSection(StorageConfiguration.SectionName)
+    .Get<StorageConfiguration>() ?? new();
 var authEnabled = builder.Configuration.GetValue<bool>("Authentication:Enabled");
 var allowedCorsOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? [];
 
@@ -72,6 +75,7 @@ llmConfig.Google.ApiKey = ReplaceEnvVars(llmConfig.Google.ApiKey);
 llmConfig.DeepSeek.ApiKey = ReplaceEnvVars(llmConfig.DeepSeek.ApiKey);
 attachmentProcessingConfig.DocumentIntelligence.Endpoint = ReplaceEnvVars(attachmentProcessingConfig.DocumentIntelligence.Endpoint);
 attachmentProcessingConfig.DocumentIntelligence.ApiKey = ReplaceEnvVars(attachmentProcessingConfig.DocumentIntelligence.ApiKey);
+storageConfig.AttachmentBlobServiceUri = ReplaceEnvVars(storageConfig.AttachmentBlobServiceUri);
 
 builder.Services.AddSingleton(llmConfig);
 builder.Services.AddSingleton(agonConfig);
@@ -206,14 +210,7 @@ else if (!string.IsNullOrEmpty(postgresConnectionString))
 }
 
 // ── Blob Storage: Session Attachments ───────────────────────────────────
-var blobConnectionString = ReplaceEnvVars(builder.Configuration.GetConnectionString("BlobStorage") ?? string.Empty);
-var attachmentContainerName = builder.Configuration["Storage:AttachmentContainer"] ?? "session-attachments";
-
-if (IsConfiguredValue(blobConnectionString))
-{
-    builder.Services.AddSingleton<IAttachmentStorageService>(_ =>
-        new AzureBlobAttachmentStorageService(blobConnectionString, attachmentContainerName));
-}
+var attachmentStorageMode = ConfigureAttachmentStorage(builder.Services, builder.Configuration, storageConfig);
 
 // ── Database: Redis ─────────────────────────────────────────────────────
 var redisConnectionString = builder.Configuration.GetConnectionString("Redis") ?? "localhost:6379";
@@ -460,7 +457,7 @@ if (app.Environment.IsDevelopment())
 }
 
 app.Logger.LogInformation(
-    "Startup summary: EnvFileExists={EnvFileExists}, EnvKeysLoaded={EnvKeysLoaded}, AuthEnabled={AuthEnabled}, CorsOriginCount={CorsOriginCount}, OpenAIConfigured={OpenAIConfigured}, AnthropicConfigured={AnthropicConfigured}, GoogleConfigured={GoogleConfigured}, DeepSeekConfigured={DeepSeekConfigured}, DocumentIntelligenceEndpointConfigured={DocumentIntelligenceEndpointConfigured}",
+    "Startup summary: EnvFileExists={EnvFileExists}, EnvKeysLoaded={EnvKeysLoaded}, AuthEnabled={AuthEnabled}, CorsOriginCount={CorsOriginCount}, OpenAIConfigured={OpenAIConfigured}, AnthropicConfigured={AnthropicConfigured}, GoogleConfigured={GoogleConfigured}, DeepSeekConfigured={DeepSeekConfigured}, DocumentIntelligenceEndpointConfigured={DocumentIntelligenceEndpointConfigured}, AttachmentStorageMode={AttachmentStorageMode}",
     envFileExists,
     envKeysLoaded,
     authEnabled,
@@ -469,11 +466,18 @@ app.Logger.LogInformation(
     !string.IsNullOrEmpty(llmConfig.Anthropic.ApiKey),
     !string.IsNullOrEmpty(llmConfig.Google.ApiKey),
     !string.IsNullOrEmpty(llmConfig.DeepSeek.ApiKey),
-    !string.IsNullOrWhiteSpace(attachmentProcessingConfig.DocumentIntelligence.Endpoint));
+    !string.IsNullOrWhiteSpace(attachmentProcessingConfig.DocumentIntelligence.Endpoint),
+    attachmentStorageMode);
 
 if (allowedCorsOrigins.Length == 0)
 {
     app.Logger.LogWarning("No CORS origins configured. AllowAnyOrigin policy is active.");
+}
+
+if (attachmentStorageMode == "disabled")
+{
+    app.Logger.LogWarning(
+        "Attachment storage is not configured. /attach uploads will return 503. Configure ConnectionStrings:BlobStorage (local) or Storage:UseManagedIdentity=true with Storage:AttachmentBlobServiceUri (Azure).");
 }
 
 app.UseHttpsRedirection();
@@ -525,6 +529,54 @@ static bool IsConfiguredValue(string? value)
     return !(trimmed.StartsWith("${", StringComparison.Ordinal) && trimmed.EndsWith("}", StringComparison.Ordinal));
 }
 
+static string ConfigureAttachmentStorage(
+    IServiceCollection services,
+    IConfiguration configuration,
+    StorageConfiguration storageConfiguration)
+{
+    var attachmentContainer = string.IsNullOrWhiteSpace(storageConfiguration.AttachmentContainer)
+        ? "session-attachments"
+        : storageConfiguration.AttachmentContainer.Trim();
+
+    var blobConnectionString = ReplaceEnvVars(configuration.GetConnectionString("BlobStorage") ?? string.Empty);
+    var blobServiceUriValue = ReplaceEnvVars(storageConfiguration.AttachmentBlobServiceUri);
+
+    if (storageConfiguration.UseManagedIdentity)
+    {
+        if (!IsConfiguredValue(blobServiceUriValue))
+        {
+            throw new InvalidOperationException(
+                "Storage:UseManagedIdentity is enabled but Storage:AttachmentBlobServiceUri is missing.");
+        }
+
+        if (!Uri.TryCreate(blobServiceUriValue, UriKind.Absolute, out var blobServiceUri))
+        {
+            throw new InvalidOperationException(
+                "Storage:AttachmentBlobServiceUri must be a valid absolute URI when Storage:UseManagedIdentity is enabled.");
+        }
+
+        services.AddSingleton<IAttachmentStorageService>(_ =>
+            new AzureBlobAttachmentStorageService(blobServiceUri, attachmentContainer, CreateDefaultAzureCredential()));
+
+        return "managed-identity";
+    }
+
+    if (IsConfiguredValue(blobConnectionString))
+    {
+        services.AddSingleton<IAttachmentStorageService>(_ =>
+            new AzureBlobAttachmentStorageService(blobConnectionString, attachmentContainer));
+        return "connection-string";
+    }
+
+    if (IsConfiguredValue(blobServiceUriValue))
+    {
+        throw new InvalidOperationException(
+            "Storage:AttachmentBlobServiceUri is configured but Storage:UseManagedIdentity is false. Enable managed identity or configure ConnectionStrings:BlobStorage.");
+    }
+
+    return "disabled";
+}
+
 static void RegisterPersistenceServices(IServiceCollection services)
 {
     services.AddScoped<ISessionRepository, SessionRepository>();
@@ -558,12 +610,14 @@ static string BuildPostgresManagedIdentityConnectionString(IConfiguration config
     return builder.ConnectionString;
 }
 
+static DefaultAzureCredential CreateDefaultAzureCredential() => new(new DefaultAzureCredentialOptions
+{
+    ExcludeInteractiveBrowserCredential = true
+});
+
 static NpgsqlDataSource CreatePostgresManagedIdentityDataSource(string connectionString)
 {
-    var credential = new DefaultAzureCredential(new DefaultAzureCredentialOptions
-    {
-        ExcludeInteractiveBrowserCredential = true
-    });
+    var credential = CreateDefaultAzureCredential();
     var tokenRequestContext = new TokenRequestContext(new[]
     {
         "https://ossrdbms-aad.database.windows.net/.default"
@@ -591,10 +645,7 @@ static IConnectionMultiplexer CreateRedisManagedIdentityConnection(string host, 
     };
     options.EndPoints.Add(host, port);
 
-    var credential = new DefaultAzureCredential(new DefaultAzureCredentialOptions
-    {
-        ExcludeInteractiveBrowserCredential = true
-    });
+    var credential = CreateDefaultAzureCredential();
 
     options.ConfigureForAzureWithTokenCredentialAsync(credential).GetAwaiter().GetResult();
     return ConnectionMultiplexer.Connect(options);

@@ -6,8 +6,8 @@ This document is the source of truth for the `dev` backend infrastructure deploy
 
 - Public edge: Azure Application Gateway (SKU is parameterized; default is `Basic` tier for cost reduction)
 - App tier: Azure App Service (Linux) in a dedicated app resource group
-- Data tier: Azure Database for PostgreSQL Flexible Server + Azure Cache for Redis + Key Vault
-- Network tier: dedicated VNet/subnets/private DNS zones (including App Service private link DNS)
+- Data tier: Azure Database for PostgreSQL Flexible Server + Azure Cache for Redis + Key Vault + Azure Storage (attachments)
+- Network tier: dedicated VNet/subnets/private DNS zones (including App Service + Blob private link DNS)
 - Telemetry: Log Analytics + Application Insights + metric alert action group
 - IaC: Bicep only
 - CI/CD auth: GitHub OIDC (no client secret)
@@ -18,7 +18,7 @@ Deployment is **subscription-scope** and creates three resource groups:
 
 - `rg-agon-dev-swc-net`: VNet, subnets, private DNS zones
 - `rg-agon-dev-swc-app`: App Service, Application Gateway, monitoring + alerts
-- `rg-agon-dev-swc-data`: PostgreSQL, Redis, Key Vault (+ private endpoints)
+- `rg-agon-dev-swc-data`: PostgreSQL, Redis, Key Vault, Storage (+ private endpoints)
 
 This split follows Azure operational best practice: isolate lifecycle and access by domain (network/app/data), not by single mega-RG.
 
@@ -114,6 +114,7 @@ Required:
 - `AZURE_TENANT_ID`
 - `AZURE_SUBSCRIPTION_ID`
 - `AZURE_POSTGRES_ADMIN_PASSWORD`
+- `BLOB_STORAGE_CONNECTION_STRING`
 
 Required for backend container deployment (Docker Hub):
 
@@ -134,6 +135,10 @@ Optional (required for HTTPS edge listener rollout):
 - `APP_GATEWAY_SSL_CERTIFICATE_PASSWORD`
 - `AGON_API_HOSTNAME` (public API FQDN bound to the certificate, for example `api-dev.example.com`)
 - `APP_GATEWAY_SSL_POLICY_NAME` (optional override; defaults to `AppGwSslPolicy20220101S`)
+
+Notes:
+- `BLOB_STORAGE_CONNECTION_STRING` is now deployed to Key Vault and referenced by App Service as `BLOB_STORAGE_CONNECTION_STRING`.
+- Attachment container remains controlled via `Storage__AttachmentContainer` (default: `session-attachments`).
 
 ## Where to Find IDs in Azure Portal
 
@@ -184,6 +189,40 @@ Then rerun deployment from `main`.
    - `rg-agon-dev-swc-net`
    - `rg-agon-dev-swc-app`
    - `rg-agon-dev-swc-data`
+
+## Attachment Storage Outputs (for backend wiring)
+
+After deployment, retrieve the storage outputs from subscription deployment:
+
+```bash
+LATEST_DEPLOYMENT=$(az deployment sub list \
+  --query "[?starts_with(name, 'agon-dev-deploy-')] | sort_by(@, &properties.timestamp) | [-1].name" \
+  -o tsv)
+
+az deployment sub show \
+  --name "$LATEST_DEPLOYMENT" \
+  --location swedencentral \
+  --query "properties.outputs.{accountName:attachmentStorageAccountName.value,container:attachmentContainerName.value,blobEndpoint:attachmentStorageBlobEndpoint.value}" \
+  -o table
+```
+
+Expected outputs:
+- `attachmentStorageAccountName`
+- `attachmentContainerName` (default: `session-attachments`)
+- `attachmentStorageBlobEndpoint`
+
+## Attachment Storage Runtime Modes
+
+Azure App Service deployments use managed identity mode by default via app settings:
+- `Storage__UseManagedIdentity=true`
+- `Storage__AttachmentBlobServiceUri=<attachmentStorageBlobEndpoint>`
+- `Storage__AttachmentContainer=<attachmentContainerName>`
+
+Local development can still use connection-string mode:
+- `ConnectionStrings__BlobStorage` (or `BLOB_STORAGE_CONNECTION_STRING` placeholder source)
+- `Storage__UseManagedIdentity=false`
+
+Misconfiguration is fail-fast when managed identity mode is enabled without a valid blob service URI.
 
 ## Common Errors
 
@@ -241,3 +280,54 @@ Both infra workflows now include a preflight warning step to detect this conditi
 - App Service reachable privately via Private Endpoint from Application Gateway subnet
 - Key Vault/Redis/PostgreSQL on private networking paths
 - Runtime secrets via Key Vault references + managed identity
+
+## Local `/attach` Runbook (No Azure Dependency)
+
+Use this when validating attachment upload flows on a fresh clone without Azure Portal resources.
+
+### 1) Start local dependencies
+
+```bash
+cd backend
+docker compose up -d postgres redis azurite
+```
+
+### 2) Set local attachment env values
+
+In repo root `.env`:
+
+```bash
+BLOB_STORAGE_CONNECTION_STRING=UseDevelopmentStorage=true
+ATTACHMENTPROCESSING__DOCUMENTINTELLIGENCE__ENABLED=false
+ATTACHMENTPROCESSING__OPENAIVISION__ENABLED=false
+```
+
+### 3) Run backend and CLI
+
+```bash
+cd backend
+dotnet run --project src/Agon.Api/Agon.Api.csproj
+```
+
+In another terminal:
+
+```bash
+cd /Users/simonholmes/Projects/Applications/Agon
+npm --prefix cli run build
+AGON_API_URL=http://localhost:5000 node cli/bin/run.js
+```
+
+### 4) Smoke-test `/attach`
+
+```text
+/new
+/attach "./README.md"
+/follow-up "Summarize this file in 3 bullets."
+```
+
+### 5) Troubleshooting quick map
+
+- `503` + `ATTACHMENT_STORAGE_NOT_CONFIGURED`: missing/empty `BLOB_STORAGE_CONNECTION_STRING`.
+- `503` + `ATTACHMENT_STORAGE_UNAVAILABLE`: Azurite not reachable.
+- `503` + `ATTACHMENT_METADATA_NOT_CONFIGURED`: attachment metadata persistence is not configured in runtime.
+- `503` + `ATTACHMENT_METADATA_UNAVAILABLE`: backing persistence is down/unreachable.

@@ -44,6 +44,13 @@ param googleApiKey string = ''
 @secure()
 param deepSeekApiKey string = ''
 
+@description('Optional Blob Storage connection string to seed Key Vault secret during deployment.')
+@secure()
+param blobStorageConnectionString string = ''
+
+@description('Blob container name used for session attachments.')
+param attachmentContainerName string = 'session-attachments'
+
 @description('Address space for the workload VNet.')
 param vnetAddressSpace string = '10.42.0.0/16'
 
@@ -196,10 +203,12 @@ module data './modules/data-dev.bicep' = {
     keyVaultPrivateDnsZoneId: network.outputs.keyVaultPrivateDnsZoneId
     redisPrivateDnsZoneId: network.outputs.redisPrivateDnsZoneId
     cognitiveServicesPrivateDnsZoneId: network.outputs.cognitiveServicesPrivateDnsZoneId
+    blobPrivateDnsZoneId: network.outputs.blobPrivateDnsZoneId
     openAiApiKey: openAiApiKey
     anthropicApiKey: anthropicApiKey
     googleApiKey: googleApiKey
     deepSeekApiKey: deepSeekApiKey
+    blobStorageConnectionString: blobStorageConnectionString
   }
 }
 
@@ -238,8 +247,11 @@ module appEdge './modules/app-edge-dev.bicep' = {
     anthropicSecretUri: data.outputs.anthropicSecretUri
     googleSecretUri: data.outputs.googleSecretUri
     deepSeekSecretUri: data.outputs.deepSeekSecretUri
+    blobStorageConnectionStringSecretUri: data.outputs.blobStorageConnectionStringSecretUri
+    attachmentContainerName: attachmentContainerName
     documentIntelligenceEndpoint: data.outputs.documentIntelligenceEndpoint
     documentIntelligenceModelId: documentIntelligenceModelId
+    attachmentStorageBlobEndpoint: data.outputs.attachmentStorageBlobEndpoint
   }
 }
 
@@ -258,6 +270,16 @@ module documentIntelligenceAccess './modules/document-intelligence-access-dev.bi
   scope: rgData
   params: {
     documentIntelligenceAccountName: data.outputs.documentIntelligenceAccountName
+    principalId: appEdge.outputs.appPrincipalId
+    principalDisplayNameSeed: appServiceName
+  }
+}
+
+module storageAccess './modules/storage-access-dev.bicep' = {
+  name: 'storage-access-dev'
+  scope: rgData
+  params: {
+    storageAccountName: data.outputs.attachmentStorageAccountName
     principalId: appEdge.outputs.appPrincipalId
     principalDisplayNameSeed: appServiceName
   }
@@ -294,3 +316,7 @@ output keyVaultName string = data.outputs.keyVaultName
 output postgresqlServerName string = data.outputs.postgresqlServerName
 output redisCacheName string = data.outputs.redisCacheName
 output documentIntelligenceAccountName string = data.outputs.documentIntelligenceAccountName
+output attachmentStorageAccountName string = data.outputs.attachmentStorageAccountName
+output attachmentStorageAccountId string = data.outputs.attachmentStorageAccountId
+output attachmentStorageBlobEndpoint string = data.outputs.attachmentStorageBlobEndpoint
+output attachmentContainerName string = data.outputs.attachmentContainerName

@@ -48,6 +48,7 @@ var redisPrivateDnsZoneName = 'privatelink.redis.cache.windows.net'
 var postgresPrivateDnsZoneName = 'privatelink.postgres.database.azure.com'
 var appServicePrivateDnsZoneName = 'privatelink.azurewebsites.net'
 var cognitiveServicesPrivateDnsZoneName = 'privatelink.cognitiveservices.azure.com'
+var blobPrivateDnsZoneName = 'privatelink.blob.${az.environment().suffixes.storage}'
 
 resource vnet 'Microsoft.Network/virtualNetworks@2023-11-01' = {
   name: vnetName
@@ -166,6 +167,12 @@ resource cognitiveServicesPrivateDnsZone 'Microsoft.Network/privateDnsZones@2020
   tags: tags
 }
 
+resource blobPrivateDnsZone 'Microsoft.Network/privateDnsZones@2020-06-01' = {
+  name: blobPrivateDnsZoneName
+  location: 'global'
+  tags: tags
+}
+
 resource keyVaultDnsVnetLink 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2020-06-01' = {
   parent: keyVaultPrivateDnsZone
   name: '${vnet.name}-link'
@@ -226,6 +233,18 @@ resource cognitiveServicesDnsVnetLink 'Microsoft.Network/privateDnsZones/virtual
   }
 }
 
+resource blobDnsVnetLink 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2020-06-01' = {
+  parent: blobPrivateDnsZone
+  name: '${vnet.name}-link'
+  location: 'global'
+  properties: {
+    registrationEnabled: false
+    virtualNetwork: {
+      id: vnet.id
+    }
+  }
+}
+
 output vnetId string = vnet.id
 output appSubnetId string = appSubnet.id
 output privateEndpointSubnetId string = privateEndpointSubnet.id
@@ -237,3 +256,4 @@ output redisPrivateDnsZoneId string = redisPrivateDnsZone.id
 output postgresPrivateDnsZoneId string = postgresPrivateDnsZone.id
 output appServicePrivateDnsZoneId string = appServicePrivateDnsZone.id
 output cognitiveServicesPrivateDnsZoneId string = cognitiveServicesPrivateDnsZone.id
+output blobPrivateDnsZoneId string = blobPrivateDnsZone.id

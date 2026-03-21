@@ -17,14 +17,17 @@ import { parseShellInput } from '../shell/parser.js';
 import { routePlainInput } from '../shell/router.js';
 import {
   buildActivePrompt,
+  buildInterruptHint,
   buildShimmerText,
   buildPromptInputLineWithCursor,
+  formatElapsedTimer,
   getPromptCursorPosition,
   type PromptFrameContext,
   renderMessagePanel,
   renderPromptBanner,
   renderShellHeader,
-  renderStatusLine
+  renderStatusLine,
+  styleAttachmentToken
 } from '../shell/renderer.js';
 import { PromptHistory } from '../shell/history.js';
 import { renderMarkdown } from '../utils/markdown.js';
@@ -37,16 +40,31 @@ import {
 } from '../utils/self-update.js';
 
 /**
- * Sentinel value returned from promptForInput when the user presses Ctrl+C.
- * The main loop treats this as "interrupt current operation and stay in shell"
- * rather than exiting the session.
+ * Sentinel value returned from promptForInput when the user presses Ctrl+C
+ * while the input zone is non-empty. The main loop treats this as
+ * "interrupt current operation and stay in shell" rather than exiting.
  */
 export const INTERRUPT_SENTINEL = '\x03';
 
 /**
- * Races a promise against an AbortSignal. If the signal fires before the
- * promise settles, an AbortError is thrown.
+ * Sentinel value returned from promptForInput when the user presses Ctrl+C
+ * while the input zone is empty. The main loop treats this as a request to
+ * exit the shell session entirely.
  */
+export const CTRL_C_EXIT_SENTINEL = '\x1C';
+
+/**
+ * Returns the appropriate sentinel for a Ctrl+C keypress based on whether
+ * the current input zone value is empty.
+ *
+ * - Empty input → CTRL_C_EXIT_SENTINEL (exit the shell)
+ * - Non-empty input → INTERRUPT_SENTINEL (interrupt only, stay in shell)
+ */
+export function selectCtrlCSentinel(inputValue: string): typeof CTRL_C_EXIT_SENTINEL | typeof INTERRUPT_SENTINEL {
+  return inputValue.length === 0 ? CTRL_C_EXIT_SENTINEL : INTERRUPT_SENTINEL;
+}
+
+
 export function raceAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
   if (signal.aborted) {
     return Promise.reject(new DOMException('Aborted', 'AbortError'));
@@ -159,6 +177,11 @@ export default class Shell extends Command {
         const promptFrame = renderPromptBanner((line) => this.log(line));
         const rawInput = await this.promptForInput(promptFrame);
 
+        if (rawInput === CTRL_C_EXIT_SENTINEL) {
+          this.log(chalk.dim('Exiting shell.'));
+          return;
+        }
+
         if (rawInput === INTERRUPT_SENTINEL) {
           this.log(chalk.dim('Interrupted. Shell still active.'));
           this.log('');
@@ -172,6 +195,14 @@ export default class Shell extends Command {
 
         if (isExitInput(trimmed)) {
           this.log(chalk.dim('Exiting shell.'));
+          try {
+            const activeSession = await controller.getActiveSession();
+            if (activeSession) {
+              this.log(chalk.dim(buildExitResumeHint(activeSession.id)));
+            }
+          } catch {
+            // Best-effort: ignore errors in the exit path
+          }
           return;
         }
 
@@ -277,8 +308,11 @@ export default class Shell extends Command {
       case 'status':
         this.log(`Session ${outcome.sessionId} | status=${outcome.status} | phase=${outcome.phase}`);
         return;
-      case 'attachment':
-        this.log(chalk.green(`✓ Attached ${outcome.fileName} to session ${outcome.sessionId}`));
+      case 'attachment': {
+        const attachedLine = chalk.green('✓ Attached ')
+          + styleAttachmentToken(outcome.fileName)
+          + chalk.green(` to session ${outcome.sessionId}`);
+        this.log(attachedLine);
         this.log(chalk.dim(`Type: ${outcome.contentType} | Size: ${formatBytes(outcome.sizeBytes)}`));
         if (outcome.hasExtractedText) {
           this.log(chalk.dim('Document text extracted and added to agent context.'));
@@ -286,6 +320,7 @@ export default class Shell extends Command {
           this.log(chalk.dim('No text extraction available; file metadata/link still added to context.'));
         }
         return;
+      }
       case 'artifact':
         if (outcome.raw) {
           this.log(outcome.content);
@@ -364,11 +399,13 @@ export default class Shell extends Command {
 
   private startSpinnerShimmer(spinner: { text: string }, baseText: string): () => void {
     let tick = 0;
-    spinner.text = buildShimmerText(baseText, tick);
+    const startedAt = Date.now();
+    const hint = buildInterruptHint();
+    spinner.text = `${buildShimmerText(baseText, tick)} ${formatElapsedTimer(startedAt)}  ${hint}`;
 
     const interval = setInterval(() => {
       tick += 1;
-      spinner.text = buildShimmerText(baseText, tick);
+      spinner.text = `${buildShimmerText(baseText, tick)} ${formatElapsedTimer(startedAt)}  ${hint}`;
     }, 90);
 
     if (typeof interval.unref === 'function') {
@@ -430,7 +467,7 @@ export default class Shell extends Command {
         const keySequence = key?.sequence;
 
         if (isCtrl && keyName === 'c') {
-          finish(INTERRUPT_SENTINEL);
+          finish(selectCtrlCSentinel(value));
           return;
         }
 
@@ -621,13 +658,15 @@ export default class Shell extends Command {
     const maxConsecutiveFailures = 5;
     let shimmerBase = 'Agents are analyzing your idea...';
     let shimmerTick = 0;
+    let thinkingStartedAt = Date.now();
+    const hint = buildInterruptHint();
     const progressSpinner = ora({
-      text: buildShimmerText(shimmerBase, shimmerTick),
+      text: `${buildShimmerText(shimmerBase, shimmerTick)} ${formatElapsedTimer(thinkingStartedAt)}  ${hint}`,
       color: 'cyan'
     }).start();
     const shimmerInterval = setInterval(() => {
       shimmerTick += 1;
-      progressSpinner.text = buildShimmerText(shimmerBase, shimmerTick);
+      progressSpinner.text = `${buildShimmerText(shimmerBase, shimmerTick)} ${formatElapsedTimer(thinkingStartedAt)}  ${hint}`;
     }, 90);
     if (typeof shimmerInterval.unref === 'function') {
       shimmerInterval.unref();
@@ -707,6 +746,7 @@ export default class Shell extends Command {
           this.log('');
           lastPhase = session.phase;
           lastProgressAt = Date.now();
+          thinkingStartedAt = Date.now();
         }
 
         const normalizedStatus = normalizeStatus(session.status);
@@ -753,6 +793,7 @@ export default class Shell extends Command {
         }
 
         if (pausedForOutput) {
+          thinkingStartedAt = Date.now();
           progressSpinner.start();
         }
 
@@ -870,4 +911,8 @@ function formatBytes(bytes: number): string {
 export function isExitInput(inputText: string): boolean {
   const trimmed = inputText.trim().toLowerCase();
   return trimmed === '/exit' || trimmed === '/quit' || trimmed === '/eot';
+}
+
+export function buildExitResumeHint(sessionId: string): string {
+  return `To continue this session, run: agon resume ${sessionId}`;
 }

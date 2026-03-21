@@ -141,3 +141,7 @@ infrastructure/bicep/modules/postgres-access-dev.json
 infrastructure/bicep/modules/redis-access-dev.json
 # Local PR draft (kept on developer machine, not versioned)
 PR.md
+
+# Local git worktree folders (developer-local only)
+.worktrees/
+cli/.worktrees/

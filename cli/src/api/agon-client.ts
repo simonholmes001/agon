@@ -40,7 +40,6 @@ export class AgonAPIClient {
       baseURL,
       timeout: 30000, // 30 seconds
       headers: {
-        'Content-Type': 'application/json',
         'X-Agon-CLI-Version': this.cliVersion,
         'User-Agent': `${this.packageName}/${this.cliVersion}`,
         ...(authToken ? { Authorization: `Bearer ${authToken}` } : {})
@@ -309,8 +308,8 @@ export class AgonAPIClient {
 
     const method = error.config?.method?.toLowerCase() ?? '';
     const url = error.config?.url ?? '';
-    if (method === 'post' && url.includes('/messages')) {
-      return false; // Avoid duplicate message submission retries.
+    if (method === 'post' && (url.includes('/messages') || url.includes('/attachments'))) {
+      return false; // Avoid duplicate side-effect POST retries.
     }
 
     // Retry on network errors or 5xx server errors
@@ -323,9 +322,10 @@ export class AgonAPIClient {
     if (error.response) {
       const status = error.response.status;
       const data = error.response.data as any;
-      const message = data?.detail || data?.message || error.message;
+      const message = data?.detail || data?.message || data?.error || error.message;
+      const errorCode = typeof data?.errorCode === 'string' ? data.errorCode : undefined;
 
-      this.logger.error('API error', { status, message });
+      this.logger.error('API error', { status, message, errorCode });
 
       switch (status) {
         case 404:
@@ -359,9 +359,16 @@ export class AgonAPIClient {
         case 502:
         case 503:
         case 504:
+          if (status === 503) {
+            const attachmentError = this.mapAttachmentServiceUnavailable(errorCode, message);
+            if (attachmentError) {
+              return attachmentError;
+            }
+          }
+
           return new AgonError(
             ErrorCode.BACKEND_UNAVAILABLE,
-            'Backend service unavailable. Please try again.',
+            message || 'Backend service unavailable. Please try again.',
             [
               'Check if the backend is running',
               'Verify API URL in config',
@@ -390,6 +397,49 @@ export class AgonAPIClient {
         ? timeoutSuggestions
         : ['Check your internet connection', 'Verify the API URL is correct']
     );
+  }
+
+  private mapAttachmentServiceUnavailable(errorCode: string | undefined, message: string): AgonError | null {
+    switch (errorCode) {
+      case 'ATTACHMENT_STORAGE_NOT_CONFIGURED':
+        return new AgonError(
+          ErrorCode.BACKEND_UNAVAILABLE,
+          message || 'Attachment storage is not configured.',
+          [
+            'Configure blob storage for the backend (BLOB_STORAGE_CONNECTION_STRING)',
+            'Restart the backend and retry /attach'
+          ]
+        );
+      case 'ATTACHMENT_STORAGE_UNAVAILABLE':
+        return new AgonError(
+          ErrorCode.BACKEND_UNAVAILABLE,
+          message || 'Attachment storage is temporarily unavailable.',
+          [
+            'Check blob storage connectivity/availability',
+            'Retry /attach once storage is healthy'
+          ]
+        );
+      case 'ATTACHMENT_METADATA_NOT_CONFIGURED':
+        return new AgonError(
+          ErrorCode.BACKEND_UNAVAILABLE,
+          message || 'Attachment metadata persistence is not configured.',
+          [
+            'Enable backend persistence for attachments',
+            'Restart the backend and retry /attach'
+          ]
+        );
+      case 'ATTACHMENT_METADATA_UNAVAILABLE':
+        return new AgonError(
+          ErrorCode.BACKEND_UNAVAILABLE,
+          message || 'Attachment metadata persistence is temporarily unavailable.',
+          [
+            'Check database connectivity',
+            'Retry /attach after persistence is healthy'
+          ]
+        );
+      default:
+        return null;
+    }
   }
 
   private delay(ms: number): Promise<void> {

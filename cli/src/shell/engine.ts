@@ -1,6 +1,7 @@
 import type { SessionResponse } from '../api/types.js';
 import type { SelfUpdateFailureCategory } from '../utils/self-update.js';
 import { extractInlineAttach, parseShellInput } from './parser.js';
+import { styleAttachmentToken } from './renderer.js';
 import type { PlainInputRoute } from './router.js';
 
 interface ShellControllerLike {
@@ -148,7 +149,7 @@ export class ShellEngine {
       }
 
       this.print(
-        `Attached ${result.attachment.fileName} to session ${result.sessionId}.`
+        `Attached ${styleAttachmentToken(result.attachment.fileName)} to session ${result.sessionId}.`
         + ` Type: ${result.attachment.contentType} | Size: ${result.attachment.sizeBytes} B`
       );
       if (result.attachment.hasExtractedText) {

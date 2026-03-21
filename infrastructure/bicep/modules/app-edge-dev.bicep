@@ -110,11 +110,20 @@ param googleSecretUri string
 @description('Key Vault secret URI for DeepSeek API key.')
 param deepSeekSecretUri string
 
+@description('Key Vault secret URI for Blob Storage connection string.')
+param blobStorageConnectionStringSecretUri string = ''
+
+@description('Blob container name used for session attachments.')
+param attachmentContainerName string = 'session-attachments'
+
 @description('Document Intelligence endpoint for attachment extraction.')
 param documentIntelligenceEndpoint string = ''
 
 @description('Document Intelligence model ID used by backend attachment extraction.')
 param documentIntelligenceModelId string = 'prebuilt-layout'
+
+@description('Blob service endpoint used by backend attachment storage (managed identity mode).')
+param attachmentStorageBlobEndpoint string = ''
 
 var tags = {
   environment: environment
@@ -413,6 +422,18 @@ resource appService 'Microsoft.Web/sites@2023-12-01' = {
           value: '6380'
         }
         {
+          name: 'Storage__UseManagedIdentity'
+          value: 'true'
+        }
+        {
+          name: 'Storage__AttachmentBlobServiceUri'
+          value: attachmentStorageBlobEndpoint
+        }
+        {
+          name: 'Storage__AttachmentContainer'
+          value: attachmentContainerName
+        }
+        {
           name: 'OPENAI_KEY'
           value: empty(openAiSecretUri) ? '' : '@Microsoft.KeyVault(SecretUri=${openAiSecretUri})'
         }
@@ -427,6 +448,10 @@ resource appService 'Microsoft.Web/sites@2023-12-01' = {
         {
           name: 'DEEPSEEK_KEY'
           value: empty(deepSeekSecretUri) ? '' : '@Microsoft.KeyVault(SecretUri=${deepSeekSecretUri})'
+        }
+        {
+          name: 'BLOB_STORAGE_CONNECTION_STRING'
+          value: empty(blobStorageConnectionStringSecretUri) ? '' : '@Microsoft.KeyVault(SecretUri=${blobStorageConnectionStringSecretUri})'
         }
         {
           name: 'AttachmentProcessing__DocumentIntelligence__Enabled'
