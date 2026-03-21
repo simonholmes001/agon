@@ -253,6 +253,7 @@ Notes:
 - By default, Agon CLI connects to the hosted backend endpoint (no manual `apiUrl` setup required for end users).
 - After successful in-shell update, your current session remains usable; restart later to run the newly installed runtime.
 - On startup, Agon checks npm and alerts when a newer stable version is available.
+- `/attach` accepts only a file path. Upload first, then send your message as a separate prompt.
 
 ### Web Application (In Development)
 [Back to top](#top)
@@ -278,12 +279,11 @@ dotnet build backend/Agon.sln
 npm --prefix cli run build
 ```
 
-#### 1) Start required local data services (PostgreSQL + Redis)
-[Back to top](#top)
+#### 1) Start required local data services (PostgreSQL + Redis + Azurite)
 
 ```bash
 cd backend
-docker compose up -d postgres redis
+docker compose up -d postgres redis azurite
 ```
 
 Optional (DB admin UI):
@@ -293,8 +293,24 @@ cd backend
 docker compose --profile tools up -d pgadmin
 ```
 
-#### 2) Run backend API locally
-[Back to top](#top)
+#### 2) Configure local attachment storage (`.env` in repo root)
+
+Create or update `/Users/simonholmes/Projects/Applications/Agon/.env`:
+
+```bash
+# Azurite local blob emulator (required for /attach)
+BLOB_STORAGE_CONNECTION_STRING=UseDevelopmentStorage=true
+```
+
+Optional extraction settings for local dev:
+
+```bash
+# Disable cloud extraction dependencies for pure local testing
+ATTACHMENTPROCESSING__DOCUMENTINTELLIGENCE__ENABLED=false
+ATTACHMENTPROCESSING__OPENAIVISION__ENABLED=false
+```
+
+#### 3) Run backend API locally
 
 ```bash
 cd backend
@@ -307,8 +323,7 @@ For local backend testing, point the CLI to your local API process:
 AGON_API_URL=http://localhost:5000 npm exec -- agon
 ```
 
-#### 3) Run a local client
-[Back to top](#top)
+#### 4) Run a local client
 
 CLI (primary interface today, using local source build):
 
@@ -342,16 +357,42 @@ npm run dev
 
 Frontend default URL: `http://localhost:3000`
 
-#### 4) Stop local data services
-[Back to top](#top)
+#### 5) `/attach` local smoke test checklist
+
+Run in CLI shell:
+
+```text
+/new
+/attach "./README.md"
+/follow-up "Summarize this file in 3 bullets."
+```
+
+Expected:
+- `/attach` returns upload success details (file name, content type, uploaded timestamp).
+- `/follow-up` uses attachment context without 503 errors.
+- `/attach` with trailing text (for example `/attach ./README.md summarize this`) is rejected with deterministic usage guidance.
+
+#### 6) Troubleshooting `/attach`
+
+- `503` + `ATTACHMENT_STORAGE_NOT_CONFIGURED`:
+  - `BLOB_STORAGE_CONNECTION_STRING` is missing/empty. Set it in repo-root `.env`, then restart backend.
+- `503` + `ATTACHMENT_STORAGE_UNAVAILABLE`:
+  - Azurite is down or not reachable. Check `docker compose ps` and restart `azurite`.
+- `503` + `ATTACHMENT_METADATA_NOT_CONFIGURED`:
+  - backend persistence wiring is missing in current runtime profile.
+- `503` + `ATTACHMENT_METADATA_UNAVAILABLE`:
+  - database path is unhealthy; verify PostgreSQL connectivity and backend logs.
+- `Attachment file not found` from CLI:
+  - verify local path exists and use quotes for spaces.
+
+#### 7) Stop local data services
 
 ```bash
 cd backend
 docker compose down
 ```
 
-#### 5) Run local tests (repo root)
-[Back to top](#top)
+#### 8) Run local tests (repo root)
 
 ```bash
 cd /Users/simonholmes/Projects/Applications/Agon

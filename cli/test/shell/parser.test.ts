@@ -182,6 +182,12 @@ describe('shell parser', () => {
       path: './docs/spec.md'
     });
 
+    expect(parseShellInput('/attach /Users/simonholmes/docs/spec.md')).toEqual({
+      type: 'slash',
+      command: 'attach',
+      path: '/Users/simonholmes/docs/spec.md'
+    });
+
     expect(parseShellInput('/attach "./docs/product brief.pdf"')).toEqual({
       type: 'slash',
       command: 'attach',
@@ -191,6 +197,23 @@ describe('shell parser', () => {
 
   it('returns deterministic error for malformed /attach', () => {
     expect(parseShellInput('/attach')).toEqual({
+      type: 'error',
+      message: 'Usage: /attach <file-path>'
+    });
+
+    expect(parseShellInput('/attach "./docs/product brief.pdf')).toEqual({
+      type: 'error',
+      message: 'Usage: /attach <file-path>'
+    });
+  });
+
+  it('rejects trailing text after /attach path to avoid path corruption', () => {
+    expect(parseShellInput('/attach /Users/simonholmes/CV/2026/Dr_Simon_Holmes_CV_2.pdf Can you read this cv?')).toEqual({
+      type: 'error',
+      message: 'Usage: /attach <file-path>'
+    });
+
+    expect(parseShellInput('/attach "/Users/simonholmes/CV/2026/Dr Simon Holmes CV 2.pdf" - can you read this cv?')).toEqual({
       type: 'error',
       message: 'Usage: /attach <file-path>'
     });

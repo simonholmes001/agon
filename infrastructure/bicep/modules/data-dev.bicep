@@ -55,6 +55,10 @@ param googleApiKey string
 @secure()
 param deepSeekApiKey string
 
+@description('Optional Blob Storage connection string to seed Key Vault secret during deployment.')
+@secure()
+param blobStorageConnectionString string = ''
+
 var tags = {
   environment: environment
   workload: workloadName
@@ -71,6 +75,7 @@ var hasOpenAiKey = !empty(openAiApiKey)
 var hasAnthropicKey = !empty(anthropicApiKey)
 var hasGoogleKey = !empty(googleApiKey)
 var hasDeepSeekKey = !empty(deepSeekApiKey)
+var hasBlobStorageConnectionString = !empty(blobStorageConnectionString)
 
 resource keyVault 'Microsoft.KeyVault/vaults@2023-02-01' = {
   name: keyVaultName
@@ -379,6 +384,14 @@ resource deepSeekSecret 'Microsoft.KeyVault/vaults/secrets@2023-02-01' = if (has
   }
 }
 
+resource blobStorageConnectionStringSecret 'Microsoft.KeyVault/vaults/secrets@2023-02-01' = if (hasBlobStorageConnectionString) {
+  parent: keyVault
+  name: 'blob-storage-connection-string'
+  properties: {
+    value: blobStorageConnectionString
+  }
+}
+
 output keyVaultName string = keyVault.name
 output keyVaultId string = keyVault.id
 output postgresqlServerName string = postgres.name
@@ -395,3 +408,4 @@ output openAiSecretUri string = hasOpenAiKey ? openAiSecret!.properties.secretUr
 output anthropicSecretUri string = hasAnthropicKey ? anthropicSecret!.properties.secretUri : ''
 output googleSecretUri string = hasGoogleKey ? googleSecret!.properties.secretUri : ''
 output deepSeekSecretUri string = hasDeepSeekKey ? deepSeekSecret!.properties.secretUri : ''
+output blobStorageConnectionStringSecretUri string = hasBlobStorageConnectionString ? blobStorageConnectionStringSecret!.properties.secretUri : ''

@@ -197,6 +197,42 @@ describe('AgonAPIClient', () => {
       expect(agonError.code).toBe(ErrorCode.BACKEND_UNAVAILABLE);
     });
 
+    it('should map attachment storage-not-configured 503 to actionable backend unavailable message', () => {
+      const error: any = new Error('Service unavailable');
+      error.response = {
+        status: 503,
+        data: {
+          errorCode: 'ATTACHMENT_STORAGE_NOT_CONFIGURED',
+          error: 'Attachment storage is not configured.'
+        }
+      };
+
+      const mapped = (client as any).mapError(error);
+      expect(mapped).toBeInstanceOf(AgonError);
+      const agonError = mapped as AgonError;
+      expect(agonError.code).toBe(ErrorCode.BACKEND_UNAVAILABLE);
+      expect(agonError.message).toBe('Attachment storage is not configured.');
+      expect(agonError.suggestions).toContain('Configure blob storage for the backend (BLOB_STORAGE_CONNECTION_STRING)');
+    });
+
+    it('should map attachment storage transient 503 to actionable retry guidance', () => {
+      const error: any = new Error('Service unavailable');
+      error.response = {
+        status: 503,
+        data: {
+          errorCode: 'ATTACHMENT_STORAGE_UNAVAILABLE',
+          error: 'Attachment storage is temporarily unavailable.'
+        }
+      };
+
+      const mapped = (client as any).mapError(error);
+      expect(mapped).toBeInstanceOf(AgonError);
+      const agonError = mapped as AgonError;
+      expect(agonError.code).toBe(ErrorCode.BACKEND_UNAVAILABLE);
+      expect(agonError.message).toBe('Attachment storage is temporarily unavailable.');
+      expect(agonError.suggestions).toContain('Retry /attach once storage is healthy');
+    });
+
     it('should map 426 errors to CLI upgrade required', async () => {
       const error: any = new Error('Request failed with status code 426');
       error.response = {
@@ -436,6 +472,15 @@ describe('AgonAPIClient', () => {
     it('should not retry message submission posts', () => {
       const networkError: any = new Error('Network error');
       networkError.config = { method: 'post', url: '/sessions/test/messages' };
+
+      const shouldRetry = (client as any).shouldRetry(networkError);
+
+      expect(shouldRetry).toBe(false);
+    });
+
+    it('should not retry attachment upload posts', () => {
+      const networkError: any = new Error('Network error');
+      networkError.config = { method: 'post', url: '/sessions/test/attachments' };
 
       const shouldRetry = (client as any).shouldRetry(networkError);
 

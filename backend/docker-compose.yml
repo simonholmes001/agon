@@ -31,6 +31,17 @@ services:
       timeout: 5s
       retries: 5
 
+  azurite:
+    image: mcr.microsoft.com/azure-storage/azurite:3.35.0
+    container_name: agon-azurite
+    command: "azurite --blobHost 0.0.0.0 --blobPort 10000 --queueHost 0.0.0.0 --queuePort 10001 --tableHost 0.0.0.0 --tablePort 10002"
+    ports:
+      - "10000:10000"
+      - "10001:10001"
+      - "10002:10002"
+    volumes:
+      - azurite_data:/data
+
   # pgAdmin for database management (optional)
   pgadmin:
     image: dpage/pgadmin4:latest
@@ -48,3 +59,4 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  azurite_data:

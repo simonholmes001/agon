@@ -272,6 +272,13 @@ public class SessionsControllerIntegrationTests : IClassFixture<AgonWebApplicati
         var response = await _client.PostAsync($"/sessions/{sessionId}/attachments", multipart);
 
         response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+        var content = await response.Content.ReadAsStringAsync();
+        using var doc = JsonDocument.Parse(content);
+        doc.RootElement.GetProperty("errorCode").GetString().Should().BeOneOf(
+            "ATTACHMENT_STORAGE_NOT_CONFIGURED",
+            "ATTACHMENT_STORAGE_UNAVAILABLE");
+        doc.RootElement.GetProperty("error").GetString().Should().NotBeNullOrWhiteSpace();
+        doc.RootElement.GetProperty("hint").GetString().Should().NotBeNullOrWhiteSpace();
     }
 
     [Fact]

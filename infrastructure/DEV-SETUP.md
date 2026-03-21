@@ -112,6 +112,7 @@ Required:
 - `AZURE_TENANT_ID`
 - `AZURE_SUBSCRIPTION_ID`
 - `AZURE_POSTGRES_ADMIN_PASSWORD`
+- `BLOB_STORAGE_CONNECTION_STRING`
 
 Required for backend container deployment (Docker Hub):
 
@@ -125,6 +126,10 @@ Optional (written into Key Vault during deploy):
 - `CLAUDE_KEY`
 - `GEMINI_KEY`
 - `DEEPSEEK_KEY`
+
+Notes:
+- `BLOB_STORAGE_CONNECTION_STRING` is now deployed to Key Vault and referenced by App Service as `BLOB_STORAGE_CONNECTION_STRING`.
+- Attachment container remains controlled via `Storage__AttachmentContainer` (default: `session-attachments`).
 
 ## Where to Find IDs in Azure Portal
 
@@ -250,3 +255,54 @@ Both infra workflows now include a preflight warning step to detect this conditi
 - App Service reachable privately via Private Endpoint from Application Gateway subnet
 - Key Vault/Redis/PostgreSQL on private networking paths
 - Runtime secrets via Key Vault references + managed identity
+
+## Local `/attach` Runbook (No Azure Dependency)
+
+Use this when validating attachment upload flows on a fresh clone without Azure Portal resources.
+
+### 1) Start local dependencies
+
+```bash
+cd backend
+docker compose up -d postgres redis azurite
+```
+
+### 2) Set local attachment env values
+
+In repo root `.env`:
+
+```bash
+BLOB_STORAGE_CONNECTION_STRING=UseDevelopmentStorage=true
+ATTACHMENTPROCESSING__DOCUMENTINTELLIGENCE__ENABLED=false
+ATTACHMENTPROCESSING__OPENAIVISION__ENABLED=false
+```
+
+### 3) Run backend and CLI
+
+```bash
+cd backend
+dotnet run --project src/Agon.Api/Agon.Api.csproj
+```
+
+In another terminal:
+
+```bash
+cd /Users/simonholmes/Projects/Applications/Agon
+npm --prefix cli run build
+AGON_API_URL=http://localhost:5000 node cli/bin/run.js
+```
+
+### 4) Smoke-test `/attach`
+
+```text
+/new
+/attach "./README.md"
+/follow-up "Summarize this file in 3 bullets."
+```
+
+### 5) Troubleshooting quick map
+
+- `503` + `ATTACHMENT_STORAGE_NOT_CONFIGURED`: missing/empty `BLOB_STORAGE_CONNECTION_STRING`.
+- `503` + `ATTACHMENT_STORAGE_UNAVAILABLE`: Azurite not reachable.
+- `503` + `ATTACHMENT_METADATA_NOT_CONFIGURED`: attachment metadata persistence is not configured in runtime.
+- `503` + `ATTACHMENT_METADATA_UNAVAILABLE`: backing persistence is down/unreachable.

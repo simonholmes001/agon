@@ -17,6 +17,7 @@ const settableKeys = new Set<ShellSettableKey>([
   'researchEnabled',
   'logLevel'
 ]);
+const attachUsageMessage = 'Usage: /attach <file-path>';
 
 export function parseShellInput(input: string): ParsedShellInput {
   const trimmed = input.trim();
@@ -29,6 +30,7 @@ export function parseShellInput(input: string): ParsedShellInput {
   }
 
   const [commandToken, ...rawArgs] = trimmed.split(/\s+/);
+  const rawCommandArgs = trimmed.slice(commandToken.length).trimStart();
   const command = commandToken.slice(1).toLowerCase();
 
   switch (command) {
@@ -46,7 +48,7 @@ export function parseShellInput(input: string): ParsedShellInput {
       return { type: 'slash', command: 'show-sessions' };
     case 'attach':
     case 'image':
-      return parseAttach(rawArgs);
+      return parseAttach(rawCommandArgs);
     case 'set':
       return parseSet(rawArgs);
     case 'session':
@@ -99,54 +101,23 @@ export function extractInlineAttach(input: string): InlineAttachExtraction | nul
   if (pathStart >= input.length) {
     return {
       type: 'error',
-      message: 'Usage: /attach <file-path>'
+      message: attachUsageMessage
     };
   }
 
-  const firstPathChar = input[pathStart];
-  let path = '';
-  let pathEnd = pathStart;
-
-  if (firstPathChar === '"' || firstPathChar === '\'') {
-    const quote = firstPathChar;
-    pathEnd = pathStart + 1;
-    while (pathEnd < input.length) {
-      const char = input[pathEnd];
-      if (char === quote && input[pathEnd - 1] !== '\\') {
-        break;
-      }
-      pathEnd += 1;
-    }
-
-    if (pathEnd >= input.length) {
-      return {
-        type: 'error',
-        message: 'Usage: /attach <file-path>'
-      };
-    }
-
-    path = input.slice(pathStart + 1, pathEnd);
-    pathEnd += 1;
-  } else {
-    while (pathEnd < input.length && !/\s/.test(input[pathEnd] ?? '')) {
-      pathEnd += 1;
-    }
-    path = input.slice(pathStart, pathEnd);
-  }
-
-  const normalizedPath = path.trim();
-  if (!normalizedPath) {
+  const parsedPath = parseAttachPathToken(input, pathStart);
+  if (!parsedPath) {
     return {
       type: 'error',
-      message: 'Usage: /attach <file-path>'
+      message: attachUsageMessage
     };
   }
 
-  const remainingText = normalizeInlineMessageText(`${input.slice(0, commandStart)} ${input.slice(pathEnd)}`);
+  const remainingText = normalizeInlineMessageText(`${input.slice(0, commandStart)} ${input.slice(parsedPath.nextIndex)}`);
 
   return {
     type: 'attach',
-    path: normalizedPath,
+    path: parsedPath.path,
     remainingText
   };
 }
@@ -292,19 +263,34 @@ function parseFollowUp(args: string[]): ParsedShellInput {
   };
 }
 
-function parseAttach(args: string[]): ParsedShellInput {
-  const rawPath = args.join(' ').trim();
+function parseAttach(rawArgs: string): ParsedShellInput {
+  const rawPath = rawArgs.trim();
   if (!rawPath) {
     return {
       type: 'error',
-      message: 'Usage: /attach <file-path>'
+      message: attachUsageMessage
+    };
+  }
+
+  const parsedPath = parseAttachPathToken(rawPath, 0);
+  if (!parsedPath) {
+    return {
+      type: 'error',
+      message: attachUsageMessage
+    };
+  }
+
+  if (rawPath.slice(parsedPath.nextIndex).trim().length > 0) {
+    return {
+      type: 'error',
+      message: attachUsageMessage
     };
   }
 
   return {
     type: 'slash',
     command: 'attach',
-    path: stripMatchingQuotes(rawPath)
+    path: parsedPath.path
   };
 }
 
@@ -348,6 +334,58 @@ function stripMatchingQuotes(value: string): string {
     }
   }
   return value;
+}
+
+function parseAttachPathToken(
+  input: string,
+  startIndex: number
+): { path: string; nextIndex: number } | null {
+  let cursor = startIndex;
+  while (cursor < input.length && /\s/.test(input[cursor] ?? '')) {
+    cursor += 1;
+  }
+
+  if (cursor >= input.length) {
+    return null;
+  }
+
+  const firstPathChar = input[cursor];
+  let rawPath = '';
+  let nextIndex = cursor;
+
+  if (firstPathChar === '"' || firstPathChar === '\'') {
+    const quote = firstPathChar;
+    let pathEnd = cursor + 1;
+    while (pathEnd < input.length) {
+      const char = input[pathEnd];
+      if (char === quote && input[pathEnd - 1] !== '\\') {
+        break;
+      }
+      pathEnd += 1;
+    }
+
+    if (pathEnd >= input.length) {
+      return null;
+    }
+
+    rawPath = input.slice(cursor + 1, pathEnd);
+    nextIndex = pathEnd + 1;
+  } else {
+    while (nextIndex < input.length && !/\s/.test(input[nextIndex] ?? '')) {
+      nextIndex += 1;
+    }
+    rawPath = input.slice(cursor, nextIndex);
+  }
+
+  const normalizedPath = rawPath.trim();
+  if (!normalizedPath) {
+    return null;
+  }
+
+  return {
+    path: stripMatchingQuotes(normalizedPath),
+    nextIndex
+  };
 }
 
 function normalizeInlineMessageText(value: string): string {
