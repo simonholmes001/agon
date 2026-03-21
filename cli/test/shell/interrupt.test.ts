@@ -7,6 +7,7 @@ import {
   raceAbort,
   selectCtrlCSentinel
 } from '../../src/commands/shell.js';
+import { buildInterruptHint } from '../../src/shell/renderer.js';
 
 describe('Ctrl+C interrupt handling', () => {
   describe('INTERRUPT_SENTINEL', () => {
@@ -134,6 +135,30 @@ describe('Ctrl+C interrupt handling', () => {
       const controller = new AbortController();
       const failing = Promise.reject(new Error('network error'));
       await expect(raceAbort(failing, controller.signal)).rejects.toThrow('network error');
+    });
+  });
+
+  describe('interrupt hint — running-state UX guidance', () => {
+    it('interrupt hint references Ctrl+C (not Esc)', () => {
+      const hint = buildInterruptHint();
+      expect(hint).toContain('Ctrl+C');
+      expect(hint.toLowerCase()).not.toContain('esc');
+    });
+
+    it('raceAbort throws an AbortError when SIGINT is simulated via AbortController during a long-running flow', async () => {
+      const controller = new AbortController();
+
+      // Simulate a long-running operation (resolves after 400 ms)
+      const longRunning = new Promise<string>(resolve => {
+        setTimeout(() => resolve('done'), 400);
+      });
+
+      // Simulate Ctrl+C (SIGINT) by aborting the controller after a short delay
+      setTimeout(() => controller.abort(), 20);
+
+      await expect(raceAbort(longRunning, controller.signal)).rejects.toMatchObject({
+        name: 'AbortError'
+      });
     });
   });
 });

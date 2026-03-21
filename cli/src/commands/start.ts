@@ -17,7 +17,7 @@ import { AgonAPIClient } from '../api/agon-client.js';
 import { SessionManager } from '../state/session-manager.js';
 import { ConfigManager } from '../state/config-manager.js';
 import { renderMarkdown } from '../utils/markdown.js';
-import { formatElapsedTimer } from '../shell/renderer.js';
+import { formatElapsedTimer, buildInterruptHint } from '../shell/renderer.js';
 
 export default class Start extends Command {
   static override readonly description = 'Start a new strategy debate session';
@@ -306,12 +306,13 @@ export default class Start extends Command {
     const maxConsecutiveFailures = 5;
     let thinkingBaseText = 'Agents are analyzing your idea...';
     let thinkingStartedAt = Date.now();
+    const hint = buildInterruptHint();
     const progressSpinner = ora({
-      text: `${thinkingBaseText} ${formatElapsedTimer(thinkingStartedAt)}`,
+      text: `${thinkingBaseText} ${formatElapsedTimer(thinkingStartedAt)}  ${hint}`,
       color: 'cyan'
     }).start();
     const timerInterval = setInterval(() => {
-      progressSpinner.text = `${thinkingBaseText} ${formatElapsedTimer(thinkingStartedAt)}`;
+      progressSpinner.text = `${thinkingBaseText} ${formatElapsedTimer(thinkingStartedAt)}  ${hint}`;
     }, 1000);
     if (typeof timerInterval.unref === 'function') {
       timerInterval.unref();

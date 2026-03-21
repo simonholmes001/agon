@@ -17,6 +17,7 @@ import { parseShellInput } from '../shell/parser.js';
 import { routePlainInput } from '../shell/router.js';
 import {
   buildActivePrompt,
+  buildInterruptHint,
   buildShimmerText,
   buildPromptInputLineWithCursor,
   formatElapsedTimer,
@@ -394,11 +395,12 @@ export default class Shell extends Command {
   private startSpinnerShimmer(spinner: { text: string }, baseText: string): () => void {
     let tick = 0;
     const startedAt = Date.now();
-    spinner.text = `${buildShimmerText(baseText, tick)} ${formatElapsedTimer(startedAt)}`;
+    const hint = buildInterruptHint();
+    spinner.text = `${buildShimmerText(baseText, tick)} ${formatElapsedTimer(startedAt)}  ${hint}`;
 
     const interval = setInterval(() => {
       tick += 1;
-      spinner.text = `${buildShimmerText(baseText, tick)} ${formatElapsedTimer(startedAt)}`;
+      spinner.text = `${buildShimmerText(baseText, tick)} ${formatElapsedTimer(startedAt)}  ${hint}`;
     }, 90);
 
     if (typeof interval.unref === 'function') {
@@ -652,13 +654,14 @@ export default class Shell extends Command {
     let shimmerBase = 'Agents are analyzing your idea...';
     let shimmerTick = 0;
     let thinkingStartedAt = Date.now();
+    const hint = buildInterruptHint();
     const progressSpinner = ora({
-      text: `${buildShimmerText(shimmerBase, shimmerTick)} ${formatElapsedTimer(thinkingStartedAt)}`,
+      text: `${buildShimmerText(shimmerBase, shimmerTick)} ${formatElapsedTimer(thinkingStartedAt)}  ${hint}`,
       color: 'cyan'
     }).start();
     const shimmerInterval = setInterval(() => {
       shimmerTick += 1;
-      progressSpinner.text = `${buildShimmerText(shimmerBase, shimmerTick)} ${formatElapsedTimer(thinkingStartedAt)}`;
+      progressSpinner.text = `${buildShimmerText(shimmerBase, shimmerTick)} ${formatElapsedTimer(thinkingStartedAt)}  ${hint}`;
     }, 90);
     if (typeof shimmerInterval.unref === 'function') {
       shimmerInterval.unref();

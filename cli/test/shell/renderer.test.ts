@@ -1,5 +1,6 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import {
+  buildInterruptHint,
   buildShimmerText,
   buildActivePrompt,
   buildPromptInputLine,
@@ -192,5 +193,28 @@ describe('formatElapsedTimer', () => {
     const startMs = Date.now();
     vi.advanceTimersByTime(12000);
     expect(formatElapsedTimer(startMs)).toBe('[12s]');
+  });
+});
+
+describe('buildInterruptHint', () => {
+  it('contains the Ctrl+C text', () => {
+    expect(buildInterruptHint()).toContain('Ctrl+C');
+  });
+
+  it('contains the word interrupt', () => {
+    expect(buildInterruptHint()).toContain('interrupt');
+  });
+
+  it('does not contain any reference to esc or escape', () => {
+    const hint = buildInterruptHint().toLowerCase();
+    expect(hint).not.toContain('esc');
+  });
+
+  it('returns a non-empty string', () => {
+    expect(buildInterruptHint().length).toBeGreaterThan(0);
+  });
+
+  it('is consistent across multiple calls', () => {
+    expect(buildInterruptHint()).toBe(buildInterruptHint());
   });
 });
