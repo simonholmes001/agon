@@ -244,7 +244,6 @@ module appEdge './modules/app-edge-dev.bicep' = {
     documentIntelligenceEndpoint: data.outputs.documentIntelligenceEndpoint
     documentIntelligenceModelId: documentIntelligenceModelId
     attachmentStorageBlobEndpoint: data.outputs.attachmentStorageBlobEndpoint
-    attachmentContainerName: data.outputs.attachmentContainerName
   }
 }
 

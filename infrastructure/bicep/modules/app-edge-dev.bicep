@@ -119,9 +119,6 @@ param documentIntelligenceModelId string = 'prebuilt-layout'
 @description('Blob service endpoint used by backend attachment storage (managed identity mode).')
 param attachmentStorageBlobEndpoint string = ''
 
-@description('Blob container name used for session attachments.')
-param attachmentContainerName string = 'session-attachments'
-
 var tags = {
   environment: environment
   workload: workloadName
@@ -440,10 +437,6 @@ resource appService 'Microsoft.Web/sites@2023-12-01' = {
         {
           name: 'BLOB_STORAGE_CONNECTION_STRING'
           value: empty(blobStorageConnectionStringSecretUri) ? '' : '@Microsoft.KeyVault(SecretUri=${blobStorageConnectionStringSecretUri})'
-        }
-        {
-          name: 'Storage__AttachmentContainer'
-          value: attachmentContainerName
         }
         {
           name: 'AttachmentProcessing__DocumentIntelligence__Enabled'
