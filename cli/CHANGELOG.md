@@ -1,5 +1,15 @@
 # @agon_agents/cli
 
+## 0.4.1
+
+### Patch Changes
+
+- Improve `/attach` reliability and diagnostics.
+
+  - Fix command parsing so trailing text cannot corrupt attachment file paths.
+  - Ensure attachment uploads use multipart form data (not forced JSON content type).
+  - Surface backend attachment error categories with clearer CLI guidance.
+
 ## 0.4.0
 
 ### Minor Changes
