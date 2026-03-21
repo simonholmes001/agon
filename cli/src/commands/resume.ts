@@ -16,8 +16,9 @@ export default class Resume extends Command {
   static override readonly description = 'Resume a session (set as current)';
 
   static override readonly examples = [
+    '<%= config.bin %> resume 550e8400-e29b-41d4-a716-446655440000',
     '<%= config.bin %> resume <session-id>',
-    '<%= config.bin %> resume session-123'
+    '<%= config.bin %> sessions  # list available session IDs'
   ];
 
   static override readonly args = {
@@ -57,9 +58,10 @@ export default class Resume extends Command {
           
           if (errorMessage.includes('not found')) {
             this.log('');
-            this.error(`❌ Session '${args.sessionId}' not found.`, {
-              exit: 1
-            });
+            this.error(
+              `Session '${args.sessionId}' not found.\n\nRun 'agon sessions' to list available session IDs.`,
+              { exit: 1 }
+            );
           }
           
           throw error;

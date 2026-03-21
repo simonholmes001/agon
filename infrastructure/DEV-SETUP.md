@@ -6,8 +6,8 @@ This document is the source of truth for the `dev` backend infrastructure deploy
 
 - Public edge: Azure Application Gateway (SKU is parameterized; default is `Basic` tier for cost reduction)
 - App tier: Azure App Service (Linux) in a dedicated app resource group
-- Data tier: Azure Database for PostgreSQL Flexible Server + Azure Cache for Redis + Key Vault
-- Network tier: dedicated VNet/subnets/private DNS zones (including App Service private link DNS)
+- Data tier: Azure Database for PostgreSQL Flexible Server + Azure Cache for Redis + Key Vault + Azure Storage (attachments)
+- Network tier: dedicated VNet/subnets/private DNS zones (including App Service + Blob private link DNS)
 - Telemetry: Log Analytics + Application Insights + metric alert action group
 - IaC: Bicep only
 - CI/CD auth: GitHub OIDC (no client secret)
@@ -18,7 +18,7 @@ Deployment is **subscription-scope** and creates three resource groups:
 
 - `rg-agon-dev-swc-net`: VNet, subnets, private DNS zones
 - `rg-agon-dev-swc-app`: App Service, Application Gateway, monitoring + alerts
-- `rg-agon-dev-swc-data`: PostgreSQL, Redis, Key Vault (+ private endpoints)
+- `rg-agon-dev-swc-data`: PostgreSQL, Redis, Key Vault, Storage (+ private endpoints)
 
 This split follows Azure operational best practice: isolate lifecycle and access by domain (network/app/data), not by single mega-RG.
 
@@ -173,6 +173,40 @@ Then rerun deployment from `main`.
    - `rg-agon-dev-swc-net`
    - `rg-agon-dev-swc-app`
    - `rg-agon-dev-swc-data`
+
+## Attachment Storage Outputs (for backend wiring)
+
+After deployment, retrieve the storage outputs from subscription deployment:
+
+```bash
+LATEST_DEPLOYMENT=$(az deployment sub list \
+  --query "[?starts_with(name, 'agon-dev-deploy-')] | sort_by(@, &properties.timestamp) | [-1].name" \
+  -o tsv)
+
+az deployment sub show \
+  --name "$LATEST_DEPLOYMENT" \
+  --location swedencentral \
+  --query "properties.outputs.{accountName:attachmentStorageAccountName.value,container:attachmentContainerName.value,blobEndpoint:attachmentStorageBlobEndpoint.value}" \
+  -o table
+```
+
+Expected outputs:
+- `attachmentStorageAccountName`
+- `attachmentContainerName` (default: `session-attachments`)
+- `attachmentStorageBlobEndpoint`
+
+## Attachment Storage Runtime Modes
+
+Azure App Service deployments use managed identity mode by default via app settings:
+- `Storage__UseManagedIdentity=true`
+- `Storage__AttachmentBlobServiceUri=<attachmentStorageBlobEndpoint>`
+- `Storage__AttachmentContainer=<attachmentContainerName>`
+
+Local development can still use connection-string mode:
+- `ConnectionStrings__BlobStorage` (or `BLOB_STORAGE_CONNECTION_STRING` placeholder source)
+- `Storage__UseManagedIdentity=false`
+
+Misconfiguration is fail-fast when managed identity mode is enabled without a valid blob service URI.
 
 ## Common Errors
 

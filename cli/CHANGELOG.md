@@ -1,5 +1,75 @@
 # @agon_agents/cli
 
+## 0.4.0
+
+### Minor Changes
+
+- Style attached file references with a Codex-like accent color
+
+  Introduces two new exports from `shell/renderer`:
+
+  - `styleAttachmentToken(token)` — applies the canonical amber accent color
+    (`chalk.bold.rgb(248, 197, 71)`) to a single file-name or Codex-style token.
+  - `highlightAttachmentRefs(text)` — scans rendered text for file paths
+    (`./path`, `../path`, `/absolute/path`) and Codex-style bracketed tokens
+    (`[Image …]`, `[File …]`, `[Attachment …]`) and styles each match with the
+    same accent color.
+
+  Surface-level changes:
+
+  - `renderMessagePanel` now post-processes rendered Markdown through
+    `highlightAttachmentRefs`, so attachment references in assistant/moderator
+    messages are visually highlighted.
+  - The `attachment` outcome in the shell command now renders the file name via
+    `styleAttachmentToken`, making the attached-file confirmation immediately
+    scannable.
+  - Inline-attach confirmation prints in the shell engine also use
+    `styleAttachmentToken` for the file name.
+
+  Non-attachment text color behavior is unchanged.
+
+## 0.3.2
+
+### Patch Changes
+
+- Show `Ctrl+C to interrupt` hint on all running spinners.
+
+  - `shell`: running-state spinners (shimmer and debate-watch) now display `Ctrl+C to interrupt` so users have clear guidance on how to stop an in-progress operation.
+  - `start --watch`: progress spinner also shows the hint while monitoring debate progress.
+  - Extracted `buildInterruptHint()` in `renderer.ts` as the single source of truth for the hint text.
+
+## 0.3.1
+
+### Patch Changes
+
+- Print a resume hint on shell exit and improve the `resume` command.
+
+  - On `/exit`, `/quit`, `/eot`: print `To continue this session, run: agon resume <session-id>` when a session was active
+  - `resume` command: improve "not found" error to suggest `agon sessions` as recovery
+  - `resume` command: add a concrete UUID example and `agon sessions` pointer to help text
+
+## 0.3.0
+
+### Minor Changes
+
+- Shell: Ctrl+C now exits Agon when the input zone is empty.
+
+  Previously, pressing Ctrl+C at an empty prompt printed "Interrupted. Shell still active." and kept the shell running. Now:
+
+  - **Empty input zone**: Ctrl+C exits the shell (prints "Exiting shell.").
+  - **Non-empty input zone**: Ctrl+C interrupts and stays in the shell (existing behavior unchanged).
+
+## 0.2.1
+
+### Patch Changes
+
+- Add bracketed elapsed timer indicator during agent reasoning
+
+  While the agent spinner is active, a live `[Xs]` timer now appears inline
+  with the thinking status text (e.g. `Agents are analyzing... (Analysis Round) [7s]`),
+  mirroring Codex behaviour. The timer resets to `[0s]` at the start of each new
+  thinking cycle (phase transition or spinner restart after output).
+
 ## 0.2.0
 
 ### Minor Changes

@@ -80,6 +80,7 @@ jobs:
             az bicep build --file infrastructure/bicep/modules/data-dev.bicep
             az bicep build --file infrastructure/bicep/modules/app-edge-dev.bicep
             az bicep build --file infrastructure/bicep/modules/keyvault-access-dev.bicep
+            az bicep build --file infrastructure/bicep/modules/storage-access-dev.bicep
 
       - name: Deploy dev infrastructure (subscription scope)
         uses: azure/cli@9f7ce6f37c31b777ec6c6b6d1dfe7db79f497956 # v2.2.0

@@ -1,3 +1,5 @@
+<a id="top"></a>
+
 # Agon
 
 [![Next.js](https://img.shields.io/badge/Next.js-16-000000?style=flat-square&logo=next.js)](https://nextjs.org)
@@ -7,7 +9,7 @@
 [![.NET](https://img.shields.io/badge/.NET-9-512BD4?style=flat-square&logo=dotnet&logoColor=fff)](https://dotnet.microsoft.com)
 [![Vitest](https://img.shields.io/badge/Tested_with-Vitest-6E9F18?style=flat-square&logo=vitest&logoColor=fff)](https://vitest.dev)
 [![xUnit](https://img.shields.io/badge/Tested_with-xUnit-512BD4?style=flat-square&logo=dotnet&logoColor=fff)](https://xunit.net)
-[![Tests](https://img.shields.io/badge/Tests-825_passing-brightgreen?style=flat-square)]()
+[![Tests](https://img.shields.io/badge/Tests-864_passing-brightgreen?style=flat-square)]()
 [![Coverage](https://img.shields.io/badge/Coverage-36%25_lines-red?style=flat-square)]()
 [![TDD](https://img.shields.io/badge/Methodology-TDD-red?style=flat-square)]()
 [![Licence](https://img.shields.io/badge/Licence-Private-lightgrey?style=flat-square)]()
@@ -25,6 +27,7 @@
 ---
 
 ## Table of Contents
+[Back to top](#top)
 
 - [What is Agon?](#project-overview)
 - [How to Run Agon](#installation)
@@ -32,8 +35,10 @@
   - [Web Application](#web-application-in-development)
   - [iOS Application](#ios-application-in-development)
   - [Local Deployment (Developer Runbook)](#local-deployment-developer-runbook)
+  - [Worktree-Based Local Testing (Feature Branch)](#worktree-based-local-testing-feature-branch)
 - [Repository Structure](#repository-structure)
 - [Development Guide](#for-developers)
+  - [Developer Setup Guide (Infrastructure)](infrastructure/DEV-SETUP.md)
   - [CLI (TypeScript)](#cli-typescript)
   - [Backend (.NET)](#backend-net)
   - [Frontend (Next.js)](#frontend-nextjs)
@@ -51,6 +56,7 @@
 ---
 
 ## Project Overview
+[Back to top](#top)
 
 **Agon** transforms raw ideas into production-ready documentation through structured multi-agent analysis. You submit a product concept, technical proposal, strategic decision, or just a simple question, and a council of AI agents (powered by OpenAI GPT, Google Gemini, and Anthropic Claude) collaboratively analyze it across multiple rounds to produce:
 
@@ -63,6 +69,7 @@
 - **Copilot Instructions** — Implementation guidance for development
 
 ### How It Works
+[Back to top](#top)
 
 1. **Clarification Phase**: A Moderator agent asks clarifying questions to refine your idea into a structured "Debate Brief"
 2. **Analysis Round**: Three council agents (GPT, Gemini, Claude) independently analyze your idea in parallel, each adding claims, assumptions, and risks to a shared **Truth Map**
@@ -75,21 +82,26 @@ The **Truth Map** is the authoritative session state — a structured graph of c
 ---
 
 ## Installation
+[Back to top](#top)
 
 Agon can be accessed through multiple interfaces. The CLI is currently available, with web and mobile applications in development.
 
 ### CLI Application (Available Now)
+[Back to top](#top)
 
 The Agon CLI is distributed as an npm package: `@agon_agents/cli`.
 
 #### Prerequisites
+[Back to top](#top)
 
 - **Node.js 20+** ([download](https://nodejs.org/))
 - **npm** (included with Node.js)
 
 #### Installation Methods (Global, npx, Local)
+[Back to top](#top)
 
 ##### 1) Global Installation (Recommended for daily use)
+[Back to top](#top)
 
 Install globally to run `agon` from any terminal directory:
 
@@ -130,6 +142,7 @@ Disadvantages:
 - Version is shared across all projects on your machine
 
 ##### 2) npx (No permanent install)
+[Back to top](#top)
 
 Run without a global install:
 
@@ -158,6 +171,7 @@ Disadvantages:
 - Can depend on registry/network availability when not cached
 
 ##### 3) Local Project Installation (version-pinned per repo)
+[Back to top](#top)
 
 Install into your project:
 
@@ -196,6 +210,7 @@ Disadvantages:
 - Usually invoked via `npm run` / `npm exec`
 
 #### Uninstalling
+[Back to top](#top)
 
 Remove global installation:
 
@@ -210,6 +225,7 @@ npm uninstall @agon_agents/cli
 ```
 
 #### Quick Start (Current Shell-First UX)
+[Back to top](#top)
 
 After launching `agon`, use these in-shell commands:
 
@@ -239,18 +255,22 @@ Notes:
 - On startup, Agon checks npm and alerts when a newer stable version is available.
 
 ### Web Application (In Development)
+[Back to top](#top)
 
 Browser-based interface with visual Truth Map explorer and real-time agent streaming. Coming soon.
 
 ### iOS Application (In Development)
+[Back to top](#top)
 
 Native iOS app for on-the-go strategy analysis. Coming soon.
 
 ### Local Deployment (Developer Runbook)
+[Back to top](#top)
 
 For local end-to-end testing, run the data services first, then the backend API, then your chosen client interface.
 
 #### 0) Build locally (repo root)
+[Back to top](#top)
 
 ```bash
 cd /Users/simonholmes/Projects/Applications/Agon
@@ -259,6 +279,7 @@ npm --prefix cli run build
 ```
 
 #### 1) Start required local data services (PostgreSQL + Redis)
+[Back to top](#top)
 
 ```bash
 cd backend
@@ -273,6 +294,7 @@ docker compose --profile tools up -d pgadmin
 ```
 
 #### 2) Run backend API locally
+[Back to top](#top)
 
 ```bash
 cd backend
@@ -286,6 +308,7 @@ AGON_API_URL=http://localhost:5000 npm exec -- agon
 ```
 
 #### 3) Run a local client
+[Back to top](#top)
 
 CLI (primary interface today, using local source build):
 
@@ -320,6 +343,7 @@ npm run dev
 Frontend default URL: `http://localhost:3000`
 
 #### 4) Stop local data services
+[Back to top](#top)
 
 ```bash
 cd backend
@@ -327,6 +351,7 @@ docker compose down
 ```
 
 #### 5) Run local tests (repo root)
+[Back to top](#top)
 
 ```bash
 cd /Users/simonholmes/Projects/Applications/Agon
@@ -334,9 +359,87 @@ DOTNET_CLI_HOME=/tmp dotnet test backend/Agon.sln --verbosity minimal
 npm --prefix cli test
 ```
 
+### Worktree-Based Local Testing (Feature Branch)
+[Back to top](#top)
+
+Use this flow when you want to test a feature branch in isolation without disturbing your current working tree. Steps 1–5 of the [Local Deployment (Developer Runbook)](#local-deployment-developer-runbook) still apply for starting/stopping data services and running the full test suite; this section covers only the worktree-specific setup.
+
+**Placeholders** — replace these throughout:
+
+| Placeholder | Example |
+|---|---|
+| `<name_of_feature_branch>` | `feature/my-new-feature` |
+| `<name_of_worktree>` | `agon-my-new-feature` |
+
+#### Step 1 — Start local dependencies (from the main repo)
+
+```bash
+# From the main repo's backend directory
+cd backend
+docker compose up -d postgres redis
+```
+
+#### Step 2 — Fetch the feature branch and create a worktree
+
+Run these from the **Agon repository root** (not from inside any existing worktree):
+
+```bash
+git fetch origin <name_of_feature_branch>
+git worktree add .worktrees/<name_of_worktree> <name_of_feature_branch>
+```
+
+**Concrete example:**
+
+```bash
+git fetch origin feature/my-new-feature
+git worktree add .worktrees/agon-my-new-feature feature/my-new-feature
+```
+
+#### Step 3 — Run the backend from the worktree (Terminal 1)
+
+Navigate to the worktree from the **Agon repository root** (the worktree was created at `.worktrees/<name_of_worktree>` in [Step 2](#step-2--fetch-the-feature-branch-and-create-a-worktree)):
+
+```bash
+cd .worktrees/<name_of_worktree>/backend
+dotnet run --project src/Agon.Api/Agon.Api.csproj
+```
+
+**Concrete example:**
+
+```bash
+cd .worktrees/agon-my-new-feature/backend
+dotnet run --project src/Agon.Api/Agon.Api.csproj
+```
+
+#### Step 4 — Run the CLI from the worktree (Terminal 2)
+
+```bash
+cd .worktrees/<name_of_worktree>/cli
+npm install
+npm run build
+AGON_API_URL=http://localhost:5000 node bin/run.js
+```
+
+**Concrete example:**
+
+```bash
+cd .worktrees/agon-my-new-feature/cli
+npm install
+npm run build
+AGON_API_URL=http://localhost:5000 node bin/run.js
+```
+
+#### Step 5 — Clean up the worktree when done
+
+```bash
+# From the Agon repository root
+git worktree remove .worktrees/<name_of_worktree>
+```
+
 ---
 
 ## Repository Structure
+[Back to top](#top)
 
 ```
 Agon/
@@ -375,12 +478,14 @@ Agon/
 ---
 
 ## For Developers
+[Back to top](#top)
 
 This section is for developers working on the Agon codebase.
 
 For a full environment setup walkthrough, see the [Developer Setup Guide](infrastructure/DEV-SETUP.md).
 
 ### Prerequisites
+[Back to top](#top)
 
 - **.NET 9.0 SDK** ([download](https://dotnet.microsoft.com/download))
 - **Node.js 20+** ([download](https://nodejs.org/))
@@ -390,8 +495,10 @@ For a full environment setup walkthrough, see the [Developer Setup Guide](infras
 ---
 
 ## CLI (TypeScript)
+[Back to top](#top)
 
 ### Architecture
+[Back to top](#top)
 
 The CLI is built with **oclif** (Open CLI Framework) and provides both command-driven and interactive shell modes.
 
@@ -405,6 +512,7 @@ The CLI is built with **oclif** (Open CLI Framework) and provides both command-d
 - **Utilities** (`src/utils/`) - Logger, error formatter, session flow helpers
 
 ### Running Tests
+[Back to top](#top)
 
 ```bash
 cd cli
@@ -412,10 +520,12 @@ npm test
 ```
 
 ### Test Coverage
+[Back to top](#top)
 
 CLI test projects use **Vitest**. Coverage is tracked in `cli/coverage/coverage-summary.json` and included in the combined badge at the top of this README.
 
 ### Key Technologies
+[Back to top](#top)
 
 - **oclif 3.0** - CLI framework with plugin architecture
 - **inquirer** - Interactive prompts for clarification Q&A
@@ -428,8 +538,10 @@ CLI test projects use **Vitest**. Coverage is tracked in `cli/coverage/coverage-
 ---
 
 ## Backend (.NET)
+[Back to top](#top)
 
 ### Architecture
+[Back to top](#top)
 
 The backend follows **Clean Architecture** with strict layer separation:
 
@@ -452,6 +564,7 @@ The backend follows **Clean Architecture** with strict layer separation:
 **Key principle:** Dependencies point **inward only**. Domain has zero external dependencies.
 
 ### Running Tests
+[Back to top](#top)
 
 ```bash
 cd backend
@@ -461,6 +574,7 @@ dotnet test
 **Current status:** See the `Tests` badge at the top of this README (auto-updated on `main`).
 
 ### Test Coverage
+[Back to top](#top)
 
 Coverage and aggregate test counts are maintained by CI badges at the top of this README.
 
@@ -472,6 +586,7 @@ Backend test projects:
 - `backend/tests/Agon.Integration.Tests`
 
 ### Key Technologies
+[Back to top](#top)
 
 - **EF Core 9.0** with PostgreSQL provider (Npgsql)
 - **Microsoft Agent Framework (MAF)** via `Microsoft.Extensions.AI`
@@ -480,6 +595,7 @@ Backend test projects:
 - **xUnit + FluentAssertions + NSubstitute** for testing
 
 ### NuGet Packages
+[Back to top](#top)
 
 ```bash
 # Domain (no external dependencies)
@@ -501,8 +617,10 @@ dotnet add src/Agon.Infrastructure/Agon.Infrastructure.csproj package \
 ---
 
 ## Frontend (Next.js)
+[Back to top](#top)
 
 ### Tech Stack
+[Back to top](#top)
 
 - **Next.js 16** with App Router
 - **React 19**
@@ -511,6 +629,7 @@ dotnet add src/Agon.Infrastructure/Agon.Infrastructure.csproj package \
 - Current scope: scaffold/WIP (`app/layout.tsx`, `app/page.tsx`)
 
 ### Getting Started
+[Back to top](#top)
 
 ```bash
 cd frontend
@@ -521,6 +640,7 @@ npm run dev
 Open [http://localhost:3000](http://localhost:3000) to see the app.
 
 ### Current Project Structure
+[Back to top](#top)
 
 ```
 frontend/
@@ -535,6 +655,7 @@ frontend/
 ```
 
 ### Frontend Roadmap (Planned)
+[Back to top](#top)
 
 - Thread View and Truth Map UI
 - Real-time SignalR updates
@@ -544,8 +665,10 @@ frontend/
 ---
 
 ## Testing & Quality
+[Back to top](#top)
 
 ### Test Coverage
+[Back to top](#top)
 
 [![CI](https://github.com/simonholmes001/agon/actions/workflows/ci.yaml/badge.svg)](https://github.com/simonholmes001/agon/actions/workflows/ci.yaml)
 [![Update Badges](https://github.com/simonholmes001/agon/actions/workflows/update-badges.yaml/badge.svg)](https://github.com/simonholmes001/agon/actions/workflows/update-badges.yaml)
@@ -553,6 +676,7 @@ frontend/
 Coverage and test counts are maintained by CI badges at the top of this README. Badges are automatically refreshed on every push/merge to `main` by `.github/workflows/update-badges.yaml`.
 
 ### Testing Strategy
+[Back to top](#top)
 
 - **Backend**: TDD strict — tests written first, implementation follows
 - **Domain**: Pure unit tests (no mocks, blazing fast)
@@ -561,6 +685,7 @@ Coverage and test counts are maintained by CI badges at the top of this README. 
 - **Frontend**: UI tests are currently not part of required CI/merge gates for this phase
 
 ### Running Tests
+[Back to top](#top)
 
 Run the full test suite from the repository root:
 
@@ -585,6 +710,7 @@ cd cli && npm run test:coverage
 ---
 
 ## Local Pre-Commit Hooks
+[Back to top](#top)
 
 Local pre-commit test gate is available at `.githooks/pre-commit` and runs:
 - CLI tests
@@ -602,13 +728,16 @@ Changeset validation is enforced by default in local pre-commit hook when `cli/`
 ---
 
 ## CLI Release Process
+[Back to top](#top)
 
 ### Workflows
+[Back to top](#top)
 
 - CI checks: `.github/workflows/ci.yaml`
 - Release + publish: `.github/workflows/publish-cli.yaml`
 
 ### Manual Steps (Developer)
+[Back to top](#top)
 
 1. In any PR that changes `cli/`, create a changeset:
    ```bash
@@ -619,6 +748,7 @@ Changeset validation is enforced by default in local pre-commit hook when `cli/`
 3. Merge the auto-generated release PR (title: `chore(release): version @agon_agents/cli`)
 
 ### Automated Steps (GitHub Actions)
+[Back to top](#top)
 
 1. PR CI fails if `cli/` changed without a `cli/.changeset/*.md` file
 2. After merge to `main`, Changesets action:
@@ -628,6 +758,7 @@ Changeset validation is enforced by default in local pre-commit hook when `cli/`
 3. When release PR is merged, Changesets action publishes to npm (`latest`) using trusted publishing (OIDC)
 
 ### Requirements
+[Back to top](#top)
 
 - npm Trusted Publisher configured for this repository/workflow
 - `publish-cli.yaml` has `id-token: write` permission
@@ -636,6 +767,7 @@ Changeset validation is enforced by default in local pre-commit hook when `cli/`
 ---
 
 ## Architecture Documentation
+[Back to top](#top)
 
 Full architecture, round policy, agent roster, and coding guidelines are in `.github/instructions/`:
 
@@ -649,8 +781,10 @@ Full architecture, round policy, agent roster, and coding guidelines are in `.gi
 ---
 
 ## Current Status (March 2026)
+[Back to top](#top)
 
 ### ✅ Completed
+[Back to top](#top)
 
 - **Backend API layer**: Session/message/artifact endpoints are implemented in `Agon.Api`.
 - **Debate orchestration**: `Orchestrator` + `AgentRunner` are active and tested.
@@ -659,10 +793,12 @@ Full architecture, round policy, agent roster, and coding guidelines are in `.gi
 - **TDD discipline**: backend + CLI test suites run in local hooks and CI.
 
 ### 🚧 In Progress
+[Back to top](#top)
 
 - **Frontend**: Next.js UI iteration and backend integration.
 
 ### 📋 Next Steps
+[Back to top](#top)
 
 1. **Frontend**:
    - Scaffold core layout (Thread View + Truth Map Drawer)
@@ -683,10 +819,12 @@ Full architecture, round policy, agent roster, and coding guidelines are in `.gi
 ---
 
 ## Contributing
+[Back to top](#top)
 
 This project follows strict **Clean Architecture** and **TDD** principles. See `.github/instructions/copilot.instructions.md` for full coding guidelines.
 
 ### Key Rules
+[Back to top](#top)
 
 1. **TDD is non-negotiable**: Write tests first, then implementation (RED → GREEN → REFACTOR)
 2. **Clean Architecture layers**: Domain has zero framework dependencies
@@ -695,6 +833,7 @@ This project follows strict **Clean Architecture** and **TDD** principles. See `
 5. **Error boundaries**: Every route must have `error.tsx` and root must have `global-error.tsx`
 
 ### Reporting Issues and Feature Requests
+[Back to top](#top)
 
 If you encounter a bug or have a feature request, please [open an issue](https://github.com/simonholmes001/agon/issues) and include:
 
@@ -707,6 +846,7 @@ If you encounter a bug or have a feature request, please [open an issue](https:/
 For feature requests, describe the problem you are trying to solve and your proposed solution. The more context you provide, the easier it is for maintainers to evaluate and prioritise.
 
 ### Submitting Pull Requests
+[Back to top](#top)
 
 1. **Fork** the repository and create a feature branch from `main`.
 2. Follow the TDD cycle: write a failing test first, then implement the fix or feature.
@@ -722,30 +862,36 @@ For feature requests, describe the problem you are trying to solve and your prop
 ---
 
 ## License
+[Back to top](#top)
 
 Proprietary — All rights reserved.
 
 ---
 
 ## Contact
+[Back to top](#top)
 
 For questions or contributions, contact the development team.
 
 ---
 
 ## Notes for Project Maintainers
+[Back to top](#top)
 
 This section captures operational notes relevant to maintainers of the Agon repository.
 
 ### Badge Maintenance
+[Back to top](#top)
 
 CI badges at the top of this README are auto-updated by `.github/workflows/update-badges.yaml` on every push to `main`. If badge values appear stale, manually trigger the workflow from the Actions tab.
 
 ### npm Publish
+[Back to top](#top)
 
 The CLI package (`@agon_agents/cli`) is published to npm via GitHub Actions using OIDC trusted publishing. No npm token is stored in repository secrets — ensure the npm Trusted Publisher is configured for `publish-cli.yaml` with `id-token: write` permission before any release.
 
 ### Dependency Updates
+[Back to top](#top)
 
 Dependencies should be updated regularly:
 
@@ -760,5 +906,6 @@ cd backend && dotnet list package --outdated
 Run the full test suite after any dependency bump before merging.
 
 ### Architecture Documentation
+[Back to top](#top)
 
 All living architecture documents are in `.github/instructions/`. Update these files alongside code changes to keep them accurate. They are auto-injected into Copilot sessions, so stale documentation directly affects AI-assisted development quality.
