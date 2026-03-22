@@ -64,8 +64,9 @@ export function renderMessagePanel(
   print('');
 }
 
-/** Warm amber used as the canonical accent for all attachment token references. */
-const attachmentAccent = chalk.bold.rgb(248, 197, 71);
+/** Distinct accents for image vs file/path attachment references. */
+const imageAttachmentAccent = chalk.bold.rgb(248, 197, 71);
+const fileAttachmentAccent = chalk.bold.rgb(110, 231, 183);
 
 /**
  * Regex that matches both Codex-style bracketed tokens and bare file paths:
@@ -79,7 +80,11 @@ const attachmentRefPattern = /(\[(?:Image|File|Attachment)\s+[^\]\n]+\])|((?:\.\
  * reference) with the canonical attachment accent color.
  */
 export function styleAttachmentToken(token: string): string {
-  return attachmentAccent(token);
+  if (/^\[image\s+/i.test(token)) {
+    return imageAttachmentAccent(token);
+  }
+
+  return fileAttachmentAccent(token);
 }
 
 /**

@@ -248,6 +248,22 @@ describe('styleAttachmentToken', () => {
     }
     expect(stripAnsi(styled)).toBe(plain);
   });
+
+  it('uses distinct styles for [Image ...] vs file/path tokens when ANSI is enabled', () => {
+    const imageToken = '[Image #1]';
+    const fileToken = './docs/spec.md';
+    const styledImage = styleAttachmentToken(imageToken);
+    const styledFile = styleAttachmentToken(fileToken);
+
+    expect(stripAnsi(styledImage)).toBe(imageToken);
+    expect(stripAnsi(styledFile)).toBe(fileToken);
+
+    const imageHasAnsi = /\u001b\[[0-9;]*m/.test(styledImage);
+    const fileHasAnsi = /\u001b\[[0-9;]*m/.test(styledFile);
+    if (imageHasAnsi && fileHasAnsi) {
+      expect(styledImage).not.toBe(styledFile);
+    }
+  });
 });
 
 describe('highlightAttachmentRefs', () => {

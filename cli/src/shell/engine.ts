@@ -99,6 +99,7 @@ export type ShellEngineOutcome =
   | {
       kind: 'attachment';
       sessionId: string;
+      referenceLabel: string;
       fileName: string;
       contentType: string;
       sizeBytes: number;
@@ -111,6 +112,7 @@ export class ShellEngine {
   private readonly routePlainInputFn: (session: SessionResponse | null) => PlainInputRoute;
   private readonly selfUpdateFn: (options: { check: boolean }) => Promise<ShellSelfUpdateResult>;
   private readonly print: (line: string) => void;
+  private readonly attachmentRefCounters = new Map<string, { image: number; file: number }>();
 
   constructor(deps: ShellEngineDeps) {
     this.controller = deps.controller;
@@ -144,10 +146,12 @@ export class ShellEngine {
     let plainText = text;
     if (inlineAttach?.type === 'attach') {
       const result = await this.controller.attachDocument(inlineAttach.path);
+      const referenceLabel = this.nextAttachmentReferenceLabel(result.sessionId, result.attachment.contentType);
       if (!inlineAttach.remainingText) {
         return {
           kind: 'attachment',
           sessionId: result.sessionId,
+          referenceLabel,
           fileName: result.attachment.fileName,
           contentType: result.attachment.contentType,
           sizeBytes: result.attachment.sizeBytes,
@@ -156,7 +160,7 @@ export class ShellEngine {
       }
 
       this.print(
-        `Attached ${styleAttachmentToken(result.attachment.fileName)} to session ${result.sessionId}.`
+        `Attached ${styleAttachmentToken(referenceLabel)} (${styleAttachmentToken(result.attachment.fileName)}) to session ${result.sessionId}.`
         + ` Type: ${result.attachment.contentType} | Size: ${result.attachment.sizeBytes} B`
       );
       this.printAttachmentExtractionMessage(result.attachment.contentType, result.attachment.hasExtractedText);
@@ -170,10 +174,12 @@ export class ShellEngine {
         const resolvedPath = await resolvePathIfExisting(implicitAttach.path);
         if (resolvedPath) {
           const result = await this.controller.attachDocument(resolvedPath);
+          const referenceLabel = this.nextAttachmentReferenceLabel(result.sessionId, result.attachment.contentType);
           if (!implicitAttach.remainingText) {
             return {
               kind: 'attachment',
               sessionId: result.sessionId,
+              referenceLabel,
               fileName: result.attachment.fileName,
               contentType: result.attachment.contentType,
               sizeBytes: result.attachment.sizeBytes,
@@ -182,7 +188,7 @@ export class ShellEngine {
           }
 
           this.print(
-            `Attached ${styleAttachmentToken(result.attachment.fileName)} to session ${result.sessionId}.`
+            `Attached ${styleAttachmentToken(referenceLabel)} (${styleAttachmentToken(result.attachment.fileName)}) to session ${result.sessionId}.`
             + ` Type: ${result.attachment.contentType} | Size: ${result.attachment.sizeBytes} B`
           );
           this.printAttachmentExtractionMessage(result.attachment.contentType, result.attachment.hasExtractedText);
@@ -388,9 +394,11 @@ export class ShellEngine {
       }
       case 'attach': {
         const result = await this.controller.attachDocument(parsed.path);
+        const referenceLabel = this.nextAttachmentReferenceLabel(result.sessionId, result.attachment.contentType);
         return {
           kind: 'attachment',
           sessionId: result.sessionId,
+          referenceLabel,
           fileName: result.attachment.fileName,
           contentType: result.attachment.contentType,
           sizeBytes: result.attachment.sizeBytes,
@@ -430,6 +438,20 @@ export class ShellEngine {
     }
 
     this.print('No text extraction available; file metadata/link still added to context.');
+  }
+
+  private nextAttachmentReferenceLabel(sessionId: string, contentType: string): string {
+    const counters = this.attachmentRefCounters.get(sessionId) ?? { image: 0, file: 0 };
+    const isImage = contentType.toLowerCase().startsWith('image/');
+    if (isImage) {
+      counters.image += 1;
+      this.attachmentRefCounters.set(sessionId, counters);
+      return `[Image #${counters.image}]`;
+    }
+
+    counters.file += 1;
+    this.attachmentRefCounters.set(sessionId, counters);
+    return `[File #${counters.file}]`;
   }
 }
 

@@ -21,6 +21,9 @@ internal static class ModeratorRoutingClassifier
         @"^\s*(how|what|who|can|could|would|do|does|is|are|where|when)\b",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex WordRegex = new(@"\b[\w'-]+\b", RegexOptions.Compiled);
+    private static readonly Regex AttachmentDirectActionRegex = new(
+        @"\b(describe|summari[sz]e|caption|transcribe|read|extract|analy[sz]e)\b.*\b(image|photo|picture|screenshot|scan|document|file|pdf|attachment)\b|\b(this|attached)\s+(image|document|file|pdf|attachment)\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     public static bool ShouldRunIntentRouter(SessionState state)
     {
@@ -52,7 +55,7 @@ internal static class ModeratorRoutingClassifier
             return false;
         }
 
-        return LooksLikeSimpleDirectQuery(latestInput);
+        return LooksLikeSimpleDirectQuery(latestInput, state.Attachments.Count > 0);
     }
 
     private static string GetLatestUserInput(SessionState state)
@@ -65,7 +68,7 @@ internal static class ModeratorRoutingClassifier
         return state.Idea ?? string.Empty;
     }
 
-    private static bool LooksLikeSimpleDirectQuery(string input)
+    private static bool LooksLikeSimpleDirectQuery(string input, bool hasAttachments)
     {
         var trimmed = input.Trim();
         if (trimmed.Length is < 4 or > 280)
@@ -73,7 +76,8 @@ internal static class ModeratorRoutingClassifier
             return false;
         }
 
-        if (!LooksLikeQuestion(trimmed))
+        var attachmentImperative = hasAttachments && AttachmentDirectActionRegex.IsMatch(trimmed);
+        if (!LooksLikeQuestion(trimmed) && !attachmentImperative)
         {
             return false;
         }

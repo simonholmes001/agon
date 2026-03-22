@@ -254,6 +254,7 @@ describe('shell engine', () => {
     expect(outcome).toEqual({
       kind: 'attachment',
       sessionId: 'session-123',
+      referenceLabel: '[File #1]',
       fileName: 'spec.md',
       contentType: 'text/markdown',
       sizeBytes: 1024,
@@ -275,6 +276,7 @@ describe('shell engine', () => {
     expect(outcome).toEqual({
       kind: 'attachment',
       sessionId: 'session-123',
+      referenceLabel: '[File #1]',
       fileName: 'spec.md',
       contentType: 'text/markdown',
       sizeBytes: 1024,
@@ -344,5 +346,48 @@ describe('shell engine', () => {
     expect(print).toHaveBeenCalledWith(
       'Update installed, but this shell is still running the previous runtime. Exit now and restart Agon to use v0.6.0.'
     );
+  });
+
+  it('assigns codex-style attachment labels per session for images', async () => {
+    controller.attachDocument.mockResolvedValueOnce({
+      sessionId: 'session-123',
+      attachment: {
+        fileName: 'image-one.jpeg',
+        contentType: 'image/jpeg',
+        sizeBytes: 2048,
+        hasExtractedText: true
+      }
+    });
+    controller.attachDocument.mockResolvedValueOnce({
+      sessionId: 'session-123',
+      attachment: {
+        fileName: 'image-two.jpeg',
+        contentType: 'image/jpeg',
+        sizeBytes: 4096,
+        hasExtractedText: true
+      }
+    });
+
+    const first = await engine.handleInput('/attach /tmp/image-one.jpeg');
+    const second = await engine.handleInput('/attach /tmp/image-two.jpeg');
+
+    expect(first).toEqual({
+      kind: 'attachment',
+      sessionId: 'session-123',
+      referenceLabel: '[Image #1]',
+      fileName: 'image-one.jpeg',
+      contentType: 'image/jpeg',
+      sizeBytes: 2048,
+      hasExtractedText: true
+    });
+    expect(second).toEqual({
+      kind: 'attachment',
+      sessionId: 'session-123',
+      referenceLabel: '[Image #2]',
+      fileName: 'image-two.jpeg',
+      contentType: 'image/jpeg',
+      sizeBytes: 4096,
+      hasExtractedText: true
+    });
   });
 });

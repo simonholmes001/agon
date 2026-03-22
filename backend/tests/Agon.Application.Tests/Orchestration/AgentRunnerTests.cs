@@ -754,6 +754,40 @@ public class AgentRunnerTests
         response.Message.Should().Contain("STATUS: DIRECT_ANSWER");
     }
 
+    [Fact]
+    public async Task RunModeratorAsync_AttachmentImperativePrompt_ShouldUseDeterministicDirectAnswerPath()
+    {
+        // Arrange
+        var repo = StubRepo();
+        var capturedContexts = new List<AgentContext>();
+
+        var moderator = Substitute.For<ICouncilAgent>();
+        moderator.AgentId.Returns(AgentId.Moderator);
+        moderator.ModelProvider.Returns("fake/model");
+        moderator.RunAsync(Arg.Do<AgentContext>(ctx => capturedContexts.Add(ctx)), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new AgentResponse(
+                AgentId.Moderator,
+                "STATUS: DIRECT_ANSWER\nThis image appears to show a dashboard screenshot.",
+                null,
+                55,
+                false,
+                null)));
+
+        var runner = BuildRunner([moderator], repo: repo);
+        var state = BuildSessionState(idea: "Describe this image");
+        state.Phase = SessionPhase.Clarification;
+        state.Attachments.Add(BuildAttachment("mock-image.jpeg", "image/jpeg"));
+
+        // Act
+        var response = await runner.RunModeratorAsync(state, CancellationToken.None);
+
+        // Assert
+        await moderator.Received(1).RunAsync(Arg.Any<AgentContext>(), Arg.Any<CancellationToken>());
+        capturedContexts.Should().HaveCount(1);
+        capturedContexts[0].MicroDirective.Should().Contain("STATUS: DIRECT_ANSWER");
+        response.Message.Should().Contain("STATUS: DIRECT_ANSWER");
+    }
+
     // ── Post-delivery follow-up tests ────────────────────────────────────────
 
     [Fact]
@@ -829,6 +863,22 @@ public class AgentRunnerTests
         var state = SessionState.Create(SessionId, Guid.Empty, idea, frictionLevel, false, EmptyMap());
         state.CurrentRound = round;
         return state;
+    }
+
+    private static SessionAttachment BuildAttachment(string fileName, string contentType)
+    {
+        return new SessionAttachment(
+            AttachmentId: Guid.NewGuid(),
+            SessionId: SessionId,
+            UserId: Guid.Empty,
+            FileName: fileName,
+            ContentType: contentType,
+            SizeBytes: 1024,
+            BlobName: $"blob/{fileName}",
+            BlobUri: $"https://example.invalid/{fileName}",
+            AccessUrl: $"https://example.invalid/access/{fileName}",
+            ExtractedText: null,
+            UploadedAt: DateTimeOffset.UtcNow);
     }
 
     private static ICouncilAgent BuildCapturingAgent(

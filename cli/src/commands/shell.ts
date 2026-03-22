@@ -344,7 +344,9 @@ export default class Shell extends Command {
         return;
       case 'attachment': {
         const attachedLine = chalk.green('✓ Attached ')
-          + styleAttachmentToken(outcome.fileName)
+          + styleAttachmentToken(outcome.referenceLabel)
+          + chalk.green(' ')
+          + chalk.dim(`(${outcome.fileName})`)
           + chalk.green(` to session ${outcome.sessionId}`);
         this.log(attachedLine);
         this.log(chalk.dim(`Type: ${outcome.contentType} | Size: ${formatBytes(outcome.sizeBytes)}`));
