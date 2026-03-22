@@ -353,6 +353,8 @@ public class SessionsController : ControllerBase
     /// POST /sessions/{id}/attachments — Upload any document/image to the active discussion.
     /// Metadata is persisted, file is stored in blob storage, and extracted text (when available)
     /// is injected into subsequent agent context.
+    /// Requires an authenticated user when authentication is enabled (Authentication:Enabled=true);
+    /// enforced globally by the application's authorization policy.
     /// </summary>
     [HttpPost("{id}/attachments")]
     [RequestSizeLimit(MaxAttachmentSizeBytes)]
@@ -522,6 +524,8 @@ public class SessionsController : ControllerBase
 
     /// <summary>
     /// GET /sessions/{id}/attachments — List all files attached to a session.
+    /// Requires an authenticated user when authentication is enabled (Authentication:Enabled=true);
+    /// enforced globally by the application's authorization policy.
     /// </summary>
     [HttpGet("{id}/attachments")]
     [ProducesResponseType(typeof(IReadOnlyList<SessionAttachmentResponse>), StatusCodes.Status200OK)]
@@ -760,6 +764,28 @@ public class SessionsController : ControllerBase
         };
     }
 
+    /// <summary>
+    /// Resolves the current user's identity to a stable <see cref="Guid"/>.
+    /// </summary>
+    /// <remarks>
+    /// Claim resolution order (first non-empty claim wins):
+    /// <list type="number">
+    ///   <item><description><c>oid</c> — Azure AD object identifier (already a GUID string)</description></item>
+    ///   <item><description><c>nameidentifier</c> (<see cref="ClaimTypes.NameIdentifier"/>) — standard identity claim</description></item>
+    ///   <item><description><c>sub</c> — OAuth 2.0 subject claim</description></item>
+    /// </list>
+    /// If the resolved claim value is already a valid GUID it is parsed directly.
+    /// Otherwise a deterministic version-3-style GUID is derived from the claim string
+    /// via SHA-256 so that the same principal always maps to the same user ID.
+    /// <para>
+    /// Returns <see cref="Guid.Empty"/> only when no identity claim is present at all
+    /// (i.e. the caller is unauthenticated). This value is used exclusively in
+    /// local-dev / auth-disabled scenarios where all sessions are created anonymously.
+    /// When authentication is enabled, the global authorization policy (set via
+    /// <c>Authentication:Enabled=true</c>) ensures unauthenticated requests are rejected
+    /// before reaching the controller.
+    /// </para>
+    /// </remarks>
     private Guid ResolveCurrentUserId()
     {
         var claimValue =
@@ -788,15 +814,30 @@ public class SessionsController : ControllerBase
         return new Guid(guidBytes);
     }
 
+    /// <summary>
+    /// Returns <see langword="true"/> when the current request's resolved user ID
+    /// matches the session's owner.
+    /// </summary>
+    /// <remarks>
+    /// Authenticated users are always matched against the session's stored
+    /// <see cref="Application.Models.SessionState.UserId"/> — there is no fallback that
+    /// grants access to all sessions.  This ensures that even when authentication is
+    /// disabled (local-dev mode), an anonymous caller with <see cref="Guid.Empty"/> as
+    /// their user ID can only reach sessions that were themselves created anonymously
+    /// (i.e. sessions whose <see cref="Application.Models.SessionState.UserId"/> is also
+    /// <see cref="Guid.Empty"/>).
+    /// </remarks>
     private bool IsOwnedByCurrentUser(Application.Models.SessionState state)
     {
         var userId = ResolveCurrentUserId();
         if (User.Identity?.IsAuthenticated == true && userId == Guid.Empty)
         {
+            // Authenticated principal but no recognisable identity claim — deny.
             return false;
         }
 
-        return userId == Guid.Empty || state.UserId == userId;
+        // Strict equality: anonymous (Guid.Empty) users may only access anonymous sessions.
+        return state.UserId == userId;
     }
 }
 
