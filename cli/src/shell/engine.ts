@@ -8,6 +8,9 @@ interface ShellControllerLike {
   getParamsSnapshot(): Promise<{
     config: {
       apiUrl: string;
+      apiUrlSource: 'default' | 'user' | 'admin';
+      apiUrlMode: 'managed' | 'custom';
+      apiUrlUpgradeSuggestion: string | null;
       defaultFriction: number;
       researchEnabled: boolean;
       logLevel: 'debug' | 'info' | 'warn' | 'error';
@@ -15,6 +18,7 @@ interface ShellControllerLike {
     session: SessionResponse | null;
   }>;
   setParam(key: 'apiUrl' | 'defaultFriction' | 'researchEnabled' | 'logLevel', value: string): Promise<void>;
+  unsetParam(key: 'apiUrl' | 'defaultFriction' | 'researchEnabled' | 'logLevel'): Promise<void>;
   clearShellSessionSelection(): Promise<void>;
   selectSession(sessionId: string): Promise<SessionResponse>;
   resumeSession(sessionId?: string): Promise<SessionResponse>;
@@ -214,6 +218,7 @@ export class ShellEngine {
           { token: '/session <session-id>',          description: 'Switch active session' },
           { token: '/update [--check]',               description: 'Update CLI in-session (--check to only verify)' },
           { token: '/set <key> <value>',             description: 'Persist config key (apiUrl|defaultFriction|researchEnabled|logLevel)' },
+          { token: '/unset <key>',                   description: 'Remove persisted key and fall back to managed defaults' },
           { token: '/show <artifact> [flags]',       description: 'Show artifact (e.g. verdict, prd)' },
           { token: '/show-sessions',                 description: 'List your sessions' },
           { token: '/status [session-id]',           description: 'Fetch session status/phase' },
@@ -227,7 +232,8 @@ export class ShellEngine {
         this.print('  /set defaultFriction 75');
         this.print('  /set researchEnabled false');
         this.print('  /set logLevel warn');
-        this.print('  /set apiUrl http://localhost:5000');
+        this.print('  /set apiUrl https://api-dev.agon-agents.org');
+        this.print('  /unset apiUrl');
         this.print('  /attach ./docs/product-brief.md');
         return { kind: 'noop' };
       }
@@ -235,17 +241,33 @@ export class ShellEngine {
         const snapshot = await this.controller.getParamsSnapshot();
         this.print('Current parameters:');
         this.print(`  apiUrl: ${snapshot.config.apiUrl}`);
-        this.print(`  defaultFriction: ${snapshot.config.defaultFriction}`);
-        this.print(`  researchEnabled: ${snapshot.config.researchEnabled}`);
+        this.print(`  apiUrlSource: ${snapshot.config.apiUrlSource} (${snapshot.config.apiUrlMode})`);
+        this.print(`  defaultFriction: ${snapshot.config.defaultFriction} (0-100 debate rigor)`);
+        this.print(`  researchEnabled: ${snapshot.config.researchEnabled} (web research tools on/off)`);
         this.print(`  logLevel: ${snapshot.config.logLevel}`);
         this.print(`  activeSession: ${snapshot.session?.id ?? 'none'}`);
         this.print(`  phase: ${snapshot.session?.phase ?? 'n/a'}`);
+        if (snapshot.config.apiUrlUpgradeSuggestion) {
+          this.print(
+            `  tip: /set apiUrl ${snapshot.config.apiUrlUpgradeSuggestion} (detected HTTP -> HTTPS redirect)`
+          );
+        }
         this.print('Use /set <key> <value> to update: apiUrl, defaultFriction, researchEnabled, logLevel');
+        this.print('Use /unset <key> to remove an override and return to managed defaults.');
         return { kind: 'noop' };
       }
       case 'set':
         await this.controller.setParam(parsed.key, parsed.value);
+        if (parsed.key === 'apiUrl') {
+          this.print('Custom backend URL enabled. Managed endpoint upgrades are disabled until /unset apiUrl.');
+        }
         return { kind: 'notice', message: `Updated ${parsed.key}.` };
+      case 'unset':
+        await this.controller.unsetParam(parsed.key);
+        if (parsed.key === 'apiUrl') {
+          return { kind: 'notice', message: 'Cleared apiUrl override. Reverted to managed backend URL.' };
+        }
+        return { kind: 'notice', message: `Cleared ${parsed.key}.` };
       case 'new':
         await this.controller.clearShellSessionSelection();
         this.print('Ready for a new idea.');

@@ -42,11 +42,15 @@ describe('shell controller', () => {
     configManager = {
       load: vi.fn().mockResolvedValue({
         apiUrl: 'http://localhost:5000',
+        apiUrlSource: 'default',
+        apiUrlMode: 'managed',
+        apiUrlUpgradeSuggestion: null,
         defaultFriction: 50,
         researchEnabled: true,
         logLevel: 'info'
       }),
-      set: vi.fn()
+      set: vi.fn(),
+      unset: vi.fn()
     };
 
     controller = new ShellController({
@@ -179,6 +183,11 @@ describe('shell controller', () => {
 
     expect(configManager.set).toHaveBeenNthCalledWith(1, 'defaultFriction', 75);
     expect(configManager.set).toHaveBeenNthCalledWith(2, 'researchEnabled', false);
+  });
+
+  it('unsets parameter values via config manager', async () => {
+    await controller.unsetParam('apiUrl');
+    expect(configManager.unset).toHaveBeenCalledWith('apiUrl');
   });
 
   it('selects a session by validating it from API when not cached', async () => {

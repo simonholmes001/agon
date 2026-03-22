@@ -51,6 +51,8 @@ export function parseShellInput(input: string): ParsedShellInput {
       return parseAttach(rawCommandArgs);
     case 'set':
       return parseSet(rawArgs);
+    case 'unset':
+      return parseUnset(rawArgs);
     case 'session':
       return parseSession(rawArgs);
     case 'resume':
@@ -143,6 +145,29 @@ function parseSet(args: string[]): ParsedShellInput {
     command: 'set',
     key,
     value: args.slice(1).join(' ')
+  };
+}
+
+function parseUnset(args: string[]): ParsedShellInput {
+  if (args.length !== 1) {
+    return {
+      type: 'error',
+      message: 'Usage: /unset <apiUrl|defaultFriction|researchEnabled|logLevel>'
+    };
+  }
+
+  const key = args[0] as ShellSettableKey;
+  if (!settableKeys.has(key)) {
+    return {
+      type: 'error',
+      message: 'Usage: /unset <apiUrl|defaultFriction|researchEnabled|logLevel>'
+    };
+  }
+
+  return {
+    type: 'slash',
+    command: 'unset',
+    key
   };
 }
 

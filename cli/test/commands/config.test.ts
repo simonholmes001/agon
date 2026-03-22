@@ -19,6 +19,7 @@ const mockConfigManager = vi.hoisted(() => ({
   load: vi.fn(),
   get: vi.fn(),
   set: vi.fn(),
+  unset: vi.fn(),
   getDefaults: vi.fn(),
   getConfigPath: vi.fn()
 }));
@@ -60,6 +61,9 @@ describe('Config Command', () => {
       // Arrange
       const config = {
         apiUrl: 'http://localhost:5000',
+        apiUrlSource: 'default' as const,
+        apiUrlMode: 'managed' as const,
+        apiUrlUpgradeSuggestion: null,
         defaultFriction: 50,
         researchEnabled: true,
         logLevel: 'info' as const
@@ -88,6 +92,9 @@ describe('Config Command', () => {
       // Arrange
       mockConfigManager.load.mockResolvedValue({
         apiUrl: 'http://localhost:5000',
+        apiUrlSource: 'default' as const,
+        apiUrlMode: 'managed' as const,
+        apiUrlUpgradeSuggestion: null,
         defaultFriction: 50,
         researchEnabled: true,
         logLevel: 'info' as const
@@ -119,6 +126,9 @@ describe('Config Command', () => {
       };
       const config = {
         apiUrl: 'https://api.agon.ai',
+        apiUrlSource: 'user' as const,
+        apiUrlMode: 'custom' as const,
+        apiUrlUpgradeSuggestion: null,
         defaultFriction: 75,
         researchEnabled: false,
         logLevel: 'debug' as const
@@ -141,6 +151,9 @@ describe('Config Command', () => {
       // Arrange
       mockConfigManager.load.mockResolvedValue({
         apiUrl: 'http://localhost:5000',
+        apiUrlSource: 'default' as const,
+        apiUrlMode: 'managed' as const,
+        apiUrlUpgradeSuggestion: null,
         defaultFriction: 50,
         researchEnabled: true,
         logLevel: 'info' as const
@@ -261,6 +274,29 @@ describe('Config Command', () => {
     });
   });
 
+  describe('Unset Configuration (agon config unset <key>)', () => {
+    it('should unset apiUrl', async () => {
+      mockConfigManager.unset.mockResolvedValue(undefined);
+
+      const command = createCommand(['unset', 'apiUrl']);
+      await command.run();
+
+      expect(mockConfigManager.unset).toHaveBeenCalledWith('apiUrl');
+    });
+
+    it('should reject unknown unset keys', async () => {
+      const command = createCommand(['unset', 'unknownKey']);
+      await expect(command.run()).rejects.toThrow(/unknown configuration key/i);
+      expect(mockConfigManager.unset).not.toHaveBeenCalled();
+    });
+
+    it('should reject missing key for unset', async () => {
+      const command = createCommand(['unset']);
+      await expect(command.run()).rejects.toThrow(/missing configuration key/i);
+      expect(mockConfigManager.unset).not.toHaveBeenCalled();
+    });
+  });
+
   describe('Error Handling', () => {
     it('should handle ConfigManager.load() errors', async () => {
       // Arrange
@@ -294,6 +330,9 @@ describe('Config Command', () => {
       // Arrange
       mockConfigManager.load.mockResolvedValue({
         apiUrl: 'http://localhost:5000',
+        apiUrlSource: 'default' as const,
+        apiUrlMode: 'managed' as const,
+        apiUrlUpgradeSuggestion: null,
         defaultFriction: 50,
         researchEnabled: true,
         logLevel: 'info' as const

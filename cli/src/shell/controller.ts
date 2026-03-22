@@ -37,11 +37,15 @@ interface SessionManagerLike {
 interface ConfigManagerLike {
   load(): Promise<{
     apiUrl: string;
+    apiUrlSource: 'default' | 'user' | 'admin';
+    apiUrlMode: 'managed' | 'custom';
+    apiUrlUpgradeSuggestion: string | null;
     defaultFriction: number;
     researchEnabled: boolean;
     logLevel: 'debug' | 'info' | 'warn' | 'error';
   }>;
   set(key: ShellSettableKey, value: string | number | boolean): Promise<void>;
+  unset(key: ShellSettableKey): Promise<void>;
 }
 
 export interface ShellControllerDeps {
@@ -155,6 +159,10 @@ export class ShellController {
   async setParam(key: ShellSettableKey, value: string): Promise<void> {
     const parsed = this.parseSetValue(key, value);
     await this.configManager.set(key, parsed);
+  }
+
+  async unsetParam(key: ShellSettableKey): Promise<void> {
+    await this.configManager.unset(key);
   }
 
   async selectSession(sessionId: string): Promise<SessionResponse> {

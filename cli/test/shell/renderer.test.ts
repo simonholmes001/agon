@@ -28,6 +28,8 @@ describe('shell renderer', () => {
         directory: '/tmp',
         config: {
           apiUrl: 'http://localhost:5000',
+          apiUrlSource: 'default',
+          apiUrlMode: 'managed',
           defaultFriction: 50,
           researchEnabled: true,
           logLevel: 'info'
@@ -42,6 +44,7 @@ describe('shell renderer', () => {
     expect(text).toContain('OpenAI GPT');
     expect(text).toContain('/tmp');
     expect(text).toContain('http://localhost:5000');
+    expect(text).toContain('(managed)');
   });
 
   it('renders message panel boundaries', () => {

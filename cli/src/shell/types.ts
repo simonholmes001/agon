@@ -42,6 +42,11 @@ export type ParsedShellInput =
     }
   | {
       type: 'slash';
+      command: 'unset';
+      key: ShellSettableKey;
+    }
+  | {
+      type: 'slash';
       command: 'show';
       artifactType: ArtifactType;
       refresh: boolean;

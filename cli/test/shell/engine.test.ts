@@ -22,6 +22,9 @@ describe('shell engine', () => {
       getParamsSnapshot: vi.fn().mockResolvedValue({
         config: {
           apiUrl: 'http://localhost:5000',
+          apiUrlSource: 'user',
+          apiUrlMode: 'custom',
+          apiUrlUpgradeSuggestion: 'https://localhost:5000/',
           defaultFriction: 50,
           researchEnabled: true,
           logLevel: 'info'
@@ -29,6 +32,7 @@ describe('shell engine', () => {
         session
       }),
       setParam: vi.fn(),
+      unsetParam: vi.fn(),
       clearShellSessionSelection: vi.fn(),
       selectSession: vi.fn().mockResolvedValue(session),
       resumeSession: vi.fn().mockResolvedValue(session),
@@ -90,10 +94,17 @@ describe('shell engine', () => {
     expect(outcome).toEqual({ kind: 'notice', message: 'Updated defaultFriction.' });
   });
 
+  it('executes /unset via controller', async () => {
+    const outcome = await engine.handleInput('/unset apiUrl');
+    expect(controller.unsetParam).toHaveBeenCalledWith('apiUrl');
+    expect(outcome).toEqual({ kind: 'notice', message: 'Cleared apiUrl override. Reverted to managed backend URL.' });
+  });
+
   it('prints detailed command help for /help', async () => {
     await engine.handleInput('/help');
     expect(print).toHaveBeenCalledWith('Commands:');
     expect(print).toHaveBeenCalledWith(expect.stringContaining('/set <key> <value>'));
+    expect(print).toHaveBeenCalledWith(expect.stringContaining('/unset <key>'));
     expect(print).toHaveBeenCalledWith(expect.stringContaining('/show-sessions'));
     expect(print).toHaveBeenCalledWith(expect.stringContaining('/resume [session-id]'));
     expect(print).toHaveBeenCalledWith(expect.stringContaining('/refresh [artifact]'));
@@ -101,6 +112,8 @@ describe('shell engine', () => {
     expect(print).toHaveBeenCalledWith(expect.stringContaining('/exit'));
     expect(print).toHaveBeenCalledWith(expect.stringContaining('/update'));
     expect(print).toHaveBeenCalledWith('  /set defaultFriction 75');
+    expect(print).toHaveBeenCalledWith('  /set apiUrl https://api-dev.agon-agents.org');
+    expect(print).toHaveBeenCalledWith('  /unset apiUrl');
   });
 
   it('prints /help command entries in strict alphabetical order', async () => {
@@ -146,8 +159,13 @@ describe('shell engine', () => {
   it('prints full parameter snapshot for /params', async () => {
     await engine.handleInput('/params');
     expect(print).toHaveBeenCalledWith('Current parameters:');
+    expect(print).toHaveBeenCalledWith('  apiUrlSource: user (custom)');
+    expect(print).toHaveBeenCalledWith('  defaultFriction: 50 (0-100 debate rigor)');
+    expect(print).toHaveBeenCalledWith('  researchEnabled: true (web research tools on/off)');
+    expect(print).toHaveBeenCalledWith('  tip: /set apiUrl https://localhost:5000/ (detected HTTP -> HTTPS redirect)');
     expect(print).toHaveBeenCalledWith('  activeSession: session-123');
     expect(print).toHaveBeenCalledWith('Use /set <key> <value> to update: apiUrl, defaultFriction, researchEnabled, logLevel');
+    expect(print).toHaveBeenCalledWith('Use /unset <key> to remove an override and return to managed defaults.');
   });
 
   it('executes /show with parsed flags', async () => {

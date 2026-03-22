@@ -8,6 +8,8 @@ export interface ShellHeaderData {
   directory: string;
   config: {
     apiUrl: string;
+    apiUrlSource?: 'default' | 'user' | 'admin';
+    apiUrlMode?: 'managed' | 'custom';
     defaultFriction: number;
     researchEnabled: boolean;
     logLevel: string;
@@ -22,6 +24,7 @@ export function renderShellHeader(data: ShellHeaderData, print: (line: string) =
   const cardFooter = chalk.blue('└' + '─'.repeat(cardWidth + 1) + '┘');
   const phase = data.session ? ` (${data.session.phase})` : '';
   const sessionLabel = data.session ? data.session.id : 'none';
+  const apiUrlMode = data.config.apiUrlMode ?? (data.config.apiUrlSource === 'user' ? 'custom' : 'managed');
   const cardLine = (content: string): string => {
     const truncated = content.length > cardWidth
       ? `${content.slice(0, cardWidth - 1)}…`
@@ -35,7 +38,7 @@ export function renderShellHeader(data: ShellHeaderData, print: (line: string) =
   print(cardLine('Agon CLI  codex-style shell'));
   print(cardLine(`model: ${data.modelLabel}`));
   print(cardLine(`directory: ${data.directory}`));
-  print(cardLine(`apiUrl: ${data.config.apiUrl}`));
+  print(cardLine(`apiUrl: ${data.config.apiUrl} (${apiUrlMode})`));
   print(cardLine(`session: ${sessionLabel}${phase}`));
   print(cardLine(`friction/research: ${data.config.defaultFriction} / ${data.config.researchEnabled ? 'on' : 'off'}`));
   print(cardLine(`logLevel: ${data.config.logLevel}`));
