@@ -6,6 +6,7 @@ import { stdin as input, stdout as output } from 'node:process';
 import { AgonAPIClient } from '../api/agon-client.js';
 import { ConfigManager } from '../state/config-manager.js';
 import { SessionManager } from '../state/session-manager.js';
+import { AuthManager } from '../auth/auth-manager.js';
 import { ShellController } from '../shell/controller.js';
 import { createKeypressInitializer } from '../shell/keypress.js';
 import {
@@ -123,15 +124,48 @@ export default class Shell extends Command {
   public async run(): Promise<void> {
     const configManager = new ConfigManager();
     const sessionManager = new SessionManager();
+    const authManager = new AuthManager();
     const config = await configManager.load();
+
+    // Resolve auth token: env var > stored credentials
+    const storedToken = await authManager.getToken();
+
     const apiClient = new AgonAPIClient(
       config.apiUrl,
       this.config.pjson.name ?? '@agon_agents/cli',
-      this.config.pjson.version ?? '0.0.0'
+      this.config.pjson.version ?? '0.0.0',
+      storedToken ?? undefined
     );
     this.apiClient = apiClient;
     this.sessionManager = sessionManager;
     this.initializeKeypressEvents = createKeypressInitializer(input);
+
+    // Pre-flight: auth check
+    // Only block when the backend explicitly requires authentication AND the
+    // user has no token configured. We do not block on network errors so
+    // that self-hosted setups still work while the backend is starting up.
+    const authStatus = await apiClient.getAuthStatus();
+    const hasToken =
+      !!process.env.AGON_AUTH_TOKEN?.trim() ||
+      !!process.env.AGON_BEARER_TOKEN?.trim() ||
+      storedToken !== null;
+
+    if (authStatus?.required && !hasToken) {
+      this.log('');
+      this.log(chalk.red('✗ Authentication required'));
+      this.log('');
+      this.log(
+        `The Agon backend at ${chalk.cyan(config.apiUrl)} requires a bearer token.`
+      );
+      this.log('');
+      this.log('First-time setup:');
+      this.log(`  ${chalk.cyan('agon login')}              Save your bearer token`);
+      this.log(`  ${chalk.cyan('agon login --status')}     Check current auth status`);
+      this.log('');
+      this.log(chalk.dim('If you do not have a token, contact your Agon administrator.'));
+      this.log('');
+      this.exit(1);
+    }
 
     const controller = new ShellController({
       apiClient,

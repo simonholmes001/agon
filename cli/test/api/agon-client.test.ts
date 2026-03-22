@@ -245,6 +245,96 @@ describe('AgonAPIClient', () => {
       expect(agonError.code).toBe(ErrorCode.CLI_UPGRADE_REQUIRED);
       expect(agonError.suggestions).toContain('Run `agon --self-update`');
     });
+
+    it('should map 401 errors to UNAUTHENTICATED with login guidance', () => {
+      const error: any = new Error('Unauthorized');
+      error.response = { status: 401, data: {} };
+      const mapped = (client as any).mapError(error);
+      expect(mapped).toBeInstanceOf(AgonError);
+      const agonError = mapped as AgonError;
+      expect(agonError.code).toBe(ErrorCode.UNAUTHENTICATED);
+      expect(agonError.suggestions).toContain('Run `agon login` to save your bearer token');
+    });
+
+    it('should map 403 errors to UNAUTHENTICATED', () => {
+      const error: any = new Error('Forbidden');
+      error.response = { status: 403, data: {} };
+      const mapped = (client as any).mapError(error);
+      expect(mapped).toBeInstanceOf(AgonError);
+      const agonError = mapped as AgonError;
+      expect(agonError.code).toBe(ErrorCode.UNAUTHENTICATED);
+    });
+  });
+
+  describe('getAuthStatus', () => {
+    it('returns auth status from the backend', async () => {
+      (mockAxios.get as any).mockResolvedValue({
+        data: { required: true, scheme: 'bearer' }
+      });
+
+      const result = await client.getAuthStatus();
+
+      expect(mockAxios.get).toHaveBeenCalledWith('/auth/status');
+      expect(result).toEqual({ required: true, scheme: 'bearer' });
+    });
+
+    it('returns { required: false } when backend does not require auth', async () => {
+      (mockAxios.get as any).mockResolvedValue({
+        data: { required: false, scheme: 'none' }
+      });
+
+      const result = await client.getAuthStatus();
+
+      expect(result?.required).toBe(false);
+      expect(result?.scheme).toBe('none');
+    });
+
+    it('returns null when the endpoint is unavailable (older backend)', async () => {
+      (mockAxios.get as any).mockRejectedValue(new Error('Network error'));
+
+      const result = await client.getAuthStatus();
+
+      expect(result).toBeNull();
+    });
+  });
+
+  describe('auth token constructor parameter', () => {
+    it('uses explicit authToken parameter over env var', () => {
+      process.env.AGON_AUTH_TOKEN = 'env-token';
+      new AgonAPIClient('http://localhost:5000', '@agon_agents/cli', '0.1.3', 'explicit-token');
+
+      expect(axios.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          headers: expect.objectContaining({
+            Authorization: 'Bearer explicit-token'
+          })
+        })
+      );
+      delete process.env.AGON_AUTH_TOKEN;
+    });
+
+    it('falls back to env var when no explicit token is provided', () => {
+      process.env.AGON_AUTH_TOKEN = 'env-token';
+      new AgonAPIClient('http://localhost:5000', '@agon_agents/cli', '0.1.3');
+
+      expect(axios.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          headers: expect.objectContaining({
+            Authorization: 'Bearer env-token'
+          })
+        })
+      );
+      delete process.env.AGON_AUTH_TOKEN;
+    });
+
+    it('sends no Authorization header when no token is available', () => {
+      delete process.env.AGON_AUTH_TOKEN;
+      delete process.env.AGON_BEARER_TOKEN;
+      new AgonAPIClient('http://localhost:5000', '@agon_agents/cli', '0.1.3');
+
+      const callArgs = (axios.create as any).mock.calls[0][0];
+      expect(callArgs.headers?.Authorization).toBeUndefined();
+    });
   });
 
   describe('timeout handling', () => {

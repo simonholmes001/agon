@@ -16,6 +16,7 @@ import ora from 'ora';
 import { AgonAPIClient } from '../api/agon-client.js';
 import { SessionManager } from '../state/session-manager.js';
 import { ConfigManager } from '../state/config-manager.js';
+import { AuthManager } from '../auth/auth-manager.js';
 import { renderMarkdown } from '../utils/markdown.js';
 import { formatElapsedTimer, buildInterruptHint } from '../shell/renderer.js';
 
@@ -69,6 +70,7 @@ export default class Start extends Command {
       // Initialize managers
       const configManager = new ConfigManager();
       const sessionManager = new SessionManager();
+      const authManager = new AuthManager();
       const config = await configManager.load();
 
       // Ensure config directory exists
@@ -78,11 +80,15 @@ export default class Start extends Command {
       const friction = flags.friction ?? config.defaultFriction;
       const researchEnabled = flags.research ?? config.researchEnabled;
 
+      // Resolve auth token: env var > stored credentials
+      const storedToken = await authManager.getToken();
+
       // Initialize API client
       const apiClient = new AgonAPIClient(
         config.apiUrl,
         this.config.pjson.name ?? '@agon_agents/cli',
-        this.config.pjson.version ?? '0.0.0'
+        this.config.pjson.version ?? '0.0.0',
+        storedToken ?? undefined
       );
 
       // Create session

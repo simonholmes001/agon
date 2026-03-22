@@ -348,6 +348,48 @@ Optional auth token for secured API (JWT bearer):
 AGON_AUTH_TOKEN="<jwt-token>" AGON_API_URL=http://localhost:5000 node cli/bin/run.js
 ```
 
+### Authentication: first-time setup
+
+If the Agon backend is configured with `Authentication:Enabled = true`, a bearer
+token is required for all API calls. On first run without a token the shell will
+display an error and exit:
+
+```
+✗ Authentication required
+
+The Agon backend at https://your-agon-host requires a bearer token.
+
+First-time setup:
+  agon login              Save your bearer token
+  agon login --status     Check current auth status
+```
+
+Run `agon login` to save your token interactively:
+
+```bash
+agon login
+# > Bearer token: ****
+
+# Or non-interactively:
+agon login --token "<your-bearer-token>"
+```
+
+The token is stored in `~/.agon/credentials` with mode `0600` (owner read/write
+only). It is **never** stored in `.agonrc` so that the main config file can be
+safely committed to version control.
+
+Additional `agon login` flags:
+
+| Flag | Description |
+|---|---|
+| `--token <token>` | Supply token directly (non-interactive) |
+| `--clear` | Remove the stored token |
+| `--status` | Show whether a token is configured and whether the backend requires one |
+
+**Returning users:** if you already set `AGON_AUTH_TOKEN` or `AGON_BEARER_TOKEN`
+as environment variables those continue to work unchanged. The environment variable
+takes precedence over a stored credentials file.
+
 Web frontend (WIP):
 
 ```bash

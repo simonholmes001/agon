@@ -20,6 +20,11 @@ import type {
   SessionAttachment
 } from './types.js';
 
+export interface AuthStatusResponse {
+  required: boolean;
+  scheme: 'bearer' | 'none';
+}
+
 export class AgonAPIClient {
   private readonly client: AxiosInstance;
   private readonly maxRetries = 2;
@@ -30,19 +35,24 @@ export class AgonAPIClient {
   constructor(
     baseURL: string = 'http://localhost:5000',
     packageName: string = '@agon_agents/cli',
-    cliVersion: string = '0.0.0'
+    cliVersion: string = '0.0.0',
+    authToken?: string
   ) {
     this.logger = new Logger('AgonAPIClient');
     this.packageName = packageName;
     this.cliVersion = cliVersion;
-    const authToken = process.env.AGON_AUTH_TOKEN?.trim() || process.env.AGON_BEARER_TOKEN?.trim();
+    // Resolve auth token: explicit parameter > AGON_AUTH_TOKEN env > AGON_BEARER_TOKEN env
+    const resolvedAuthToken =
+      authToken?.trim() ||
+      process.env.AGON_AUTH_TOKEN?.trim() ||
+      process.env.AGON_BEARER_TOKEN?.trim();
     this.client = axios.create({
       baseURL,
       timeout: 30000, // 30 seconds
       headers: {
         'X-Agon-CLI-Version': this.cliVersion,
         'User-Agent': `${this.packageName}/${this.cliVersion}`,
-        ...(authToken ? { Authorization: `Bearer ${authToken}` } : {})
+        ...(resolvedAuthToken ? { Authorization: `Bearer ${resolvedAuthToken}` } : {})
       }
     });
 
@@ -260,6 +270,20 @@ export class AgonAPIClient {
     return response.data;
   }
 
+  /**
+   * Query whether the backend requires authentication.
+   * This endpoint is always anonymous — it is safe to call before a token is set up.
+   * Returns null when the endpoint is not available (older backend versions).
+   */
+  async getAuthStatus(): Promise<AuthStatusResponse | null> {
+    try {
+      const response = await this.client.get<AuthStatusResponse>('/auth/status');
+      return response.data;
+    } catch {
+      return null;
+    }
+  }
+
   // Helper methods
 
   private mapAttachmentFileError(error: unknown, filePath: string): Error {
@@ -328,6 +352,17 @@ export class AgonAPIClient {
       this.logger.error('API error', { status, message, errorCode });
 
       switch (status) {
+        case 401:
+        case 403:
+          return new AgonError(
+            ErrorCode.UNAUTHENTICATED,
+            'Authentication required. Your request was rejected by the backend.',
+            [
+              'Run `agon login` to save your bearer token',
+              'Or set the AGON_AUTH_TOKEN environment variable',
+              'Contact your Agon administrator if you do not have a token'
+            ]
+          );
         case 404:
           return new AgonError(
             ErrorCode.SESSION_NOT_FOUND,
