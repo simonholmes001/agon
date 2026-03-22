@@ -490,6 +490,11 @@ if (authEnabled)
 
 // ── Map Endpoints ───────────────────────────────────────────────────────
 app.MapGet("/health", () => Results.Ok(new { status = "Healthy" })).AllowAnonymous();
+
+// Always anonymous: clients use this to discover whether the backend requires a bearer token
+// before making any authenticated API calls. Returns { required: bool, scheme: string }.
+var authStatusPayload = new { required = authEnabled, scheme = authEnabled ? "bearer" : "none" };
+app.MapGet("/auth/status", () => Results.Ok(authStatusPayload)).AllowAnonymous();
 var controllers = app.MapControllers();
 if (authEnabled)
 {
