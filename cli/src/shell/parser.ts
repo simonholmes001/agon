@@ -67,6 +67,12 @@ export function parseShellInput(input: string): ParsedShellInput {
     case 'followup':
       return parseFollowUp(rawArgs);
     default:
+      if (isLikelyPathToken(commandToken)) {
+        return {
+          type: 'plain',
+          text: trimmed
+        };
+      }
       return {
         type: 'error',
         message: 'Unknown command. Use /help for available commands.'
@@ -117,6 +123,30 @@ export function extractInlineAttach(input: string): InlineAttachExtraction | nul
 
   const remainingText = normalizeInlineMessageText(`${input.slice(0, commandStart)} ${input.slice(parsedPath.nextIndex)}`);
 
+  return {
+    type: 'attach',
+    path: parsedPath.path,
+    remainingText
+  };
+}
+
+export function extractImplicitAttach(input: string): InlineAttachExtraction | null {
+  const leadingWhitespaceTrimmed = input.trimStart();
+  if (!leadingWhitespaceTrimmed) {
+    return null;
+  }
+
+  const startIndex = input.length - leadingWhitespaceTrimmed.length;
+  const parsedPath = parseAttachPathToken(input, startIndex);
+  if (!parsedPath) {
+    return null;
+  }
+
+  if (!isPathLikeCandidate(parsedPath.path)) {
+    return null;
+  }
+
+  const remainingText = normalizeInlineMessageText(input.slice(parsedPath.nextIndex));
   return {
     type: 'attach',
     path: parsedPath.path,
@@ -396,13 +426,23 @@ function parseAttachPathToken(
     rawPath = input.slice(cursor + 1, pathEnd);
     nextIndex = pathEnd + 1;
   } else {
-    while (nextIndex < input.length && !/\s/.test(input[nextIndex] ?? '')) {
+    while (nextIndex < input.length) {
+      const char = input[nextIndex] ?? '';
+      if (char === '\\' && nextIndex + 1 < input.length) {
+        nextIndex += 2;
+        continue;
+      }
+
+      if (/\s/.test(char)) {
+        break;
+      }
+
       nextIndex += 1;
     }
     rawPath = input.slice(cursor, nextIndex);
   }
 
-  const normalizedPath = rawPath.trim();
+  const normalizedPath = decodeEscapedPath(rawPath).trim();
   if (!normalizedPath) {
     return null;
   }
@@ -418,4 +458,27 @@ function normalizeInlineMessageText(value: string): string {
     .replace(/\s+/g, ' ')
     .replace(/\s+([.,!?;:])/g, '$1')
     .trim();
+}
+
+function decodeEscapedPath(rawPath: string): string {
+  return rawPath.replace(/\\(.)/g, '$1');
+}
+
+function isPathLikeCandidate(value: string): boolean {
+  return value.startsWith('/')
+    || value.startsWith('./')
+    || value.startsWith('../')
+    || value.startsWith('~/')
+    || /^[A-Za-z]:[\\/]/.test(value);
+}
+
+function isLikelyPathToken(value: string): boolean {
+  if (!value.startsWith('/')) {
+    return false;
+  }
+
+  const withoutLeadingSlash = value.slice(1);
+  return withoutLeadingSlash.includes('/')
+    || withoutLeadingSlash.includes('.')
+    || withoutLeadingSlash.includes('\\');
 }
