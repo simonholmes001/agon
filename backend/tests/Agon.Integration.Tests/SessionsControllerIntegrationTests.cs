@@ -5,6 +5,7 @@ using System.Text.Json;
 using Agon.Domain.Sessions;
 using FluentAssertions;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Agon.Integration.Tests;
 
@@ -15,9 +16,11 @@ namespace Agon.Integration.Tests;
 public class SessionsControllerIntegrationTests : IClassFixture<AgonWebApplicationFactory>
 {
     private readonly HttpClient _client;
+    private readonly AgonWebApplicationFactory _factory;
 
     public SessionsControllerIntegrationTests(AgonWebApplicationFactory factory)
     {
+        _factory = factory;
         _client = factory.CreateClient();
     }
 
@@ -392,5 +395,90 @@ public class SessionsControllerIntegrationTests : IClassFixture<AgonWebApplicati
         // NOTE: In Testing environment, Orchestrator and agents are not registered
         // so this test verifies the API layer works correctly without actual agent execution.
         // Full agent execution is tested in manual/E2E tests with real LLM providers.
+    }
+
+    // ── Attachment Auth Enforcement Tests ──────────────────────────────────
+
+    /// <summary>
+    /// Verifies that in local-dev mode (auth disabled), an anonymously created session
+    /// is accessible by the same anonymous caller — Guid.Empty == Guid.Empty ownership
+    /// check still passes so existing workflows are not regressed.
+    /// </summary>
+    [Fact]
+    public async Task GET_Attachments_AnonymousUserCanAccessOwnAnonymousSession_InLocalDevMode()
+    {
+        // Arrange — create a session (no auth configured, userId = Guid.Empty)
+        var createRequest = new { idea = "Test attachment auth — local dev", frictionLevel = 50 };
+        var createResponse = await _client.PostAsJsonAsync("/sessions", createRequest);
+        createResponse.StatusCode.Should().Be(HttpStatusCode.Created);
+
+        var createContent = await createResponse.Content.ReadAsStringAsync();
+        using var createDoc = JsonDocument.Parse(createContent);
+        var sessionId = createDoc.RootElement.GetProperty("id").GetGuid();
+
+        // Act — list attachments for that session (still anonymous — same Guid.Empty identity)
+        var response = await _client.GetAsync($"/sessions/{sessionId}/attachments");
+
+        // Assert — ownership check passes (Guid.Empty == Guid.Empty) → 200 with empty list
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var content = await response.Content.ReadAsStringAsync();
+        using var doc = JsonDocument.Parse(content);
+        doc.RootElement.ValueKind.Should().Be(JsonValueKind.Array);
+        doc.RootElement.GetArrayLength().Should().Be(0, "no attachments uploaded yet");
+    }
+
+    /// <summary>
+    /// Verifies that an anonymous caller cannot access a session that belongs to a different
+    /// user — the strict ownership check must not fall through via a Guid.Empty bypass.
+    ///
+    /// In the test environment auth is disabled (local-dev mode), so all sessions created
+    /// through the API have UserId = Guid.Empty and are therefore owned by the anonymous
+    /// identity.  To simulate a session owned by a real user we insert one directly into
+    /// the in-memory database.
+    /// </summary>
+    [Fact]
+    public async Task GET_Session_AnonymousUserCannotAccessSessionOwnedByAuthenticatedUser()
+    {
+        // Arrange — seed a session owned by a specific authenticated user ID directly in
+        // the in-memory DB (bypassing the controller which would set UserId = Guid.Empty).
+        var otherUserId = Guid.NewGuid();
+        var sessionId = Guid.NewGuid();
+
+        using var scope = _factory.Services.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<Agon.Infrastructure.Persistence.PostgreSQL.AgonDbContext>();
+
+        var emptyMap = Agon.Domain.TruthMap.TruthMap.Empty(sessionId);
+        dbContext.Sessions.Add(new Agon.Infrastructure.Persistence.PostgreSQL.SessionEntity
+        {
+            Id = sessionId,
+            UserId = otherUserId,
+            Mode = "quick",
+            FrictionLevel = 50,
+            Phase = "Intake",
+            Status = "Active",
+            CurrentRound = 0,
+            TokensUsed = 0,
+            TargetedLoopCount = 0,
+            ClarificationIncomplete = false,
+            ClarificationRoundCount = 0,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        });
+        dbContext.TruthMaps.Add(new Agon.Infrastructure.Persistence.PostgreSQL.TruthMapEntity
+        {
+            SessionId = sessionId,
+            CurrentState = System.Text.Json.JsonSerializer.Serialize(emptyMap),
+            Version = 0,
+            UpdatedAt = DateTime.UtcNow
+        });
+        await dbContext.SaveChangesAsync();
+
+        // Act — anonymous user (Guid.Empty) tries to access the session
+        var response = await _client.GetAsync($"/sessions/{sessionId}");
+
+        // Assert — must be 404; the anonymous caller must NOT access a session owned by
+        // a different user ID (the old Guid.Empty bypass would have incorrectly allowed this).
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
     }
 }
