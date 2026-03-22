@@ -841,6 +841,45 @@ public class OrchestratorTests
     }
 
     [Fact]
+    public async Task RunModeratorAsync_WithReadyAndShortGeneralQuestion_ShouldSuppressDebateChain()
+    {
+        var runner = Substitute.For<IAgentRunner>();
+        var moderatorResponse = new AgentResponse(
+            AgentId.Moderator,
+            "STATUS: READY\nDNS maps hostnames to IP addresses.",
+            null,
+            80,
+            false,
+            null);
+
+        runner.RunModeratorAsync(Arg.Any<SessionState>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(moderatorResponse));
+
+        var sessionService = StubSessionService();
+        var orchestrator = BuildOrchestrator(
+            runner: runner,
+            sessionService: sessionService);
+
+        var state = BuildState(SessionPhase.Clarification);
+        state.ClarificationRoundCount = 1;
+        state.UserMessages.Add(new UserMessage(
+            "What is DNS?",
+            DateTimeOffset.UtcNow,
+            1));
+
+        await orchestrator.RunModeratorAsync(state, CancellationToken.None);
+
+        state.ClarificationRoundCount.Should().Be(1);
+        await sessionService.DidNotReceive().AdvancePhaseAsync(
+            state,
+            SessionPhase.AnalysisRound,
+            Arg.Any<CancellationToken>());
+        await sessionService.DidNotReceive().RecordRoundSnapshotAsync(
+            state,
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task RunModeratorAsync_ReadyOnFirstRoundWithoutUserMessages_ShouldNotAdvance()
     {
         var runner = Substitute.For<IAgentRunner>();

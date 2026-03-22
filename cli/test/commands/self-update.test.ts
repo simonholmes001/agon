@@ -84,5 +84,8 @@ describe('self-update command', () => {
 
     await expect(command.run()).resolves.not.toThrow();
     expect(command.installedPackage).toBe('@agon_agents/cli');
+    expect(command.log).toHaveBeenCalledWith(
+      expect.stringContaining('Exit now and restart Agon to use v0.1.4.')
+    );
   });
 });

@@ -75,7 +75,14 @@ llmConfig.Google.ApiKey = ReplaceEnvVars(llmConfig.Google.ApiKey);
 llmConfig.DeepSeek.ApiKey = ReplaceEnvVars(llmConfig.DeepSeek.ApiKey);
 attachmentProcessingConfig.DocumentIntelligence.Endpoint = ReplaceEnvVars(attachmentProcessingConfig.DocumentIntelligence.Endpoint);
 attachmentProcessingConfig.DocumentIntelligence.ApiKey = ReplaceEnvVars(attachmentProcessingConfig.DocumentIntelligence.ApiKey);
+attachmentProcessingConfig.OpenAiVision.FallbackModel = ReplaceEnvVars(attachmentProcessingConfig.OpenAiVision.FallbackModel);
 storageConfig.AttachmentBlobServiceUri = ReplaceEnvVars(storageConfig.AttachmentBlobServiceUri);
+
+llmConfig.OpenAI.ApiKey = NormalizeSecretValue(llmConfig.OpenAI.ApiKey);
+llmConfig.Anthropic.ApiKey = NormalizeSecretValue(llmConfig.Anthropic.ApiKey);
+llmConfig.Google.ApiKey = NormalizeSecretValue(llmConfig.Google.ApiKey);
+llmConfig.DeepSeek.ApiKey = NormalizeSecretValue(llmConfig.DeepSeek.ApiKey);
+attachmentProcessingConfig.DocumentIntelligence.ApiKey = NormalizeSecretValue(attachmentProcessingConfig.DocumentIntelligence.ApiKey);
 
 builder.Services.AddSingleton(llmConfig);
 builder.Services.AddSingleton(agonConfig);
@@ -98,6 +105,9 @@ builder.Services.AddSingleton(new AttachmentExtractionOptions
         Enabled = attachmentProcessingConfig.OpenAiVision.Enabled,
         ApiKey = llmConfig.OpenAI.ApiKey,
         Model = attachmentProcessingConfig.OpenAiVision.Model,
+        FallbackModel = string.IsNullOrWhiteSpace(attachmentProcessingConfig.OpenAiVision.FallbackModel)
+            ? llmConfig.OpenAI.Model
+            : attachmentProcessingConfig.OpenAiVision.FallbackModel,
         MaxTokens = attachmentProcessingConfig.OpenAiVision.MaxTokens,
         Detail = attachmentProcessingConfig.OpenAiVision.Detail,
         MaxImageBytes = attachmentProcessingConfig.OpenAiVision.MaxImageBytes
@@ -532,6 +542,16 @@ static bool IsConfiguredValue(string? value)
 
     var trimmed = value.Trim();
     return !(trimmed.StartsWith("${", StringComparison.Ordinal) && trimmed.EndsWith("}", StringComparison.Ordinal));
+}
+
+static string NormalizeSecretValue(string? value)
+{
+    if (!IsConfiguredValue(value))
+    {
+        return string.Empty;
+    }
+
+    return value!.Trim();
 }
 
 static string ConfigureAttachmentStorage(

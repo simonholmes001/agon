@@ -329,4 +329,20 @@ describe('shell engine', () => {
     expect(outcome).toEqual({ kind: 'noop' });
     expect(print).toHaveBeenCalledWith('Update available: v0.1.10 -> v0.1.11');
   });
+
+  it('prints explicit restart guidance after /update installs a new version', async () => {
+    selfUpdate.mockResolvedValueOnce({
+      status: 'updated',
+      currentVersion: '0.5.1',
+      latestVersion: '0.6.0'
+    });
+
+    const outcome = await engine.handleInput('/update');
+
+    expect(outcome).toEqual({ kind: 'noop' });
+    expect(print).toHaveBeenCalledWith('Updated CLI from v0.5.1 to v0.6.0.');
+    expect(print).toHaveBeenCalledWith(
+      'Update installed, but this shell is still running the previous runtime. Exit now and restart Agon to use v0.6.0.'
+    );
+  });
 });

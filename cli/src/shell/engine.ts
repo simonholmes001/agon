@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import type { SessionResponse } from '../api/types.js';
-import type { SelfUpdateFailureCategory } from '../utils/self-update.js';
+import { getSelfUpdateRestartNotice, type SelfUpdateFailureCategory } from '../utils/self-update.js';
 import { extractImplicitAttach, extractInlineAttach, parseShellInput } from './parser.js';
 import { styleAttachmentToken } from './renderer.js';
 import type { PlainInputRoute } from './router.js';
@@ -159,11 +159,7 @@ export class ShellEngine {
         `Attached ${styleAttachmentToken(result.attachment.fileName)} to session ${result.sessionId}.`
         + ` Type: ${result.attachment.contentType} | Size: ${result.attachment.sizeBytes} B`
       );
-      if (result.attachment.hasExtractedText) {
-        this.print('Document text extracted and added to agent context.');
-      } else {
-        this.print('No text extraction available; file metadata/link still added to context.');
-      }
+      this.printAttachmentExtractionMessage(result.attachment.contentType, result.attachment.hasExtractedText);
 
       plainText = inlineAttach.remainingText;
     }
@@ -189,11 +185,7 @@ export class ShellEngine {
             `Attached ${styleAttachmentToken(result.attachment.fileName)} to session ${result.sessionId}.`
             + ` Type: ${result.attachment.contentType} | Size: ${result.attachment.sizeBytes} B`
           );
-          if (result.attachment.hasExtractedText) {
-            this.print('Document text extracted and added to agent context.');
-          } else {
-            this.print('No text extraction available; file metadata/link still added to context.');
-          }
+          this.printAttachmentExtractionMessage(result.attachment.contentType, result.attachment.hasExtractedText);
 
           plainText = implicitAttach.remainingText;
         } else if (!implicitAttach.remainingText) {
@@ -324,7 +316,7 @@ export class ShellEngine {
             return { kind: 'noop' };
           case 'updated':
             this.print(`Updated CLI from v${result.currentVersion} to v${result.latestVersion}.`);
-            this.print('Current shell session stays active. Restart later to run the new runtime.');
+            this.print(getSelfUpdateRestartNotice(result.latestVersion));
             return { kind: 'noop' };
           case 'failed':
             this.print(`Self-update failed (${result.reason}): ${result.message}`);
@@ -421,6 +413,23 @@ export class ShellEngine {
         };
       }
     }
+  }
+
+  private printAttachmentExtractionMessage(contentType: string, hasExtractedText: boolean): void {
+    if (hasExtractedText) {
+      this.print('Attachment content extracted and added to agent context.');
+      return;
+    }
+
+    if (contentType.toLowerCase().startsWith('image/')) {
+      this.print(
+        'Image uploaded, but backend vision extraction returned no content. '
+        + 'Verify backend OpenAI vision settings (OPENAI_KEY and ATTACHMENTPROCESSING__OPENAIVISION__ENABLED).'
+      );
+      return;
+    }
+
+    this.print('No text extraction available; file metadata/link still added to context.');
   }
 }
 

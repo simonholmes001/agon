@@ -28,6 +28,7 @@ public sealed class OpenAiVisionProcessingConfiguration
 {
     public bool Enabled { get; set; } = true;
     public string Model { get; set; } = "gpt-4o-mini";
+    public string FallbackModel { get; set; } = string.Empty;
     public int MaxTokens { get; set; } = 1200;
     public string Detail { get; set; } = "auto";
     public int MaxImageBytes { get; set; } = 6291456;

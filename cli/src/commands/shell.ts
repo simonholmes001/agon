@@ -349,9 +349,18 @@ export default class Shell extends Command {
         this.log(attachedLine);
         this.log(chalk.dim(`Type: ${outcome.contentType} | Size: ${formatBytes(outcome.sizeBytes)}`));
         if (outcome.hasExtractedText) {
-          this.log(chalk.dim('Document text extracted and added to agent context.'));
+          this.log(chalk.dim('Attachment content extracted and added to agent context.'));
         } else {
-          this.log(chalk.dim('No text extraction available; file metadata/link still added to context.'));
+          if (outcome.contentType.toLowerCase().startsWith('image/')) {
+            this.log(
+              chalk.yellow(
+                'Image uploaded, but backend vision extraction returned no content. '
+                + 'Check OPENAI_KEY and ATTACHMENTPROCESSING__OPENAIVISION__ENABLED on backend.'
+              )
+            );
+          } else {
+            this.log(chalk.dim('No text extraction available; file metadata/link still added to context.'));
+          }
         }
         return;
       }

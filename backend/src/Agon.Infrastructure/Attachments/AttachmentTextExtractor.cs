@@ -104,7 +104,13 @@ public sealed class AttachmentTextExtractor : IAttachmentTextExtractor
         if (IsImage(fileName, normalizedContentType))
         {
             var visionResult = await ExtractWithOpenAiVisionAsync(content, normalizedContentType, cancellationToken);
-            return NormalizeText(visionResult);
+            if (!string.IsNullOrWhiteSpace(visionResult))
+            {
+                return NormalizeText(visionResult);
+            }
+
+            var imageOcrResult = await ExtractWithDocumentIntelligenceAsync(content, cancellationToken);
+            return NormalizeText(imageOcrResult);
         }
 
         if (IsDocument(fileName, normalizedContentType))
@@ -240,7 +246,7 @@ public sealed class AttachmentTextExtractor : IAttachmentTextExtractor
         string normalizedContentType,
         CancellationToken cancellationToken)
     {
-        if (!_options.OpenAiVision.Enabled || string.IsNullOrWhiteSpace(_options.OpenAiVision.ApiKey))
+        if (!_options.OpenAiVision.Enabled || !IsConfiguredSecret(_options.OpenAiVision.ApiKey))
         {
             return null;
         }
@@ -253,10 +259,58 @@ public sealed class AttachmentTextExtractor : IAttachmentTextExtractor
             return null;
         }
 
+        var primaryModel = string.IsNullOrWhiteSpace(_options.OpenAiVision.Model)
+            ? "gpt-4o-mini"
+            : _options.OpenAiVision.Model.Trim();
+        var fallbackModel = string.IsNullOrWhiteSpace(_options.OpenAiVision.FallbackModel)
+            ? string.Empty
+            : _options.OpenAiVision.FallbackModel.Trim();
+
+        var primaryAttempt = await TryExtractWithOpenAiModelAsync(
+            content,
+            normalizedContentType,
+            primaryModel,
+            cancellationToken);
+        if (!string.IsNullOrWhiteSpace(primaryAttempt.Text))
+        {
+            return primaryAttempt.Text;
+        }
+
+        var shouldTryFallback =
+            !string.IsNullOrWhiteSpace(fallbackModel)
+            && !string.Equals(primaryModel, fallbackModel, StringComparison.OrdinalIgnoreCase)
+            && primaryAttempt.StatusCode is HttpStatusCode.BadRequest or HttpStatusCode.NotFound;
+
+        if (!shouldTryFallback)
+        {
+            return null;
+        }
+
+        _logger.LogInformation(
+            "Retrying OpenAI vision extraction with fallback model {FallbackModel} after primary model {PrimaryModel} failed with status {StatusCode}.",
+            fallbackModel,
+            primaryModel,
+            (int)primaryAttempt.StatusCode!.Value);
+
+        var fallbackAttempt = await TryExtractWithOpenAiModelAsync(
+            content,
+            normalizedContentType,
+            fallbackModel,
+            cancellationToken);
+
+        return fallbackAttempt.Text;
+    }
+
+    private async Task<OpenAiVisionAttemptResult> TryExtractWithOpenAiModelAsync(
+        byte[] content,
+        string normalizedContentType,
+        string model,
+        CancellationToken cancellationToken)
+    {
         var dataUrl = $"data:{(string.IsNullOrWhiteSpace(normalizedContentType) ? "application/octet-stream" : normalizedContentType)};base64,{Convert.ToBase64String(content)}";
         var requestPayload = new
         {
-            model = string.IsNullOrWhiteSpace(_options.OpenAiVision.Model) ? "gpt-4o-mini" : _options.OpenAiVision.Model,
+            model,
             temperature = 0,
             max_tokens = Math.Max(256, _options.OpenAiVision.MaxTokens),
             messages = new object[]
@@ -303,13 +357,14 @@ public sealed class AttachmentTextExtractor : IAttachmentTextExtractor
         if (!response.IsSuccessStatusCode)
         {
             _logger.LogWarning(
-                "OpenAI vision extraction failed. Status={StatusCode}, Payload={Payload}",
+                "OpenAI vision extraction failed for model {Model}. Status={StatusCode}, Payload={Payload}",
+                model,
                 (int)response.StatusCode,
                 Truncate(payload, 600));
-            return null;
+            return new OpenAiVisionAttemptResult(null, response.StatusCode);
         }
 
-        return ParseOpenAiContent(payload);
+        return new OpenAiVisionAttemptResult(ParseOpenAiContent(payload), response.StatusCode);
     }
 
     private static string NormalizeContentType(string contentType)
@@ -320,6 +375,17 @@ public sealed class AttachmentTextExtractor : IAttachmentTextExtractor
         }
 
         return contentType.Split(';')[0].Trim();
+    }
+
+    private static bool IsConfiguredSecret(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        var trimmed = value.Trim();
+        return !(trimmed.StartsWith("${", StringComparison.Ordinal) && trimmed.EndsWith("}", StringComparison.Ordinal));
     }
 
     private static bool IsImage(string fileName, string contentType)
@@ -417,7 +483,7 @@ public sealed class AttachmentTextExtractor : IAttachmentTextExtractor
 
             if (!message.TryGetProperty("content", out var content))
             {
-                return null;
+                return ParseResponsesApiContent(document.RootElement);
             }
 
             if (content.ValueKind == JsonValueKind.String)
@@ -428,24 +494,78 @@ public sealed class AttachmentTextExtractor : IAttachmentTextExtractor
             if (content.ValueKind == JsonValueKind.Array)
             {
                 var parts = content.EnumerateArray()
-                    .Where(item => item.TryGetProperty("type", out var type) &&
-                                   type.ValueKind == JsonValueKind.String &&
-                                   string.Equals(type.GetString(), "text", StringComparison.OrdinalIgnoreCase) &&
-                                   item.TryGetProperty("text", out var textProp) &&
-                                   textProp.ValueKind == JsonValueKind.String)
-                    .Select(item => item.GetProperty("text").GetString())
+                    .Select(ExtractContentText)
                     .Where(text => !string.IsNullOrWhiteSpace(text))
                     .OfType<string>();
 
                 return string.Join("\n", parts);
             }
 
-            return null;
+            return ParseResponsesApiContent(document.RootElement);
         }
         catch
         {
             return null;
         }
+    }
+
+    private static string? ParseResponsesApiContent(JsonElement root)
+    {
+        if (!root.TryGetProperty("output", out var output) || output.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        var segments = new List<string>();
+        foreach (var outputItem in output.EnumerateArray())
+        {
+            if (!outputItem.TryGetProperty("content", out var content) || content.ValueKind != JsonValueKind.Array)
+            {
+                continue;
+            }
+
+            foreach (var contentItem in content.EnumerateArray())
+            {
+                var text = ExtractContentText(contentItem);
+                if (!string.IsNullOrWhiteSpace(text))
+                {
+                    segments.Add(text);
+                }
+            }
+        }
+
+        return segments.Count == 0 ? null : string.Join("\n", segments);
+    }
+
+    private static string? ExtractContentText(JsonElement contentItem)
+    {
+        if (contentItem.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        if (contentItem.TryGetProperty("text", out var textProp))
+        {
+            if (textProp.ValueKind == JsonValueKind.String)
+            {
+                return textProp.GetString();
+            }
+
+            if (textProp.ValueKind == JsonValueKind.Object &&
+                textProp.TryGetProperty("value", out var valueProp) &&
+                valueProp.ValueKind == JsonValueKind.String)
+            {
+                return valueProp.GetString();
+            }
+        }
+
+        if (contentItem.TryGetProperty("content", out var contentProp) &&
+            contentProp.ValueKind == JsonValueKind.String)
+        {
+            return contentProp.GetString();
+        }
+
+        return null;
     }
 
     private static string? ParseDocumentIntelligenceStatus(string payload)
@@ -504,4 +624,8 @@ public sealed class AttachmentTextExtractor : IAttachmentTextExtractor
             ? value
             : value[..maxLength] + "...";
     }
+
+    private readonly record struct OpenAiVisionAttemptResult(
+        string? Text,
+        HttpStatusCode? StatusCode);
 }
