@@ -874,6 +874,8 @@ function getSpinnerText(parsed: ReturnType<typeof parseShellInput>): string | nu
       return parsed.check ? 'Checking for CLI updates...' : 'Updating CLI...';
     case 'set':
       return 'Saving parameter...';
+    case 'unset':
+      return 'Clearing parameter...';
     case 'session':
       return 'Switching session...';
     case 'resume':

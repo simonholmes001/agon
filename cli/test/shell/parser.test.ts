@@ -52,6 +52,26 @@ describe('shell parser', () => {
     });
   });
 
+  it('parses /unset with key', () => {
+    expect(parseShellInput('/unset apiUrl')).toEqual({
+      type: 'slash',
+      command: 'unset',
+      key: 'apiUrl'
+    });
+  });
+
+  it('returns deterministic error for malformed /unset', () => {
+    expect(parseShellInput('/unset')).toEqual({
+      type: 'error',
+      message: 'Usage: /unset <apiUrl|defaultFriction|researchEnabled|logLevel>'
+    });
+
+    expect(parseShellInput('/unset unknownKey')).toEqual({
+      type: 'error',
+      message: 'Usage: /unset <apiUrl|defaultFriction|researchEnabled|logLevel>'
+    });
+  });
+
   it('parses /new', () => {
     expect(parseShellInput('/new')).toEqual({
       type: 'slash',

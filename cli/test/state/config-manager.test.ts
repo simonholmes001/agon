@@ -8,17 +8,38 @@
  * - Test validation
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { promises as fs } from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { ConfigManager } from '../../src/state/config-manager.js';
 import type { AgonConfig } from '../../src/state/config-manager.js';
 
 // We'll use cosmiconfig which handles file I/O, so we test the wrapper logic
 describe('ConfigManager', () => {
   let configManager: ConfigManager;
+  const originalCwd = process.cwd();
+  const originalHome = process.env.HOME;
+  let tempDir = '';
 
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks();
+    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'agon-config-manager-'));
+    process.chdir(tempDir);
+    process.env.HOME = tempDir;
     configManager = new ConfigManager();
+  });
+
+  afterEach(async () => {
+    process.chdir(originalCwd);
+    if (originalHome === undefined) {
+      delete process.env.HOME;
+    } else {
+      process.env.HOME = originalHome;
+    }
+    if (tempDir) {
+      await fs.rm(tempDir, { recursive: true, force: true });
+    }
   });
 
   describe('default configuration', () => {
@@ -305,6 +326,59 @@ describe('ConfigManager', () => {
       
       // Assert - Valid return values
       expect(path === null || typeof path === 'string').toBe(true);
+    });
+  });
+
+  describe('apiUrl ownership and migration', () => {
+    const originalApiHostname = process.env.AGON_API_HOSTNAME;
+
+    beforeEach(() => {
+      process.env.AGON_API_HOSTNAME = 'api-dev.agon-agents.org';
+      configManager = new ConfigManager();
+    });
+
+    afterEach(() => {
+      if (originalApiHostname === undefined) {
+        delete process.env.AGON_API_HOSTNAME;
+      } else {
+        process.env.AGON_API_HOSTNAME = originalApiHostname;
+      }
+    });
+
+    it('migrates legacy hosted default to managed source and HTTPS host default', async () => {
+      await fs.writeFile(
+        path.join(tempDir, '.agonrc'),
+        'apiUrl: http://4.225.205.12\n',
+        'utf-8'
+      );
+
+      const resolved = await configManager.load();
+
+      expect(resolved.apiUrl).toBe('https://api-dev.agon-agents.org');
+      expect(resolved.apiUrlSource).toBe('default');
+      expect(resolved.apiUrlMode).toBe('managed');
+    });
+
+    it('does not persist default apiUrl when setting non-apiUrl keys', async () => {
+      await configManager.set('defaultFriction', 75);
+
+      const configText = await fs.readFile(path.join(tempDir, '.agonrc'), 'utf-8');
+      expect(configText).toContain('defaultFriction: 75');
+      expect(configText).not.toContain('apiUrl:');
+    });
+
+    it('marks set apiUrl as user source and allows /unset-style reversion', async () => {
+      await configManager.set('apiUrl', 'http://custom.internal');
+      let resolved = await configManager.load();
+      expect(resolved.apiUrlSource).toBe('user');
+      expect(resolved.apiUrlMode).toBe('custom');
+      expect(resolved.apiUrl).toBe('http://custom.internal');
+
+      await configManager.unset('apiUrl');
+      resolved = await configManager.load();
+      expect(resolved.apiUrlSource).toBe('default');
+      expect(resolved.apiUrlMode).toBe('managed');
+      expect(resolved.apiUrl).toBe('https://api-dev.agon-agents.org');
     });
   });
 });

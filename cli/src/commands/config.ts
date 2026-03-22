@@ -10,6 +10,7 @@
 
 import { Command, Args } from '@oclif/core';
 import { ConfigManager } from '../state/config-manager.js';
+import type { AgonConfig, ResolvedAgonConfig } from '../state/config-manager.js';
 import chalk from 'chalk';
 import Table from 'cli-table3';
 
@@ -19,6 +20,7 @@ export default class Config extends Command {
   static override readonly examples = [
     '<%= config.bin %> <%= command.id %>',
     '<%= config.bin %> <%= command.id %> set apiUrl https://api.agon.ai',
+    '<%= config.bin %> <%= command.id %> unset apiUrl',
     '<%= config.bin %> <%= command.id %> set defaultFriction 75',
     '<%= config.bin %> <%= command.id %> set researchEnabled false',
     '<%= config.bin %> <%= command.id %> set logLevel debug'
@@ -26,7 +28,7 @@ export default class Config extends Command {
 
   static override readonly args = {
     action: Args.string({
-      description: 'Action to perform (set)',
+      description: 'Action to perform (set|unset)',
       required: false
     }),
     key: Args.string({
@@ -47,6 +49,11 @@ export default class Config extends Command {
     // If action is 'set', handle setting a value
     if (args.action === 'set') {
       await this.handleSet(args.key, args.value);
+      return;
+    }
+
+    if (args.action === 'unset') {
+      await this.handleUnset(args.key);
       return;
     }
 
@@ -80,23 +87,32 @@ export default class Config extends Command {
     });
 
     // Add rows for each config key
-    const keys: Array<keyof typeof config> = ['apiUrl', 'defaultFriction', 'researchEnabled', 'logLevel'];
+    const keys: Array<keyof AgonConfig> = ['apiUrl', 'defaultFriction', 'researchEnabled', 'logLevel'];
     
     for (const key of keys) {
       const value = config[key];
       const defaultValue = defaults[key];
       const isDefault = value === defaultValue;
+      const sourceLabel = key === 'apiUrl'
+        ? this.describeApiUrlSource(config)
+        : (isDefault ? chalk.dim('default') : chalk.green('override'));
       
       table.push([
         key,
         this.formatValue(value),
-        isDefault ? chalk.dim('default') : chalk.green('override')
+        sourceLabel
       ]);
     }
 
     this.log(table.toString());
+    if (config.apiUrlUpgradeSuggestion) {
+      this.log('');
+      this.log(chalk.yellow('Detected HTTP to HTTPS redirect for current apiUrl.'));
+      this.log(chalk.dim(`Suggested command: agon config set apiUrl ${config.apiUrlUpgradeSuggestion}`));
+    }
     this.log('');
     this.log(chalk.dim('To modify a value: agon config set <key> <value>'));
+    this.log(chalk.dim('To remove an override: agon config unset <key>'));
   }
 
   /**
@@ -130,6 +146,33 @@ export default class Config extends Command {
     // Show confirmation
     this.log(chalk.green('✓') + ` Configuration updated:`);
     this.log(`  ${chalk.cyan(key)}: ${this.formatValue(parsedValue)}`);
+    if (key === 'apiUrl') {
+      this.log(chalk.dim('  Custom backend URL enabled; managed endpoint upgrades are disabled.'));
+      this.log(chalk.dim('  Run: agon config unset apiUrl  to return to managed defaults.'));
+    }
+  }
+
+  /**
+   * Handle unsetting a configuration value
+   */
+  private async handleUnset(key: string | undefined): Promise<void> {
+    if (!key) {
+      throw new Error('Missing configuration key. Usage: agon config unset <key>');
+    }
+
+    const validKeys = ['apiUrl', 'defaultFriction', 'researchEnabled', 'logLevel'];
+    if (!validKeys.includes(key)) {
+      throw new Error(
+        `Unknown configuration key: ${key}\n` +
+        `Valid keys: ${validKeys.join(', ')}`
+      );
+    }
+
+    await this.configManager.unset(key as keyof AgonConfig);
+    this.log(chalk.green('✓') + ` Cleared configuration override: ${chalk.cyan(key)}`);
+    if (key === 'apiUrl') {
+      this.log(chalk.dim('  Managed backend URL resolution is now active.'));
+    }
   }
 
   /**
@@ -188,5 +231,17 @@ export default class Config extends Command {
       return chalk.yellow(value.toString());
     }
     return chalk.white(value);
+  }
+
+  private describeApiUrlSource(config: ResolvedAgonConfig): string {
+    switch (config.apiUrlSource) {
+      case 'admin':
+        return chalk.yellow('admin');
+      case 'user':
+        return chalk.green('custom');
+      case 'default':
+      default:
+        return chalk.dim('managed');
+    }
   }
 }
