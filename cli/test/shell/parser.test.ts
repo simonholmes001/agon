@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { extractInlineAttach, parseShellInput } from '../../src/shell/parser.js';
+import { extractImplicitAttach, extractInlineAttach, parseShellInput } from '../../src/shell/parser.js';
 
 describe('shell parser', () => {
   it('parses plain input', () => {
@@ -33,6 +33,13 @@ describe('shell parser', () => {
     expect(parseShellInput('help')).toEqual({
       type: 'plain',
       text: 'help'
+    });
+  });
+
+  it('treats absolute path-like input as plain text (not unknown slash command)', () => {
+    expect(parseShellInput('/Users/simonholmes/docs/spec.md')).toEqual({
+      type: 'plain',
+      text: '/Users/simonholmes/docs/spec.md'
     });
   });
 
@@ -281,5 +288,33 @@ describe('shell parser', () => {
       type: 'error',
       message: 'Usage: /attach <file-path>'
     });
+  });
+
+  it('extracts implicit attach from a path-only input', () => {
+    expect(extractImplicitAttach('/Users/simonholmes/docs/spec.md')).toEqual({
+      type: 'attach',
+      path: '/Users/simonholmes/docs/spec.md',
+      remainingText: ''
+    });
+  });
+
+  it('extracts implicit attach from path followed by message', () => {
+    expect(extractImplicitAttach('/Users/simonholmes/docs/spec.md summarize key points')).toEqual({
+      type: 'attach',
+      path: '/Users/simonholmes/docs/spec.md',
+      remainingText: 'summarize key points'
+    });
+  });
+
+  it('extracts implicit attach from escaped-space path tokens', () => {
+    expect(extractImplicitAttach('/Users/simonholmes/My\\ Documents/brief\\ v2.pdf please review')).toEqual({
+      type: 'attach',
+      path: '/Users/simonholmes/My Documents/brief v2.pdf',
+      remainingText: 'please review'
+    });
+  });
+
+  it('does not treat non-path plain text as implicit attach', () => {
+    expect(extractImplicitAttach('Please summarize this')).toBeNull();
   });
 });

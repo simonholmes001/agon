@@ -1,6 +1,9 @@
+import { promises as fs } from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import type { SessionResponse } from '../api/types.js';
 import type { SelfUpdateFailureCategory } from '../utils/self-update.js';
-import { extractInlineAttach, parseShellInput } from './parser.js';
+import { extractImplicitAttach, extractInlineAttach, parseShellInput } from './parser.js';
 import { styleAttachmentToken } from './renderer.js';
 import type { PlainInputRoute } from './router.js';
 
@@ -165,6 +168,42 @@ export class ShellEngine {
       plainText = inlineAttach.remainingText;
     }
 
+    if (!inlineAttach) {
+      const implicitAttach = extractImplicitAttach(text);
+      if (implicitAttach?.type === 'attach') {
+        const resolvedPath = await resolvePathIfExisting(implicitAttach.path);
+        if (resolvedPath) {
+          const result = await this.controller.attachDocument(resolvedPath);
+          if (!implicitAttach.remainingText) {
+            return {
+              kind: 'attachment',
+              sessionId: result.sessionId,
+              fileName: result.attachment.fileName,
+              contentType: result.attachment.contentType,
+              sizeBytes: result.attachment.sizeBytes,
+              hasExtractedText: result.attachment.hasExtractedText
+            };
+          }
+
+          this.print(
+            `Attached ${styleAttachmentToken(result.attachment.fileName)} to session ${result.sessionId}.`
+            + ` Type: ${result.attachment.contentType} | Size: ${result.attachment.sizeBytes} B`
+          );
+          if (result.attachment.hasExtractedText) {
+            this.print('Document text extracted and added to agent context.');
+          } else {
+            this.print('No text extraction available; file metadata/link still added to context.');
+          }
+
+          plainText = implicitAttach.remainingText;
+        } else if (!implicitAttach.remainingText) {
+          this.print(`File not found: ${implicitAttach.path}`);
+          this.print('Use /attach <file-path> for explicit attach, or provide a valid local file path.');
+          return { kind: 'noop' };
+        }
+      }
+    }
+
     const activeSession = await this.controller.getActiveSession();
     const route = this.routePlainInputFn(activeSession);
 
@@ -235,6 +274,8 @@ export class ShellEngine {
         this.print('  /set apiUrl https://api-dev.agon-agents.org');
         this.print('  /unset apiUrl');
         this.print('  /attach ./docs/product-brief.md');
+        this.print('  /Users/simonholmes/Documents/brief.pdf');
+        this.print('  /Users/simonholmes/Documents/brief.pdf summarize the risks');
         return { kind: 'noop' };
       }
       case 'params': {
@@ -381,4 +422,34 @@ export class ShellEngine {
       }
     }
   }
+}
+
+async function resolvePathIfExisting(inputPath: string): Promise<string | null> {
+  const expandedPath = expandTilde(inputPath.trim());
+  if (!expandedPath) {
+    return null;
+  }
+
+  const absolutePath = path.isAbsolute(expandedPath)
+    ? expandedPath
+    : path.resolve(expandedPath);
+
+  try {
+    const stat = await fs.stat(absolutePath);
+    if (!stat.isFile()) {
+      return null;
+    }
+
+    return absolutePath;
+  } catch {
+    return null;
+  }
+}
+
+function expandTilde(value: string): string {
+  if (!value.startsWith('~/')) {
+    return value;
+  }
+
+  return path.join(os.homedir(), value.slice(2));
 }

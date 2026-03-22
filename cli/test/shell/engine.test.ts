@@ -1,4 +1,7 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { promises as fs } from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SessionResponse } from '../../src/api/types.js';
 import { ShellEngine } from '../../src/shell/engine.js';
 
@@ -8,6 +11,7 @@ describe('shell engine', () => {
   let print: ReturnType<typeof vi.fn>;
   let routeFn: ReturnType<typeof vi.fn>;
   let engine: ShellEngine;
+  let tempDirs: string[];
 
   const session: SessionResponse = {
     id: 'session-123',
@@ -18,6 +22,7 @@ describe('shell engine', () => {
   };
 
   beforeEach(() => {
+    tempDirs = [];
     controller = {
       getParamsSnapshot: vi.fn().mockResolvedValue({
         config: {
@@ -86,6 +91,12 @@ describe('shell engine', () => {
       selfUpdate,
       print
     });
+  });
+
+  afterEach(async () => {
+    await Promise.all(
+      tempDirs.map((tempDir) => fs.rm(tempDir, { recursive: true, force: true }))
+    );
   });
 
   it('executes /set via controller', async () => {
@@ -248,6 +259,60 @@ describe('shell engine', () => {
       sizeBytes: 1024,
       hasExtractedText: true
     });
+  });
+
+  it('auto-attaches when plain input is an existing local file path', async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'agon-shell-engine-'));
+    tempDirs.push(tempDir);
+    const filePath = path.join(tempDir, 'brief.md');
+    await fs.writeFile(filePath, '# brief', 'utf-8');
+
+    const outcome = await engine.handleInput(filePath);
+
+    expect(controller.attachDocument).toHaveBeenCalledWith(filePath);
+    expect(controller.startIdea).not.toHaveBeenCalled();
+    expect(controller.submitFollowUp).not.toHaveBeenCalled();
+    expect(outcome).toEqual({
+      kind: 'attachment',
+      sessionId: 'session-123',
+      fileName: 'spec.md',
+      contentType: 'text/markdown',
+      sizeBytes: 1024,
+      hasExtractedText: true
+    });
+  });
+
+  it('auto-attaches escaped-space file paths and submits remaining text', async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'agon-shell-engine-'));
+    tempDirs.push(tempDir);
+    const filePath = path.join(tempDir, 'brief v2.md');
+    await fs.writeFile(filePath, '# brief', 'utf-8');
+    const escapedPath = filePath.replace(/ /g, '\\ ');
+
+    const outcome = await engine.handleInput(`${escapedPath} summarize key risks`);
+
+    expect(controller.attachDocument).toHaveBeenCalledWith(filePath);
+    expect(controller.submitFollowUp).toHaveBeenCalledWith('summarize key risks');
+    expect(outcome).toEqual({
+      kind: 'follow-up',
+      sessionId: 'session-123',
+      status: 'active',
+      phase: 'Clarification',
+      response: {
+        agentId: 'moderator',
+        message: 'Next question'
+      }
+    });
+  });
+
+  it('returns a friendly message when a path-like input file does not exist', async () => {
+    const outcome = await engine.handleInput('/tmp/agon-shell-engine-missing-file.pdf');
+
+    expect(outcome).toEqual({ kind: 'noop' });
+    expect(controller.attachDocument).not.toHaveBeenCalled();
+    expect(controller.startIdea).not.toHaveBeenCalled();
+    expect(controller.submitFollowUp).not.toHaveBeenCalled();
+    expect(print).toHaveBeenCalledWith('File not found: /tmp/agon-shell-engine-missing-file.pdf');
   });
 
   it('runs /update --check through updater callback', async () => {
