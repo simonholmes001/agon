@@ -1,5 +1,34 @@
 # @agon_agents/cli
 
+## 0.6.1
+
+### Patch Changes
+
+- Improve attachment UX and routing behavior:
+
+  - show codex-style attachment references in shell output (`[Image #n]`, `[File #n]`) with distinct image/file coloring
+  - improve attachment feedback readability by separating reference label and filename
+  - keep simple image-description prompts in direct-answer mode instead of triggering full debate flow
+
+- Improve reliability for simple-query routing and image attachment handling:
+
+  - prevent accidental message submission when implicit drag/paste attachment path cannot be resolved
+  - expand image MIME/extension recognition for upload and extraction paths
+  - improve extraction compatibility for additional OpenAI vision response shapes
+  - keep simple requests (including image-description asks) on deterministic direct-answer path to avoid unnecessary full debate cycles
+
+- Improve shell UX and reliability in three areas:
+
+  - Make `/update` restart guidance explicit so users know they must exit and relaunch to run the newly installed runtime.
+  - Improve attachment feedback for image uploads when backend extraction returns no vision text.
+  - Keep "attach anytime" flow behavior while clarifying extraction outcomes in shell output.
+
+- Refine shell interaction and moderation behavior:
+
+  - replace dragged/pasted file paths inline with codex-style attachment tokens in the prompt input (`[File #n]` / `[Image #n]`) and color only the attachment segment
+  - update shell status guidance to focus on paste/drag attachment flow and include `/exit` / `Ctrl+C` exit hints
+  - improve direct-answer routing heuristics and tests so simple requests avoid unnecessary full agent-cycle orchestration
+
 ## 0.6.0
 
 ### Minor Changes
