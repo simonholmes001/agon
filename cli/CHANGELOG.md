@@ -1,5 +1,22 @@
 # @agon_agents/cli
 
+## 0.6.2
+
+### Patch Changes
+
+- Improve attachment experience and output rendering:
+
+  - stop auto-highlighting plain slash-separated prose (for example CV/resume, CI/CD)
+  - add follow-up scoping hint after implicit attachment so responses focus on the newly attached file/image
+  - avoid submitting prompts when an implicit drag/paste file path cannot be resolved locally
+  - improve image extraction fallback behavior by ignoring refusal-like extractor outputs
+
+- Harden shell reliability for attachment follow-ups and reduce confusing guidance:
+
+  - recover automatically when a stale/deleted session ID causes a follow-up `SESSION_NOT_FOUND` error
+  - clear stale local session pointers before retrying as a new idea
+  - update shell next-step hints to prefer paste/drag file-path flow instead of `/attach` guidance
+
 ## 0.6.1
 
 ### Patch Changes
