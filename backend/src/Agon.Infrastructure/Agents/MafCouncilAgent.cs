@@ -1,8 +1,10 @@
 using Agon.Application.Interfaces;
+using Agon.Application.Models;
 using Agon.Domain.Sessions;
 using Microsoft.Agents.AI;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using AgonAgentResponse = Agon.Application.Models.AgentResponse;
 using AgonAgentContext = Agon.Application.Models.AgentContext;
 using TruthMapModel = Agon.Domain.TruthMap.TruthMap;
@@ -15,6 +17,10 @@ namespace Agon.Infrastructure.Agents;
 /// </summary>
 public sealed class MafCouncilAgent : ICouncilAgent
 {
+    private static readonly Regex DeicticAttachmentRegex = new(
+        @"\b(this|that|attached|newly attached)\s+(image|photo|picture|document|file|pdf|attachment)\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
     private readonly IAgentResponseParser _parser;
 
     public string AgentId { get; }
@@ -121,6 +127,7 @@ public sealed class MafCouncilAgent : ICouncilAgent
 
         if (context.Attachments.Count > 0)
         {
+            var targetedAttachment = ResolveTargetAttachment(context);
             sb.AppendLine("# Attached Documents");
             sb.AppendLine("The user attached the following files for this discussion:");
             sb.AppendLine();
@@ -128,6 +135,10 @@ public sealed class MafCouncilAgent : ICouncilAgent
             {
                 var attachment = context.Attachments[i];
                 sb.AppendLine($"{i + 1}. {attachment.FileName} ({attachment.ContentType}, {attachment.SizeBytes} bytes)");
+                if (targetedAttachment is not null && attachment.AttachmentId == targetedAttachment.AttachmentId)
+                {
+                    sb.AppendLine("   Targeted by latest user request: yes");
+                }
                 sb.AppendLine($"   Secure URL: {attachment.AccessUrl}");
                 if (!string.IsNullOrWhiteSpace(attachment.ExtractedText))
                 {
@@ -142,6 +153,10 @@ public sealed class MafCouncilAgent : ICouncilAgent
                 sb.AppendLine();
             }
             sb.AppendLine("Use these attachments as part of your reasoning and recommendations.");
+            if (targetedAttachment is not null)
+            {
+                sb.AppendLine($"Prioritize {targetedAttachment.FileName} unless the user explicitly asks for multiple attachments.");
+            }
             sb.AppendLine();
         }
 
@@ -206,5 +221,29 @@ public sealed class MafCouncilAgent : ICouncilAgent
         {
             return "{}";
         }
+    }
+
+    private static SessionAttachment? ResolveTargetAttachment(AgonAgentContext context)
+    {
+        if (context.Attachments.Count == 0)
+        {
+            return null;
+        }
+
+        var latestUserInput = context.UserMessages.Count > 0
+            ? context.UserMessages[^1].Content
+            : string.Empty;
+
+        if (string.IsNullOrWhiteSpace(latestUserInput))
+        {
+            return null;
+        }
+
+        if (!DeicticAttachmentRegex.IsMatch(latestUserInput))
+        {
+            return null;
+        }
+
+        return context.Attachments[^1];
     }
 }

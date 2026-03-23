@@ -204,6 +204,74 @@ public class AttachmentTextExtractorTests
         handler.CallCount.Should().Be(1);
     }
 
+    [Fact]
+    public async Task ExtractAsync_ImageVisionRefusalText_FallsBackToDocumentIntelligence()
+    {
+        var handler = new SequenceHandler([
+            // Vision call returns refusal-style content.
+            _ => new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("""
+                {
+                  "choices": [
+                    {
+                      "message": {
+                        "content": "I'm unable to assist with that."
+                      }
+                    }
+                  ]
+                }
+                """, Encoding.UTF8, "application/json")
+            },
+            // Start DI analyze call.
+            _ => new HttpResponseMessage(HttpStatusCode.Accepted)
+            {
+                Headers =
+                {
+                    Location = new Uri("https://example.cognitiveservices.azure.com/ops/456")
+                },
+                Content = new StringContent("{}", Encoding.UTF8, "application/json")
+            },
+            // Poll DI call.
+            _ => new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("""
+                {
+                  "status": "succeeded",
+                  "analyzeResult": {
+                    "content": "Photo shows a person standing by a whiteboard."
+                  }
+                }
+                """, Encoding.UTF8, "application/json")
+            }
+        ]);
+
+        var extractor = CreateExtractor(new AttachmentExtractionOptions
+        {
+            DocumentIntelligence = new DocumentIntelligenceExtractionOptions
+            {
+                Enabled = true,
+                Endpoint = "https://example.cognitiveservices.azure.com",
+                UseManagedIdentity = false,
+                ApiKey = "test-doc-key",
+                PollIntervalMs = 1,
+                MaxPollAttempts = 2
+            },
+            OpenAiVision = new OpenAiVisionExtractionOptions
+            {
+                Enabled = true,
+                ApiKey = "test-key",
+                Model = "gpt-4o-mini"
+            }
+        }, handler);
+
+        var bytes = new byte[] { 1, 2, 3, 4, 5 };
+        var result = await extractor.ExtractAsync(bytes, "photo.jpeg", "image/jpeg");
+
+        result.Should().Contain("whiteboard");
+        handler.CallCount.Should().Be(3);
+    }
+
     private static AttachmentTextExtractor CreateExtractor(AttachmentExtractionOptions options, HttpMessageHandler? handler = null)
     {
         var httpClientFactory = Substitute.For<IHttpClientFactory>();

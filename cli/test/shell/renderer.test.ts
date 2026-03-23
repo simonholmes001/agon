@@ -329,6 +329,11 @@ describe('highlightAttachmentRefs', () => {
     expect(highlightAttachmentRefs(text)).toBe(text);
   });
 
+  it('does not highlight plain slash-separated prose like CV/resume or CI/CD', () => {
+    const text = 'This document is a CV/resume with CI/CD and tool/workflow examples.';
+    expect(highlightAttachmentRefs(text)).toBe(text);
+  });
+
   it('returns an empty string unchanged', () => {
     expect(highlightAttachmentRefs('')).toBe('');
   });
