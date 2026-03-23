@@ -797,6 +797,11 @@ cd cli && npm run test:coverage
 
 Use this exact checklist before merging PRs that touch CLI and backend behavior.
 
+Important local-config note:
+- `cli/.agonrc` is your local shell config (for example `apiUrl`, friction, research toggle).
+- It is intentionally gitignored and should not be committed.
+- You can still test locally with it; not committing it does not affect your local runs.
+
 #### Track A — CLI behavior against deployed backend
 
 1. Point CLI to deployed environment:
@@ -815,11 +820,18 @@ Use this exact checklist before merging PRs that touch CLI and backend behavior.
    - explicit instruction to exit and restart `agon` to use new runtime
 3. Validate moderator routing (no unnecessary full debate):
    - Ask a short direct question: `What is DNS?`
+   - Ask a short utility prompt without a question mark: `Today's weather for AB31 5UQ`
    - Run `/status`
    Expected:
    - direct answer from moderator
    - no transition into `AnalysisRound` for this short direct question
-4. Validate attachment image path:
+   - response is concise and does not expand into debate-style framework sections
+4. Validate post-delivery assistant simplicity:
+   - Complete one debate flow and then ask a simple follow-up: `What do DNS record types do?`
+   Expected:
+   - answer is direct and concise
+   - no unnecessary template-style framing
+5. Validate attachment image path:
    - Drag/drop or paste an image path into shell, then ask: `Analyze this image.`
    Expected:
    - if vision extraction is configured: answer references image content

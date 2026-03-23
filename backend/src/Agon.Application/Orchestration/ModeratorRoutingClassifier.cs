@@ -20,6 +20,12 @@ internal static class ModeratorRoutingClassifier
     private static readonly Regex QuestionLeadRegex = new(
         @"^\s*(how|what|who|can|could|would|do|does|is|are|where|when)\b",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex UtilityImperativeLeadRegex = new(
+        @"^\s*(give|show|tell|explain|describe|define|check|summari[sz]e|compare|help\s+me\s+understand|today(?:'s)?|current)\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex UtilityTopicRegex = new(
+        @"\b(weather|forecast|temperature|rain|wind|postcode|dns|domain|record(?:\s+types?)?|a/aaaa|cname|mx|txt|http|https|ssl|tls|certificate|hostname|ip(?:v4|v6)?|status\s*code|timezone|utc)\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex WordRegex = new(@"\b[\w'-]+\b", RegexOptions.Compiled);
     private static readonly Regex AttachmentDirectActionRegex = new(
         @"\b(describe|summari[sz]e|caption|transcribe|read|extract|analy[sz]e)\b.*\b(image|photo|picture|screenshot|scan|document|file|pdf|attachment)\b|\b(this|attached)\s+(image|document|file|pdf|attachment)\b",
@@ -77,7 +83,8 @@ internal static class ModeratorRoutingClassifier
         }
 
         var attachmentImperative = hasAttachments && AttachmentDirectActionRegex.IsMatch(trimmed);
-        if (!LooksLikeQuestion(trimmed) && !attachmentImperative)
+        var utilityImperative = LooksLikeUtilityImperative(trimmed);
+        if (!LooksLikeQuestion(trimmed) && !attachmentImperative && !utilityImperative)
         {
             return false;
         }
@@ -106,5 +113,10 @@ internal static class ModeratorRoutingClassifier
     private static bool LooksLikeQuestion(string input)
     {
         return input.Contains('?') || QuestionLeadRegex.IsMatch(input);
+    }
+
+    private static bool LooksLikeUtilityImperative(string input)
+    {
+        return UtilityImperativeLeadRegex.IsMatch(input) && UtilityTopicRegex.IsMatch(input);
     }
 }

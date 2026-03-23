@@ -3,6 +3,7 @@ import ora from 'ora';
 import chalk from 'chalk';
 import { type Key } from 'node:readline';
 import { stdin as input, stdout as output } from 'node:process';
+import path from 'node:path';
 import { AgonAPIClient } from '../api/agon-client.js';
 import { ConfigManager } from '../state/config-manager.js';
 import { SessionManager } from '../state/session-manager.js';
@@ -14,7 +15,7 @@ import {
   type ShellEngineOutcome,
   type ShellSelfUpdateResult
 } from '../shell/engine.js';
-import { parseShellInput } from '../shell/parser.js';
+import { extractImplicitAttach, extractInlineAttach, parseShellInput } from '../shell/parser.js';
 import { routePlainInput } from '../shell/router.js';
 import {
   buildActivePrompt,
@@ -118,6 +119,7 @@ export default class Shell extends Command {
   private inRawInputMode = false;
   private apiClient?: AgonAPIClient;
   private sessionManager?: SessionManager;
+  private readonly livePreviewNextBySession = new Map<string, { image: number; file: number }>();
   private initializeKeypressEvents: () => void = () => {};
   private readonly promptHistory = new PromptHistory();
 
@@ -209,7 +211,8 @@ export default class Shell extends Command {
     try {
       while (true) {
         const promptFrame = renderPromptBanner((line) => this.log(line));
-        const rawInput = await this.promptForInput(promptFrame);
+        const activeSession = await controller.getActiveSession();
+        const rawInput = await this.promptForInput(promptFrame, activeSession?.id ?? null);
 
         if (rawInput === CTRL_C_EXIT_SENTINEL) {
           this.log(chalk.dim('Exiting shell.'));
@@ -343,6 +346,7 @@ export default class Shell extends Command {
         this.log(`Session ${outcome.sessionId} | status=${outcome.status} | phase=${outcome.phase}`);
         return;
       case 'attachment': {
+        this.syncLivePreviewCounter(outcome.sessionId, outcome.referenceLabel);
         const attachedLine = chalk.green('✓ Attached ')
           + styleAttachmentToken(outcome.referenceLabel)
           + chalk.green(' ')
@@ -461,7 +465,8 @@ export default class Shell extends Command {
   }
 
   private async promptForInput(
-    frame: PromptFrameContext
+    frame: PromptFrameContext,
+    activeSessionId: string | null
   ): Promise<string> {
     if (!input.isTTY || typeof input.setRawMode !== 'function') {
       this.log(chalk.red('Interactive shell input requires a TTY.'));
@@ -484,11 +489,23 @@ export default class Shell extends Command {
       this.promptHistory.reset();
 
       const redraw = (): void => {
+        const preview = this.buildLiveAttachmentPreview(value, cursorIndex, activeSessionId);
+        const rendered = buildPromptInputLineWithCursor(frame, preview.displayValue, preview.displayCursorIndex);
+        const cursorAnchor = rendered.lastIndexOf('\r');
+        const beforeCursor = cursorAnchor >= 0 ? rendered.slice(0, cursorAnchor) : rendered;
+        const afterCursor = cursorAnchor >= 0 ? rendered.slice(cursorAnchor) : '';
+        const styledBefore = preview.highlightSegment
+          ? stylePromptAttachmentSegment(beforeCursor, preview.highlightSegment)
+          : beforeCursor;
+        const styledAfter = preview.highlightSegment
+          ? stylePromptAttachmentSegment(afterCursor, preview.highlightSegment)
+          : afterCursor;
+        const styled = `${styledBefore}${styledAfter}`;
         if (cursorLineIndex > 0) {
           output.write(`\u001b[${cursorLineIndex}A`);
         }
         output.write('\r');
-        output.write(buildPromptInputLineWithCursor(frame, value, cursorIndex));
+        output.write(styled);
         cursorLineIndex = getPromptCursorPosition(frame, value, cursorIndex).lineIndex;
       };
 
@@ -660,6 +677,94 @@ export default class Shell extends Command {
 
     input.pause();
     output.write('\u001b[0m\u001b[?25h\r\n');
+  }
+
+  private buildLiveAttachmentPreview(
+    inputValue: string,
+    cursorIndex: number,
+    activeSessionId: string | null
+  ): {
+    displayValue: string;
+    displayCursorIndex: number;
+    highlightSegment: string | null;
+  } {
+    const baseline = {
+      displayValue: inputValue,
+      displayCursorIndex: cursorIndex,
+      highlightSegment: null
+    };
+
+    const inlineAttach = extractInlineAttach(inputValue);
+    if (inlineAttach?.type === 'attach' || inlineAttach?.type === 'error') {
+      return baseline;
+    }
+
+    const implicitAttach = extractImplicitAttach(inputValue);
+    if (implicitAttach?.type !== 'attach') {
+      return baseline;
+    }
+
+    const rawPathRange = findRawAttachmentPathRange(inputValue, implicitAttach.path);
+    if (!rawPathRange) {
+      return baseline;
+    }
+
+    const isImage = isLikelyImagePath(implicitAttach.path);
+    const nextToken = this.peekLivePreviewToken(activeSessionId, isImage ? 'image' : 'file');
+    const token = isImage ? `[Image #${nextToken}]` : `[File #${nextToken}]`;
+    const fileName = path.basename(implicitAttach.path);
+    const replacement = `${token} ${fileName}`;
+    const displayValue = `${inputValue.slice(0, rawPathRange.start)}${replacement}${inputValue.slice(rawPathRange.end)}`;
+
+    const replacedLength = rawPathRange.end - rawPathRange.start;
+    const delta = replacement.length - replacedLength;
+    let displayCursorIndex = cursorIndex;
+    if (cursorIndex > rawPathRange.end) {
+      displayCursorIndex = cursorIndex + delta;
+    } else if (cursorIndex > rawPathRange.start) {
+      displayCursorIndex = rawPathRange.start + replacement.length;
+    }
+
+    return {
+      displayValue,
+      displayCursorIndex,
+      highlightSegment: replacement
+    };
+  }
+
+  private peekLivePreviewToken(
+    sessionId: string | null,
+    kind: 'image' | 'file'
+  ): number {
+    const key = sessionId ?? '__pending__';
+    const counters = this.livePreviewNextBySession.get(key) ?? { image: 1, file: 1 };
+    return kind === 'image' ? counters.image : counters.file;
+  }
+
+  private syncLivePreviewCounter(sessionId: string, referenceLabel: string): void {
+    const imageMatch = /^\[Image\s+#(\d+)\]$/i.exec(referenceLabel);
+    const fileMatch = /^\[File\s+#(\d+)\]$/i.exec(referenceLabel);
+
+    if (!imageMatch && !fileMatch) {
+      return;
+    }
+
+    const counters = this.livePreviewNextBySession.get(sessionId) ?? { image: 1, file: 1 };
+    if (imageMatch) {
+      const seen = Number.parseInt(imageMatch[1] ?? '0', 10);
+      if (Number.isFinite(seen)) {
+        counters.image = Math.max(counters.image, seen + 1);
+      }
+    }
+
+    if (fileMatch) {
+      const seen = Number.parseInt(fileMatch[1] ?? '0', 10);
+      if (Number.isFinite(seen)) {
+        counters.file = Math.max(counters.file, seen + 1);
+      }
+    }
+
+    this.livePreviewNextBySession.set(sessionId, counters);
   }
 
   private formatPhaseForDisplay(phase: string): string {
@@ -899,6 +1004,59 @@ function findNextWordBoundary(value: string, cursorIndex: number): number {
   }
 
   return index;
+}
+
+function isLikelyImagePath(filePath: string): boolean {
+  const extension = path.extname(filePath).toLowerCase();
+  return extension === '.png'
+    || extension === '.jpg'
+    || extension === '.jpeg'
+    || extension === '.gif'
+    || extension === '.webp'
+    || extension === '.bmp'
+    || extension === '.tif'
+    || extension === '.tiff'
+    || extension === '.heic'
+    || extension === '.heif';
+}
+
+function stylePromptAttachmentSegment(
+  rendered: string,
+  segment: string
+): string {
+  const escaped = escapeRegExp(segment);
+  const segmentPattern = new RegExp(escaped, 'g');
+  const accentStart = '\u001b[1m\u001b[38;2;132;255;142m';
+  const accentEnd = '\u001b[22m\u001b[97m';
+  return rendered.replace(segmentPattern, (match) => `${accentStart}${match}${accentEnd}`);
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function findRawAttachmentPathRange(
+  input: string,
+  normalizedPath: string
+): { start: number; end: number } | null {
+  const escapedSpaces = normalizedPath.replace(/ /g, '\\ ');
+  const candidates = [
+    `"${normalizedPath}"`,
+    `'${normalizedPath}'`,
+    `"${escapedSpaces}"`,
+    `'${escapedSpaces}'`,
+    escapedSpaces,
+    normalizedPath
+  ];
+
+  for (const candidate of candidates) {
+    const start = input.lastIndexOf(candidate);
+    if (start >= 0) {
+      return { start, end: start + candidate.length };
+    }
+  }
+
+  return null;
 }
 
 function getSpinnerText(parsed: ReturnType<typeof parseShellInput>): string | null {

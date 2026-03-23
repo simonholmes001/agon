@@ -162,6 +162,21 @@ describe('shell renderer', () => {
     expect(cursorSegment).toContain('  > hello');
     expect(cursorSegment).not.toContain('  > hello world');
   });
+
+  it('renders top overlay text for live attachment preview', () => {
+    const frame = renderPromptBanner(() => {});
+    const rendered = buildPromptInputLineWithCursor(
+      frame,
+      'Describe this image -> /tmp/cat.jpg',
+      32,
+      { topOverlayText: '  pending [Image #1] cat.jpg' }
+    );
+    const plain = rendered.replace(/\u001b\[[0-9;]*m/g, '');
+    const rows = plain.split('\n');
+
+    expect(rows[0]).toContain('pending [Image #1] cat.jpg');
+    expect(rows[1]).toContain('  > ');
+  });
 });
 
 describe('formatElapsedTimer', () => {

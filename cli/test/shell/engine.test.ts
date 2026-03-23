@@ -307,6 +307,29 @@ describe('shell engine', () => {
     });
   });
 
+  it('auto-attaches when drag-drop path appears after prompt text', async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'agon-shell-engine-'));
+    tempDirs.push(tempDir);
+    const filePath = path.join(tempDir, 'image 01.jpeg');
+    await fs.writeFile(filePath, 'fake', 'utf-8');
+    const escapedPath = filePath.replace(/ /g, '\\ ');
+
+    const outcome = await engine.handleInput(`Describe this image -> ${escapedPath}`);
+
+    expect(controller.attachDocument).toHaveBeenCalledWith(filePath);
+    expect(controller.submitFollowUp).toHaveBeenCalledWith('Describe this image');
+    expect(outcome).toEqual({
+      kind: 'follow-up',
+      sessionId: 'session-123',
+      status: 'active',
+      phase: 'Clarification',
+      response: {
+        agentId: 'moderator',
+        message: 'Next question'
+      }
+    });
+  });
+
   it('returns a friendly message when a path-like input file does not exist', async () => {
     const outcome = await engine.handleInput('/tmp/agon-shell-engine-missing-file.pdf');
 

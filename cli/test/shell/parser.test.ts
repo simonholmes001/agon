@@ -314,7 +314,27 @@ describe('shell parser', () => {
     });
   });
 
+  it('extracts implicit attach when drag-drop path appears after prompt text', () => {
+    expect(extractImplicitAttach('Describe this image -> /Users/simonholmes/Pictures/Photos\\ Library.photoslibrary/resources/derivatives/B/example.jpeg')).toEqual({
+      type: 'attach',
+      path: '/Users/simonholmes/Pictures/Photos Library.photoslibrary/resources/derivatives/B/example.jpeg',
+      remainingText: 'Describe this image'
+    });
+  });
+
+  it('extracts implicit attach when quoted path appears after prompt text', () => {
+    expect(extractImplicitAttach('Summarize this file "/Users/simonholmes/Documents/my notes.pdf"')).toEqual({
+      type: 'attach',
+      path: '/Users/simonholmes/Documents/my notes.pdf',
+      remainingText: 'Summarize this file'
+    });
+  });
+
   it('does not treat non-path plain text as implicit attach', () => {
     expect(extractImplicitAttach('Please summarize this')).toBeNull();
+  });
+
+  it('does not treat slash endpoint tokens as implicit file attach', () => {
+    expect(extractImplicitAttach('Check /health endpoint status')).toBeNull();
   });
 });

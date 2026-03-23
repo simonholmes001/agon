@@ -34,7 +34,9 @@ public sealed class AgentRunner : IAgentRunner
     private const string ModeratorDirectAnswerDirective = """
         The latest user input should be handled as a direct answer path.
         Do NOT ask clarification questions.
-        Provide a direct, concise, user-facing explanation.
+        Answer only the user's latest request with a direct, concise explanation.
+        Do NOT include Agon workflow/process context unless explicitly asked.
+        For straightforward factual or utility requests, keep output plain and minimal.
         First line in MESSAGE must be exactly: STATUS: DIRECT_ANSWER
         PATCH must be valid JSON with empty ops and correct moderator meta.
         """;
