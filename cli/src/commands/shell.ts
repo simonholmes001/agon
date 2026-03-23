@@ -315,7 +315,7 @@ export default class Shell extends Command {
           renderMessagePanel(title, outcome.response.message, color, (line) => this.log(line));
           this.log('Next steps:');
           this.log('  • Continue in this shell: type your next message');
-          this.log('  • Attach a document: /attach "<file-path>"');
+          this.log('  • Add a file: paste/drag a local file path into the input box');
           this.log('  • Explicit follow-up: /follow-up "<follow-up request>"');
           this.log('  • Start a new session: /new');
           this.log('  • Exit shell: /exit');
@@ -330,7 +330,7 @@ export default class Shell extends Command {
           renderMessagePanel(title, outcome.response.message, color, (line) => this.log(line));
           this.log('Next steps:');
           this.log('  • Continue in this shell: type your next message');
-          this.log('  • Attach a document: /attach "<file-path>"');
+          this.log('  • Add a file: paste/drag a local file path into the input box');
           this.log('  • Explicit follow-up: /follow-up "<follow-up request>"');
           this.log('  • Start a new session: /new');
           this.log('  • Exit shell: /exit');
@@ -922,7 +922,7 @@ export default class Shell extends Command {
           this.log('');
           this.log('Next steps:');
           this.log('  • Ask follow-up questions: /follow-up "<follow-up request>"');
-          this.log('  • Attach a document: /attach "<file-path>"');
+          this.log('  • Add a file: paste/drag a local file path into the input box');
           this.log('  • Start a new session: /new');
           this.log('  • View again: /refresh verdict');
           this.log('  • Exit shell: /exit');

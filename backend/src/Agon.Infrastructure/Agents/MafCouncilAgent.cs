@@ -20,6 +20,9 @@ public sealed class MafCouncilAgent : ICouncilAgent
     private static readonly Regex DeicticAttachmentRegex = new(
         @"\b(this|that|attached|newly attached)\s+(image|photo|picture|document|file|pdf|attachment)\b",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex ExplicitAttachmentTokenRegex = new(
+        @"\[(?:Image|File)\s+#\d+\]\s+([^\]\n]+)",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private readonly IAgentResponseParser _parser;
 
@@ -237,6 +240,23 @@ public sealed class MafCouncilAgent : ICouncilAgent
         if (string.IsNullOrWhiteSpace(latestUserInput))
         {
             return null;
+        }
+
+        var explicitMatch = ExplicitAttachmentTokenRegex.Match(latestUserInput);
+        if (explicitMatch.Success)
+        {
+            var rawName = explicitMatch.Groups[1].Value.Trim();
+            if (!string.IsNullOrWhiteSpace(rawName))
+            {
+                for (int index = context.Attachments.Count - 1; index >= 0; index -= 1)
+                {
+                    var attachment = context.Attachments[index];
+                    if (string.Equals(attachment.FileName, rawName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return attachment;
+                    }
+                }
+            }
         }
 
         if (!DeicticAttachmentRegex.IsMatch(latestUserInput))
