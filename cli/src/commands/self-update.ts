@@ -4,6 +4,7 @@ import chalk from 'chalk';
 import { checkForCliUpdate } from '../utils/update-check.js';
 import {
   describeSelfUpdateFailure,
+  getSelfUpdateRestartNotice,
   getSelfUpdateGuidance,
   runNpmGlobalInstall as npmGlobalInstall
 } from '../utils/self-update.js';
@@ -58,7 +59,7 @@ export default class SelfUpdate extends Command {
     try {
       await this.installLatest(packageName);
       installSpinner.succeed(`Updated to v${updateInfo.latestVersion}.`);
-      this.log(chalk.dim('Current process continues running this session. Restart later to use the updated runtime.'));
+      this.log(chalk.yellow(getSelfUpdateRestartNotice(updateInfo.latestVersion)));
     } catch (error) {
       installSpinner.fail('Update failed.');
       const failure = describeSelfUpdateFailure(error);

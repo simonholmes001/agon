@@ -162,6 +162,21 @@ describe('shell renderer', () => {
     expect(cursorSegment).toContain('  > hello');
     expect(cursorSegment).not.toContain('  > hello world');
   });
+
+  it('renders top overlay text for live attachment preview', () => {
+    const frame = renderPromptBanner(() => {});
+    const rendered = buildPromptInputLineWithCursor(
+      frame,
+      'Describe this image -> /tmp/cat.jpg',
+      32,
+      { topOverlayText: '  pending [Image #1] cat.jpg' }
+    );
+    const plain = rendered.replace(/\u001b\[[0-9;]*m/g, '');
+    const rows = plain.split('\n');
+
+    expect(rows[0]).toContain('pending [Image #1] cat.jpg');
+    expect(rows[1]).toContain('  > ');
+  });
 });
 
 describe('formatElapsedTimer', () => {
@@ -247,6 +262,22 @@ describe('styleAttachmentToken', () => {
       expect(styled).not.toBe(plain);
     }
     expect(stripAnsi(styled)).toBe(plain);
+  });
+
+  it('uses distinct styles for [Image ...] vs file/path tokens when ANSI is enabled', () => {
+    const imageToken = '[Image #1]';
+    const fileToken = './docs/spec.md';
+    const styledImage = styleAttachmentToken(imageToken);
+    const styledFile = styleAttachmentToken(fileToken);
+
+    expect(stripAnsi(styledImage)).toBe(imageToken);
+    expect(stripAnsi(styledFile)).toBe(fileToken);
+
+    const imageHasAnsi = /\u001b\[[0-9;]*m/.test(styledImage);
+    const fileHasAnsi = /\u001b\[[0-9;]*m/.test(styledFile);
+    if (imageHasAnsi && fileHasAnsi) {
+      expect(styledImage).not.toBe(styledFile);
+    }
   });
 });
 

@@ -64,22 +64,27 @@ export function renderMessagePanel(
   print('');
 }
 
-/** Warm amber used as the canonical accent for all attachment token references. */
-const attachmentAccent = chalk.bold.rgb(248, 197, 71);
+/** Distinct accents for image vs file/path attachment references. */
+const imageAttachmentAccent = chalk.bold.yellowBright;
+const fileAttachmentAccent = chalk.bold.greenBright;
 
 /**
  * Regex that matches both Codex-style bracketed tokens and bare file paths:
  *   Group 1 – `[Image …]`, `[File …]`, `[Attachment …]`
  *   Group 2 – paths starting with `./`, `../`, or `/` (not `/ ` + space)
  */
-const attachmentRefPattern = /(\[(?:Image|File|Attachment)\s+[^\]\n]+\])|((?:\.\.?\/|\/(?!\s))[a-zA-Z0-9_\-./?&=#@:+%]+)/gi;
+const attachmentRefPattern = /(\[(?:Image|File)\s+#\d+\]\s+[^\s\]\n]+)|(\[(?:Image|File|Attachment)\s+[^\]\n]+\])|((?:\.\.?\/|\/(?!\s))[a-zA-Z0-9_\-./?&=#@:+%]+)/gi;
 
 /**
  * Style a single attachment token (file path or Codex-style image/file
  * reference) with the canonical attachment accent color.
  */
 export function styleAttachmentToken(token: string): string {
-  return attachmentAccent(token);
+  if (/^\[image\s+/i.test(token)) {
+    return imageAttachmentAccent(token);
+  }
+
+  return fileAttachmentAccent(token);
 }
 
 /**
@@ -149,10 +154,15 @@ export function buildPromptInputLine(frame: PromptFrameContext, value: string): 
   return buildPromptInputLineWithCursor(frame, value, value.length);
 }
 
+export interface PromptRenderOptions {
+  topOverlayText?: string;
+}
+
 export function buildPromptInputLineWithCursor(
   frame: PromptFrameContext,
   value: string,
-  cursorIndex: number
+  cursorIndex: number,
+  options?: PromptRenderOptions
 ): string {
   const editableLineCount = getEditableLineCount(frame);
   const visibleValue = getVisiblePromptValue(value, frame.maxInputChars);
@@ -165,6 +175,10 @@ export function buildPromptInputLineWithCursor(
     { length: frame.inputLineCount },
     () => `${frame.promptStart}${' '.repeat(frame.width)}${frame.reset}`
   );
+
+  if (options?.topOverlayText) {
+    lines[0] = buildOverlayLine(frame, options.topOverlayText);
+  }
 
   for (let index = 0; index < editableLineCount; index += 1) {
     const chunk = chunks[index] ?? '';
@@ -268,15 +282,15 @@ export function renderStatusLine(print: (line: string) => void): void {
   print(
     chalk.dim('Use ')
       + chalk.cyan('/new')
-      + chalk.dim(' for a new idea, ')
-      + chalk.cyan('/attach')
-      + chalk.dim(' or paste/drag a file path to add a document, ')
+      + chalk.dim(' for a new idea, paste/drag a file path to add a document, ')
       + chalk.cyan('/params')
       + chalk.dim(' to view params, ')
       + chalk.cyan('/set')
       + chalk.dim(' to change params, ')
       + chalk.cyan('/help')
-      + chalk.dim(' for commands.')
+      + chalk.dim(' for commands, ')
+      + chalk.cyan('/exit')
+      + chalk.dim(' or Ctrl+C to exit.')
   );
 }
 
@@ -395,6 +409,21 @@ function wrapPromptValue(value: string, maxWidth: number): WrappedPromptLines {
 interface VisibleWrappedWindow {
   lines: string[];
   cursorLineIndex: number;
+}
+
+function buildOverlayLine(frame: PromptFrameContext, content: string): string {
+  const visibleLength = stripAnsiCodes(content).length;
+  if (visibleLength > frame.width) {
+    const clipped = `${stripAnsiCodes(content).slice(0, frame.width - 1)}…`;
+    return `${frame.promptStart}${clipped.padEnd(frame.width, ' ')}${frame.reset}`;
+  }
+
+  const padding = ' '.repeat(Math.max(0, frame.width - visibleLength));
+  return `${frame.promptStart}${content}${padding}${frame.reset}`;
+}
+
+function stripAnsiCodes(value: string): string {
+  return value.replace(/\u001b\[[0-9;]*m/g, '');
 }
 
 function getVisibleWrappedWindow(

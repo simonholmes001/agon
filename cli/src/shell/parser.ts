@@ -131,27 +131,36 @@ export function extractInlineAttach(input: string): InlineAttachExtraction | nul
 }
 
 export function extractImplicitAttach(input: string): InlineAttachExtraction | null {
-  const leadingWhitespaceTrimmed = input.trimStart();
-  if (!leadingWhitespaceTrimmed) {
+  if (!input.trim()) {
     return null;
   }
 
-  const startIndex = input.length - leadingWhitespaceTrimmed.length;
-  const parsedPath = parseAttachPathToken(input, startIndex);
-  if (!parsedPath) {
-    return null;
+  for (let index = 0; index < input.length; index += 1) {
+    if (!isPotentialPathStart(input, index)) {
+      continue;
+    }
+
+    const parsedPath = parseAttachPathToken(input, index);
+    if (!parsedPath) {
+      continue;
+    }
+
+    if (!isPathLikeCandidate(parsedPath.path)) {
+      continue;
+    }
+
+    const combinedRemaining = normalizeInlineMessageText(
+      `${input.slice(0, index)} ${input.slice(parsedPath.nextIndex)}`
+    );
+
+    return {
+      type: 'attach',
+      path: parsedPath.path,
+      remainingText: cleanConnectorArtifacts(combinedRemaining)
+    };
   }
 
-  if (!isPathLikeCandidate(parsedPath.path)) {
-    return null;
-  }
-
-  const remainingText = normalizeInlineMessageText(input.slice(parsedPath.nextIndex));
-  return {
-    type: 'attach',
-    path: parsedPath.path,
-    remainingText
-  };
+  return null;
 }
 
 function parseSet(args: string[]): ParsedShellInput {
@@ -460,16 +469,57 @@ function normalizeInlineMessageText(value: string): string {
     .trim();
 }
 
+function cleanConnectorArtifacts(value: string): string {
+  return value
+    .replace(/\s*(?:->|=>)\s*$/g, '')
+    .trim();
+}
+
 function decodeEscapedPath(rawPath: string): string {
   return rawPath.replace(/\\(.)/g, '$1');
 }
 
 function isPathLikeCandidate(value: string): boolean {
-  return value.startsWith('/')
-    || value.startsWith('./')
+  if (value.startsWith('/')) {
+    const remainder = value.slice(1);
+    return remainder.includes('/') || remainder.includes('.');
+  }
+
+  return value.startsWith('./')
     || value.startsWith('../')
     || value.startsWith('~/')
     || /^[A-Za-z]:[\\/]/.test(value);
+}
+
+function isPotentialPathStart(input: string, index: number): boolean {
+  const char = input[index] ?? '';
+  const previous = index > 0 ? (input[index - 1] ?? '') : '';
+  const hasBoundary = index === 0 || /\s|[([{:>,'"`]/.test(previous);
+  if (!hasBoundary) {
+    return false;
+  }
+
+  if (char === '/' || char === '"' || char === '\'') {
+    return true;
+  }
+
+  if (char === '~') {
+    return (input[index + 1] ?? '') === '/';
+  }
+
+  if (char === '.') {
+    const next = input[index + 1] ?? '';
+    if (next === '/') {
+      return true;
+    }
+    return next === '.' && (input[index + 2] ?? '') === '/';
+  }
+
+  if (/[A-Za-z]/.test(char)) {
+    return /^[A-Za-z]:[\\/]/.test(input.slice(index));
+  }
+
+  return false;
 }
 
 function isLikelyPathToken(value: string): boolean {

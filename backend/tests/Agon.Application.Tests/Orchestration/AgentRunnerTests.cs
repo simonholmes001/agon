@@ -638,7 +638,7 @@ public class AgentRunnerTests
     }
 
     [Fact]
-    public async Task RunModeratorAsync_SimpleMetaQuery_WithNeedsInfoFirst_ShouldRetryForDirectAnswer()
+    public async Task RunModeratorAsync_SimpleMetaQuery_ShouldUseDeterministicDirectAnswerPath()
     {
         // Arrange
         var repo = StubRepo();
@@ -649,13 +649,6 @@ public class AgentRunnerTests
         moderator.ModelProvider.Returns("fake/model");
         moderator.RunAsync(Arg.Do<AgentContext>(ctx => capturedContexts.Add(ctx)), Arg.Any<CancellationToken>())
             .Returns(
-                Task.FromResult(new AgentResponse(
-                    AgentId.Moderator,
-                    "ROUTE: DIRECT_ANSWER\nMeta/system question about how Agon works.",
-                    null,
-                    20,
-                    false,
-                    null)),
                 Task.FromResult(new AgentResponse(
                     AgentId.Moderator,
                     "STATUS: NEEDS_INFO\nWhat are you trying to build?",
@@ -679,16 +672,15 @@ public class AgentRunnerTests
         var response = await runner.RunModeratorAsync(state, CancellationToken.None);
 
         // Assert
-        await moderator.Received(3).RunAsync(Arg.Any<AgentContext>(), Arg.Any<CancellationToken>());
-        capturedContexts.Should().HaveCount(3);
-        capturedContexts[0].MicroDirective.Should().Contain("ROUTE: DIRECT_ANSWER");
+        await moderator.Received(2).RunAsync(Arg.Any<AgentContext>(), Arg.Any<CancellationToken>());
+        capturedContexts.Should().HaveCount(2);
+        capturedContexts[0].MicroDirective.Should().Contain("STATUS: DIRECT_ANSWER");
         capturedContexts[1].MicroDirective.Should().Contain("STATUS: DIRECT_ANSWER");
-        capturedContexts[2].MicroDirective.Should().Contain("STATUS: DIRECT_ANSWER");
         response.Message.Should().Contain("STATUS: DIRECT_ANSWER");
     }
 
     [Fact]
-    public async Task RunModeratorAsync_InternalArchitectureQuestion_ShouldUseLlmRouterToForceDirectAnswer()
+    public async Task RunModeratorAsync_InternalArchitectureQuestion_ShouldUseDeterministicDirectAnswerPath()
     {
         // Arrange
         var repo = StubRepo();
@@ -699,13 +691,6 @@ public class AgentRunnerTests
         moderator.ModelProvider.Returns("fake/model");
         moderator.RunAsync(Arg.Do<AgentContext>(ctx => capturedContexts.Add(ctx)), Arg.Any<CancellationToken>())
             .Returns(
-                Task.FromResult(new AgentResponse(
-                    AgentId.Moderator,
-                    "ROUTE: DIRECT_ANSWER\nUser is asking about Agon internal architecture and models.",
-                    null,
-                    25,
-                    false,
-                    null)),
                 Task.FromResult(new AgentResponse(
                     AgentId.Moderator,
                     "STATUS: NEEDS_INFO\nPlease clarify your context.",
@@ -729,11 +714,147 @@ public class AgentRunnerTests
         var response = await runner.RunModeratorAsync(state, CancellationToken.None);
 
         // Assert
-        await moderator.Received(3).RunAsync(Arg.Any<AgentContext>(), Arg.Any<CancellationToken>());
-        capturedContexts.Should().HaveCount(3);
-        capturedContexts[0].MicroDirective.Should().Contain("ROUTE: DIRECT_ANSWER");
+        await moderator.Received(2).RunAsync(Arg.Any<AgentContext>(), Arg.Any<CancellationToken>());
+        capturedContexts.Should().HaveCount(2);
+        capturedContexts[0].MicroDirective.Should().Contain("STATUS: DIRECT_ANSWER");
         capturedContexts[1].MicroDirective.Should().Contain("STATUS: DIRECT_ANSWER");
-        capturedContexts[2].MicroDirective.Should().Contain("STATUS: DIRECT_ANSWER");
+        response.Message.Should().Contain("STATUS: DIRECT_ANSWER");
+    }
+
+    [Fact]
+    public async Task RunModeratorAsync_ShortGeneralQuestion_ShouldUseDeterministicDirectAnswerPath()
+    {
+        // Arrange
+        var repo = StubRepo();
+        var capturedContexts = new List<AgentContext>();
+
+        var moderator = Substitute.For<ICouncilAgent>();
+        moderator.AgentId.Returns(AgentId.Moderator);
+        moderator.ModelProvider.Returns("fake/model");
+        moderator.RunAsync(Arg.Do<AgentContext>(ctx => capturedContexts.Add(ctx)), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new AgentResponse(
+                AgentId.Moderator,
+                "STATUS: DIRECT_ANSWER\nDNS maps hostnames to IP addresses.",
+                null,
+                60,
+                false,
+                null)));
+
+        var runner = BuildRunner([moderator], repo: repo);
+        var state = BuildSessionState(idea: "What is DNS?");
+        state.Phase = SessionPhase.Clarification;
+
+        // Act
+        var response = await runner.RunModeratorAsync(state, CancellationToken.None);
+
+        // Assert
+        await moderator.Received(1).RunAsync(Arg.Any<AgentContext>(), Arg.Any<CancellationToken>());
+        capturedContexts.Should().HaveCount(1);
+        capturedContexts[0].MicroDirective.Should().Contain("STATUS: DIRECT_ANSWER");
+        response.Message.Should().Contain("STATUS: DIRECT_ANSWER");
+    }
+
+    [Fact]
+    public async Task RunModeratorAsync_UtilityImperativeWithoutQuestionMark_ShouldUseDeterministicDirectAnswerPath()
+    {
+        // Arrange
+        var repo = StubRepo();
+        var capturedContexts = new List<AgentContext>();
+
+        var moderator = Substitute.For<ICouncilAgent>();
+        moderator.AgentId.Returns(AgentId.Moderator);
+        moderator.ModelProvider.Returns("fake/model");
+        moderator.RunAsync(Arg.Do<AgentContext>(ctx => capturedContexts.Add(ctx)), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new AgentResponse(
+                AgentId.Moderator,
+                "STATUS: DIRECT_ANSWER\nToday in AB31 5UQ, expect light rain and 9C.",
+                null,
+                60,
+                false,
+                null)));
+
+        var runner = BuildRunner([moderator], repo: repo);
+        var state = BuildSessionState(idea: "Today's weather for AB31 5UQ");
+        state.Phase = SessionPhase.Clarification;
+
+        // Act
+        var response = await runner.RunModeratorAsync(state, CancellationToken.None);
+
+        // Assert
+        await moderator.Received(1).RunAsync(Arg.Any<AgentContext>(), Arg.Any<CancellationToken>());
+        capturedContexts.Should().HaveCount(1);
+        capturedContexts[0].MicroDirective.Should().Contain("STATUS: DIRECT_ANSWER");
+        response.Message.Should().Contain("STATUS: DIRECT_ANSWER");
+    }
+
+    [Fact]
+    public async Task RunModeratorAsync_UtilityFollowUpMessage_ShouldUseLatestUserMessageForDeterministicDirectAnswerPath()
+    {
+        // Arrange
+        var repo = StubRepo();
+        var capturedContexts = new List<AgentContext>();
+
+        var moderator = Substitute.For<ICouncilAgent>();
+        moderator.AgentId.Returns(AgentId.Moderator);
+        moderator.ModelProvider.Returns("fake/model");
+        moderator.RunAsync(Arg.Do<AgentContext>(ctx => capturedContexts.Add(ctx)), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new AgentResponse(
+                AgentId.Moderator,
+                "STATUS: DIRECT_ANSWER\nDNS record types map hostnames and services.",
+                null,
+                60,
+                false,
+                null)));
+
+        var runner = BuildRunner([moderator], repo: repo);
+        var state = BuildSessionState(idea: "Create a full PRD for a new payments product");
+        state.Phase = SessionPhase.Clarification;
+        state.UserMessages.Add(new UserMessage(
+            "Explain DNS record types",
+            DateTimeOffset.UtcNow,
+            1));
+
+        // Act
+        var response = await runner.RunModeratorAsync(state, CancellationToken.None);
+
+        // Assert
+        await moderator.Received(1).RunAsync(Arg.Any<AgentContext>(), Arg.Any<CancellationToken>());
+        capturedContexts.Should().HaveCount(1);
+        capturedContexts[0].MicroDirective.Should().Contain("STATUS: DIRECT_ANSWER");
+        response.Message.Should().Contain("STATUS: DIRECT_ANSWER");
+    }
+
+    [Fact]
+    public async Task RunModeratorAsync_AttachmentImperativePrompt_ShouldUseDeterministicDirectAnswerPath()
+    {
+        // Arrange
+        var repo = StubRepo();
+        var capturedContexts = new List<AgentContext>();
+
+        var moderator = Substitute.For<ICouncilAgent>();
+        moderator.AgentId.Returns(AgentId.Moderator);
+        moderator.ModelProvider.Returns("fake/model");
+        moderator.RunAsync(Arg.Do<AgentContext>(ctx => capturedContexts.Add(ctx)), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new AgentResponse(
+                AgentId.Moderator,
+                "STATUS: DIRECT_ANSWER\nThis image appears to show a dashboard screenshot.",
+                null,
+                55,
+                false,
+                null)));
+
+        var runner = BuildRunner([moderator], repo: repo);
+        var state = BuildSessionState(idea: "Describe this image");
+        state.Phase = SessionPhase.Clarification;
+        state.Attachments.Add(BuildAttachment("mock-image.jpeg", "image/jpeg"));
+
+        // Act
+        var response = await runner.RunModeratorAsync(state, CancellationToken.None);
+
+        // Assert
+        await moderator.Received(1).RunAsync(Arg.Any<AgentContext>(), Arg.Any<CancellationToken>());
+        capturedContexts.Should().HaveCount(1);
+        capturedContexts[0].MicroDirective.Should().Contain("STATUS: DIRECT_ANSWER");
         response.Message.Should().Contain("STATUS: DIRECT_ANSWER");
     }
 
@@ -812,6 +933,22 @@ public class AgentRunnerTests
         var state = SessionState.Create(SessionId, Guid.Empty, idea, frictionLevel, false, EmptyMap());
         state.CurrentRound = round;
         return state;
+    }
+
+    private static SessionAttachment BuildAttachment(string fileName, string contentType)
+    {
+        return new SessionAttachment(
+            AttachmentId: Guid.NewGuid(),
+            SessionId: SessionId,
+            UserId: Guid.Empty,
+            FileName: fileName,
+            ContentType: contentType,
+            SizeBytes: 1024,
+            BlobName: $"blob/{fileName}",
+            BlobUri: $"https://example.invalid/{fileName}",
+            AccessUrl: $"https://example.invalid/access/{fileName}",
+            ExtractedText: null,
+            UploadedAt: DateTimeOffset.UtcNow);
     }
 
     private static ICouncilAgent BuildCapturingAgent(

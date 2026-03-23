@@ -12,6 +12,10 @@ export interface SelfUpdateFailure {
   message: string;
 }
 
+export function getSelfUpdateRestartNotice(latestVersion: string): string {
+  return `Update installed, but this shell is still running the previous runtime. Exit now and restart Agon to use v${latestVersion}.`;
+}
+
 export function runNpmGlobalInstall(packageName: string): Promise<void> {
   return new Promise((resolve, reject) => {
     const child = spawn('npm', ['install', '-g', `${packageName}@latest`], {

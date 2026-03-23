@@ -44,6 +44,7 @@
   - [Frontend (Next.js)](#frontend-nextjs)
 - [Testing and Quality](#testing--quality)
   - [Running Tests](#running-tests)
+  - [Pre-Merge Validation Protocol](#pre-merge-validation-protocol)
 - [CLI Release Process](#cli-release-process)
 - [Architecture Documentation](#architecture-documentation)
 - [Current Status](#current-status-march-2026)
@@ -252,7 +253,7 @@ Notes:
 - `/update` runs the same update flow from inside an active shell session.
 - By default, Agon CLI connects to the hosted backend endpoint (no manual `apiUrl` setup required for end users).
 - Endpoint override precedence is: `AGON_API_URL` (explicit runtime override), then `AGON_HOSTED_API_URL`, then `AGON_API_HOSTNAME` as `https://<hostname>`, then legacy fallback.
-- After successful in-shell update, your current session remains usable; restart later to run the newly installed runtime.
+- After successful in-shell update, exit the shell and start `agon` again to run the newly installed runtime.
 - On startup, Agon checks npm and alerts when a newer stable version is available.
 - `/attach` accepts only a file path. Upload first, then send your message as a separate prompt.
 
@@ -790,6 +791,80 @@ dotnet test backend/tests/Agon.Domain.Tests
 # CLI tests with coverage
 cd cli && npm run test:coverage
 ```
+
+### Pre-Merge Validation Protocol
+[Back to top](#top)
+
+Use this exact checklist before merging PRs that touch CLI and backend behavior.
+
+Important local-config note:
+- `cli/.agonrc` is your local shell config (for example `apiUrl`, friction, research toggle).
+- It is intentionally gitignored and should not be committed.
+- You can still test locally with it; not committing it does not affect your local runs.
+
+#### Track A — CLI behavior against deployed backend
+
+1. Point CLI to deployed environment:
+   ```bash
+   agon
+   /set apiUrl https://api-dev.agon-agents.org
+   /params
+   ```
+2. Validate `/update` message clarity:
+   ```bash
+   /update --check
+   /update
+   ```
+   Expected:
+   - update result is shown
+   - explicit instruction to exit and restart `agon` to use new runtime
+3. Validate moderator routing (no unnecessary full debate):
+   - Ask a short direct question: `What is DNS?`
+   - Ask a short utility prompt without a question mark: `Today's weather for AB31 5UQ`
+   - Run `/status`
+   Expected:
+   - direct answer from moderator
+   - no transition into `AnalysisRound` for this short direct question
+   - response is concise and does not expand into debate-style framework sections
+4. Validate post-delivery assistant simplicity:
+   - Complete one debate flow and then ask a simple follow-up: `What do DNS record types do?`
+   Expected:
+   - answer is direct and concise
+   - no unnecessary template-style framing
+5. Validate attachment image path:
+   - Drag/drop or paste an image path into shell, then ask: `Analyze this image.`
+   Expected:
+   - if vision extraction is configured: answer references image content
+   - if not configured: explicit warning about backend vision extraction configuration
+
+#### Track B — backend fix validation locally
+
+1. Start local dependencies and backend:
+   ```bash
+   cd backend
+   docker compose up -d postgres redis azurite
+   dotnet run --project src/Agon.Api/Agon.Api.csproj
+   ```
+2. In a second shell, point CLI to local backend and run checks:
+   ```bash
+   agon
+   /set apiUrl http://localhost:5000
+   /params
+   ```
+3. Run targeted automated tests before PR merge:
+   ```bash
+   # CLI tests
+   npm --prefix cli test
+
+   # Backend orchestration + extraction tests
+   dotnet test backend/tests/Agon.Application.Tests/Agon.Application.Tests.csproj --filter "FullyQualifiedName~Orchestration"
+   dotnet test backend/tests/Agon.Infrastructure.Tests/Agon.Infrastructure.Tests.csproj --filter "FullyQualifiedName~AttachmentTextExtractor"
+   ```
+4. Run full suite when changing shared flows:
+   ```bash
+   dotnet test backend/Agon.sln --verbosity minimal
+   npm --prefix cli test
+   ```
 
 ---
 

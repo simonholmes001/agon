@@ -254,6 +254,7 @@ describe('shell engine', () => {
     expect(outcome).toEqual({
       kind: 'attachment',
       sessionId: 'session-123',
+      referenceLabel: '[File #1]',
       fileName: 'spec.md',
       contentType: 'text/markdown',
       sizeBytes: 1024,
@@ -275,6 +276,7 @@ describe('shell engine', () => {
     expect(outcome).toEqual({
       kind: 'attachment',
       sessionId: 'session-123',
+      referenceLabel: '[File #1]',
       fileName: 'spec.md',
       contentType: 'text/markdown',
       sizeBytes: 1024,
@@ -293,6 +295,29 @@ describe('shell engine', () => {
 
     expect(controller.attachDocument).toHaveBeenCalledWith(filePath);
     expect(controller.submitFollowUp).toHaveBeenCalledWith('summarize key risks');
+    expect(outcome).toEqual({
+      kind: 'follow-up',
+      sessionId: 'session-123',
+      status: 'active',
+      phase: 'Clarification',
+      response: {
+        agentId: 'moderator',
+        message: 'Next question'
+      }
+    });
+  });
+
+  it('auto-attaches when drag-drop path appears after prompt text', async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'agon-shell-engine-'));
+    tempDirs.push(tempDir);
+    const filePath = path.join(tempDir, 'image 01.jpeg');
+    await fs.writeFile(filePath, 'fake', 'utf-8');
+    const escapedPath = filePath.replace(/ /g, '\\ ');
+
+    const outcome = await engine.handleInput(`Describe this image -> ${escapedPath}`);
+
+    expect(controller.attachDocument).toHaveBeenCalledWith(filePath);
+    expect(controller.submitFollowUp).toHaveBeenCalledWith('Describe this image');
     expect(outcome).toEqual({
       kind: 'follow-up',
       sessionId: 'session-123',
@@ -328,5 +353,64 @@ describe('shell engine', () => {
     expect(selfUpdate).toHaveBeenCalledWith({ check: true });
     expect(outcome).toEqual({ kind: 'noop' });
     expect(print).toHaveBeenCalledWith('Update available: v0.1.10 -> v0.1.11');
+  });
+
+  it('prints explicit restart guidance after /update installs a new version', async () => {
+    selfUpdate.mockResolvedValueOnce({
+      status: 'updated',
+      currentVersion: '0.5.1',
+      latestVersion: '0.6.0'
+    });
+
+    const outcome = await engine.handleInput('/update');
+
+    expect(outcome).toEqual({ kind: 'noop' });
+    expect(print).toHaveBeenCalledWith('Updated CLI from v0.5.1 to v0.6.0.');
+    expect(print).toHaveBeenCalledWith(
+      'Update installed, but this shell is still running the previous runtime. Exit now and restart Agon to use v0.6.0.'
+    );
+  });
+
+  it('assigns codex-style attachment labels per session for images', async () => {
+    controller.attachDocument.mockResolvedValueOnce({
+      sessionId: 'session-123',
+      attachment: {
+        fileName: 'image-one.jpeg',
+        contentType: 'image/jpeg',
+        sizeBytes: 2048,
+        hasExtractedText: true
+      }
+    });
+    controller.attachDocument.mockResolvedValueOnce({
+      sessionId: 'session-123',
+      attachment: {
+        fileName: 'image-two.jpeg',
+        contentType: 'image/jpeg',
+        sizeBytes: 4096,
+        hasExtractedText: true
+      }
+    });
+
+    const first = await engine.handleInput('/attach /tmp/image-one.jpeg');
+    const second = await engine.handleInput('/attach /tmp/image-two.jpeg');
+
+    expect(first).toEqual({
+      kind: 'attachment',
+      sessionId: 'session-123',
+      referenceLabel: '[Image #1]',
+      fileName: 'image-one.jpeg',
+      contentType: 'image/jpeg',
+      sizeBytes: 2048,
+      hasExtractedText: true
+    });
+    expect(second).toEqual({
+      kind: 'attachment',
+      sessionId: 'session-123',
+      referenceLabel: '[Image #2]',
+      fileName: 'image-two.jpeg',
+      contentType: 'image/jpeg',
+      sizeBytes: 4096,
+      hasExtractedText: true
+    });
   });
 });

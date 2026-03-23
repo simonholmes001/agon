@@ -32,9 +32,11 @@ public sealed class AgentRunner : IAgentRunner
         If you cannot make a valid patch, output an empty ops array with valid meta.
         """;
     private const string ModeratorDirectAnswerDirective = """
-        The latest user input is a simple/meta question about Agon itself.
+        The latest user input should be handled as a direct answer path.
         Do NOT ask clarification questions.
-        Provide a direct, concise, user-facing explanation.
+        Answer only the user's latest request with a direct, concise explanation.
+        Do NOT include Agon workflow/process context unless explicitly asked.
+        For straightforward factual or utility requests, keep output plain and minimal.
         First line in MESSAGE must be exactly: STATUS: DIRECT_ANSWER
         PATCH must be valid JSON with empty ops and correct moderator meta.
         """;
@@ -54,21 +56,6 @@ public sealed class AgentRunner : IAgentRunner
     private static readonly Regex ModeratorRouteRegex = new(
         @"^\s*route\s*[:=]\s*(DIRECT_ANSWER|FULL_DEBATE)\b",
         RegexOptions.Multiline | RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex AnalysisIntentRegex = new(
-        @"\b(prd|product requirements?|debate brief|architecture|roadmap|mvp|spec(?:ification)?|analysis|analy[sz]e|evaluate|compare|implementation|implement|build|design|tech stack|user stor(?:y|ies))\b",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex SimpleMetaQueryRegex = new(
-        @"\b(what can you do|how can you help|who are you|what is agon|internal setup|your setup|how do you work|capabilities|command(?:s)?)\b",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex SelfReferenceRegex = new(
-        @"\b(agon|you|your|this assistant|this tool|this cli)\b",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex SystemMetaTopicRegex = new(
-        @"\b(agent(?:s)?|llm(?:s)?|model(?:s)?|internal|setup|architecture|capabilit(?:y|ies)|command(?:s)?|work(?:s|ing)?|help)\b",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex QuestionLeadRegex = new(
-        @"^\s*(how|what|who|can|could|would|do|does|is|are|where|when)\b",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private readonly IReadOnlyList<ICouncilAgent> _agents;
     private readonly ITruthMapRepository _truthMapRepository;
@@ -118,7 +105,7 @@ public sealed class AgentRunner : IAgentRunner
             false, // Research tools not used during clarification
             state.Attachments);
 
-        var shouldRunIntentRouter = ShouldRunIntentRouter(state);
+        var shouldRunIntentRouter = ModeratorRoutingClassifier.ShouldRunIntentRouter(state);
         var routeDecision = await DetermineModeratorRouteAsync(
             moderator,
             context,
@@ -216,6 +203,14 @@ public sealed class AgentRunner : IAgentRunner
         bool shouldRunIntentRouter,
         CancellationToken cancellationToken)
     {
+        if (ModeratorRoutingClassifier.ShouldForceDirectAnswer(state))
+        {
+            _logger?.LogInformation(
+                "Deterministic moderator classifier selected DIRECT_ANSWER for session {SessionId}.",
+                state.SessionId);
+            return new ModeratorRouteDecision(true, "deterministic");
+        }
+
         if (!shouldRunIntentRouter)
         {
             return new ModeratorRouteDecision(false, "router_not_run");
@@ -251,7 +246,7 @@ public sealed class AgentRunner : IAgentRunner
                 state.SessionId);
         }
 
-        var fallback = ShouldHandleAsSimpleMetaQuery(state);
+        var fallback = ModeratorRoutingClassifier.ShouldForceDirectAnswer(state);
         _logger?.LogInformation(
             "Moderator intent router fell back to deterministic heuristics (directAnswer={DirectAnswer}) for session {SessionId}.",
             fallback,
@@ -383,76 +378,6 @@ public sealed class AgentRunner : IAgentRunner
         }
 
         return ModeratorRoute.Unknown;
-    }
-
-    private static bool ShouldRunIntentRouter(SessionState state)
-    {
-        var latestInput = GetLatestUserInput(state);
-        if (string.IsNullOrWhiteSpace(latestInput))
-        {
-            return false;
-        }
-
-        var trimmed = latestInput.Trim();
-        if (trimmed.Length is < 4 or > 600)
-        {
-            return false;
-        }
-
-        return trimmed.Contains('?') || QuestionLeadRegex.IsMatch(trimmed);
-    }
-
-    private static bool ShouldHandleAsSimpleMetaQuery(SessionState state)
-    {
-        var latestInput = GetLatestUserInput(state);
-        if (string.IsNullOrWhiteSpace(latestInput))
-        {
-            return false;
-        }
-
-        return LooksLikeSimpleMetaQuery(latestInput);
-    }
-
-    private static string GetLatestUserInput(SessionState state)
-    {
-        if (state.UserMessages.Count > 0)
-        {
-            return state.UserMessages[^1].Content;
-        }
-
-        return state.Idea ?? string.Empty;
-    }
-
-    private static bool LooksLikeSimpleMetaQuery(string input)
-    {
-        var trimmed = input.Trim();
-        if (trimmed.Length is < 4 or > 280)
-        {
-            return false;
-        }
-
-        var looksLikeQuestion = trimmed.Contains('?') || QuestionLeadRegex.IsMatch(trimmed);
-        if (!looksLikeQuestion)
-        {
-            return false;
-        }
-
-        if (SimpleMetaQueryRegex.IsMatch(trimmed))
-        {
-            return true;
-        }
-
-        var selfReferential = SelfReferenceRegex.IsMatch(trimmed);
-        var systemTopic = SystemMetaTopicRegex.IsMatch(trimmed);
-        var strongProjectSignal = AnalysisIntentRegex.IsMatch(trimmed)
-            && !selfReferential;
-
-        if (strongProjectSignal)
-        {
-            return false;
-        }
-
-        return selfReferential && systemTopic;
     }
 
     /// <summary>

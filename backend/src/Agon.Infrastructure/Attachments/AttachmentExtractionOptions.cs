@@ -27,6 +27,7 @@ public sealed class OpenAiVisionExtractionOptions
     public bool Enabled { get; set; } = true;
     public string ApiKey { get; set; } = string.Empty;
     public string Model { get; set; } = "gpt-4o-mini";
+    public string FallbackModel { get; set; } = string.Empty;
     public int MaxTokens { get; set; } = 1200;
     public string Detail { get; set; } = "auto";
     public int MaxImageBytes { get; set; } = 6 * 1024 * 1024;
