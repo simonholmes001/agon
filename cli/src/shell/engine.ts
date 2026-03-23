@@ -170,10 +170,10 @@ export class ShellEngine {
 
     if (!inlineAttach) {
       const implicitAttach = extractImplicitAttach(text);
-      if (implicitAttach?.type === 'attach') {
-        const resolvedPath = await resolvePathIfExisting(implicitAttach.path);
-        if (resolvedPath) {
-          const result = await this.controller.attachDocument(resolvedPath);
+        if (implicitAttach?.type === 'attach') {
+          const resolvedPath = await resolvePathIfExisting(implicitAttach.path);
+          if (resolvedPath) {
+            const result = await this.controller.attachDocument(resolvedPath);
           const referenceLabel = this.nextAttachmentReferenceLabel(result.sessionId, result.attachment.contentType);
           if (!implicitAttach.remainingText) {
             return {
@@ -194,9 +194,9 @@ export class ShellEngine {
           this.printAttachmentExtractionMessage(result.attachment.contentType, result.attachment.hasExtractedText);
 
           plainText = implicitAttach.remainingText;
-        } else if (!implicitAttach.remainingText) {
+        } else {
           this.print(`File not found: ${implicitAttach.path}`);
-          this.print('Use /attach <file-path> for explicit attach, or provide a valid local file path.');
+          this.print('Attachment was not sent. Provide a valid local file path, then retry.');
           return { kind: 'noop' };
         }
       }

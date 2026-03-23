@@ -61,7 +61,7 @@ internal static class ModeratorRoutingClassifier
             return false;
         }
 
-        return LooksLikeSimpleDirectQuery(latestInput, state.Attachments.Count > 0);
+        return LooksLikeSimpleDirectQuery(latestInput);
     }
 
     private static string GetLatestUserInput(SessionState state)
@@ -74,7 +74,7 @@ internal static class ModeratorRoutingClassifier
         return state.Idea ?? string.Empty;
     }
 
-    private static bool LooksLikeSimpleDirectQuery(string input, bool hasAttachments)
+    private static bool LooksLikeSimpleDirectQuery(string input)
     {
         var trimmed = input.Trim();
         if (trimmed.Length is < 4 or > 280)
@@ -82,7 +82,12 @@ internal static class ModeratorRoutingClassifier
             return false;
         }
 
-        var attachmentImperative = hasAttachments && AttachmentDirectActionRegex.IsMatch(trimmed);
+        var attachmentImperative = AttachmentDirectActionRegex.IsMatch(trimmed);
+        if (attachmentImperative && !FullDebateIntentRegex.IsMatch(trimmed))
+        {
+            return true;
+        }
+
         var utilityImperative = LooksLikeUtilityImperative(trimmed);
         if (!LooksLikeQuestion(trimmed) && !attachmentImperative && !utilityImperative)
         {

@@ -858,6 +858,84 @@ public class AgentRunnerTests
         response.Message.Should().Contain("STATUS: DIRECT_ANSWER");
     }
 
+    [Fact]
+    public async Task RunModeratorAsync_AttachmentImperativePromptWithoutAttachment_ShouldStillUseDeterministicDirectAnswerPath()
+    {
+        // Arrange
+        var repo = StubRepo();
+        var capturedContexts = new List<AgentContext>();
+
+        var moderator = Substitute.For<ICouncilAgent>();
+        moderator.AgentId.Returns(AgentId.Moderator);
+        moderator.ModelProvider.Returns("fake/model");
+        moderator.RunAsync(Arg.Do<AgentContext>(ctx => capturedContexts.Add(ctx)), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new AgentResponse(
+                AgentId.Moderator,
+                "STATUS: DIRECT_ANSWER\nPlease upload an image and I will describe it.",
+                null,
+                55,
+                false,
+                null)));
+
+        var runner = BuildRunner([moderator], repo: repo);
+        var state = BuildSessionState(idea: "Describe this image");
+        state.Phase = SessionPhase.Clarification;
+
+        // Act
+        var response = await runner.RunModeratorAsync(state, CancellationToken.None);
+
+        // Assert
+        await moderator.Received(1).RunAsync(Arg.Any<AgentContext>(), Arg.Any<CancellationToken>());
+        capturedContexts.Should().HaveCount(1);
+        capturedContexts[0].MicroDirective.Should().Contain("STATUS: DIRECT_ANSWER");
+        response.Message.Should().Contain("STATUS: DIRECT_ANSWER");
+    }
+
+    [Fact]
+    public async Task RunModeratorAsync_DirectAnswerRoute_ShouldCoerceNonDirectModeratorStatuses()
+    {
+        // Arrange
+        var repo = StubRepo();
+        var capturedContexts = new List<AgentContext>();
+
+        var moderator = Substitute.For<ICouncilAgent>();
+        moderator.AgentId.Returns(AgentId.Moderator);
+        moderator.ModelProvider.Returns("fake/model");
+        moderator.RunAsync(Arg.Do<AgentContext>(ctx => capturedContexts.Add(ctx)), Arg.Any<CancellationToken>())
+            .Returns(
+                Task.FromResult(new AgentResponse(
+                    AgentId.Moderator,
+                    "STATUS: NEEDS_INFO\nCan you clarify what you mean?",
+                    null,
+                    50,
+                    false,
+                    null)),
+                Task.FromResult(new AgentResponse(
+                    AgentId.Moderator,
+                    "STATUS: READY\nDNS maps hostnames to IP addresses.",
+                    null,
+                    65,
+                    false,
+                    null)));
+
+        var runner = BuildRunner([moderator], repo: repo);
+        var state = BuildSessionState(idea: "What is DNS?");
+        state.Phase = SessionPhase.Clarification;
+        state.ClarificationRoundCount = 1;
+
+        // Act
+        var response = await runner.RunModeratorAsync(state, CancellationToken.None);
+
+        // Assert
+        await moderator.Received(2).RunAsync(Arg.Any<AgentContext>(), Arg.Any<CancellationToken>());
+        capturedContexts.Should().HaveCount(2);
+        response.Message.Should().StartWith("STATUS: DIRECT_ANSWER");
+        response.Patch.Should().NotBeNull();
+        response.Patch!.Ops.Should().BeEmpty();
+        response.Patch.Meta.Agent.Should().Be(AgentId.Moderator);
+        response.Patch.Meta.Round.Should().Be(state.ClarificationRoundCount);
+    }
+
     // ── Post-delivery follow-up tests ────────────────────────────────────────
 
     [Fact]

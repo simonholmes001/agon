@@ -164,6 +164,46 @@ public class AttachmentTextExtractorTests
         handler.CallCount.Should().Be(2);
     }
 
+    [Fact]
+    public async Task ExtractAsync_ImageVisionWithObjectContent_ParsesText()
+    {
+        var handler = new SequenceHandler([
+            _ => new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("""
+                {
+                  "choices": [
+                    {
+                      "message": {
+                        "content": {
+                          "type": "output_text",
+                          "text": "Screenshot shows a blue dashboard with status cards."
+                        }
+                      }
+                    }
+                  ]
+                }
+                """, Encoding.UTF8, "application/json")
+            }
+        ]);
+
+        var extractor = CreateExtractor(new AttachmentExtractionOptions
+        {
+            OpenAiVision = new OpenAiVisionExtractionOptions
+            {
+                Enabled = true,
+                ApiKey = "test-key",
+                Model = "gpt-4o-mini"
+            }
+        }, handler);
+
+        var bytes = new byte[] { 1, 2, 3, 4, 5 };
+        var result = await extractor.ExtractAsync(bytes, "snapshot.jpeg", "image/jpeg");
+
+        result.Should().Contain("blue dashboard");
+        handler.CallCount.Should().Be(1);
+    }
+
     private static AttachmentTextExtractor CreateExtractor(AttachmentExtractionOptions options, HttpMessageHandler? handler = null)
     {
         var httpClientFactory = Substitute.For<IHttpClientFactory>();

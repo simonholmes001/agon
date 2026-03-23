@@ -132,6 +132,10 @@ public sealed class AgentRunner : IAgentRunner
             state,
             response,
             cancellationToken);
+        response = CoerceModeratorDirectAnswerIfRequired(
+            response,
+            shouldForceDirectAnswer,
+            state);
 
         if (response.HasPatch && GetModeratorPatchValidationError(response.Patch!, state) is not null)
         {
@@ -358,6 +362,65 @@ public sealed class AgentRunner : IAgentRunner
         var match = ModeratorStatusRegex.Match(message);
         return match.Success ? match.Groups[1].Value.Trim().ToUpperInvariant() : null;
     }
+
+    private static AgentResponse CoerceModeratorDirectAnswerIfRequired(
+        AgentResponse response,
+        bool shouldForceDirectAnswer,
+        SessionState state)
+    {
+        if (!shouldForceDirectAnswer || response.TimedOut)
+        {
+            return response;
+        }
+
+        var status = ParseModeratorStatus(response.Message);
+        var body = StripLeadingStatusLine(response.Message);
+        if (string.IsNullOrWhiteSpace(body))
+        {
+            body = "I can help with that.";
+        }
+
+        var message = status == "DIRECT_ANSWER"
+            ? response.Message
+            : $"STATUS: DIRECT_ANSWER\n{body}";
+
+        return response with
+        {
+            Message = message,
+            Patch = BuildEmptyModeratorPatch(state, "Direct-answer path: no Truth Map mutation.")
+        };
+    }
+
+    private static string StripLeadingStatusLine(string message)
+    {
+        if (string.IsNullOrWhiteSpace(message))
+        {
+            return string.Empty;
+        }
+
+        var normalized = message.Replace("\r\n", "\n").Replace('\r', '\n');
+        var lines = normalized.Split('\n');
+        if (lines.Length == 0)
+        {
+            return normalized.Trim();
+        }
+
+        if (!ModeratorStatusRegex.IsMatch(lines[0]))
+        {
+            return normalized.Trim();
+        }
+
+        return string.Join('\n', lines.Skip(1)).Trim();
+    }
+
+    private static TruthMapPatch BuildEmptyModeratorPatch(SessionState state, string reason) =>
+        new(
+            [],
+            new PatchMeta(
+                Domain.Agents.AgentId.Moderator,
+                state.ClarificationRoundCount,
+                reason,
+                state.SessionId));
 
     private static ModeratorRoute ParseModeratorRoute(string? message)
     {

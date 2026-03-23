@@ -56,17 +56,21 @@ public sealed class AttachmentTextExtractor : IAttachmentTextExtractor
 
     private static readonly HashSet<string> ImageExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
-        ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".tif", ".tiff"
+        ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".tif", ".tiff", ".heic", ".heif", ".jfif"
     };
 
     private static readonly HashSet<string> ImageContentTypes = new(StringComparer.OrdinalIgnoreCase)
     {
         "image/png",
         "image/jpeg",
+        "image/jpg",
+        "image/pjpeg",
         "image/gif",
         "image/bmp",
         "image/webp",
-        "image/tiff"
+        "image/tiff",
+        "image/heic",
+        "image/heif"
     };
 
     private readonly IHttpClientFactory _httpClientFactory;
@@ -499,6 +503,11 @@ public sealed class AttachmentTextExtractor : IAttachmentTextExtractor
                     .OfType<string>();
 
                 return string.Join("\n", parts);
+            }
+
+            if (content.ValueKind == JsonValueKind.Object)
+            {
+                return ExtractContentText(content);
             }
 
             return ParseResponsesApiContent(document.RootElement);
