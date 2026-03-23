@@ -758,8 +758,13 @@ public class SessionsController : ControllerBase
             ".pptx" => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
             ".png" => "image/png",
             ".jpg" or ".jpeg" => "image/jpeg",
+            ".jfif" => "image/jpeg",
             ".gif" => "image/gif",
+            ".bmp" => "image/bmp",
+            ".tif" or ".tiff" => "image/tiff",
             ".webp" => "image/webp",
+            ".heic" => "image/heic",
+            ".heif" => "image/heif",
             _ => "application/octet-stream"
         };
     }

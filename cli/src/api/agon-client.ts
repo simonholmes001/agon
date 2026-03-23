@@ -505,8 +505,14 @@ function guessContentType(fileName: string): string {
     '.png': 'image/png',
     '.jpg': 'image/jpeg',
     '.jpeg': 'image/jpeg',
+    '.jfif': 'image/jpeg',
     '.gif': 'image/gif',
-    '.webp': 'image/webp'
+    '.bmp': 'image/bmp',
+    '.tif': 'image/tiff',
+    '.tiff': 'image/tiff',
+    '.webp': 'image/webp',
+    '.heic': 'image/heic',
+    '.heif': 'image/heif'
   };
 
   return map[extension] ?? 'application/octet-stream';

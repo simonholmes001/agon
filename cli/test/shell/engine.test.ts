@@ -340,6 +340,17 @@ describe('shell engine', () => {
     expect(print).toHaveBeenCalledWith('File not found: /tmp/agon-shell-engine-missing-file.pdf');
   });
 
+  it('does not submit plain text when implicit attach path is missing but prompt text exists', async () => {
+    const outcome = await engine.handleInput('Describe this image -> /tmp/agon-shell-engine-missing-file.jpeg');
+
+    expect(outcome).toEqual({ kind: 'noop' });
+    expect(controller.attachDocument).not.toHaveBeenCalled();
+    expect(controller.startIdea).not.toHaveBeenCalled();
+    expect(controller.submitFollowUp).not.toHaveBeenCalled();
+    expect(print).toHaveBeenCalledWith('File not found: /tmp/agon-shell-engine-missing-file.jpeg');
+    expect(print).toHaveBeenCalledWith('Attachment was not sent. Provide a valid local file path, then retry.');
+  });
+
   it('runs /update --check through updater callback', async () => {
     selfUpdate.mockResolvedValueOnce({
       status: 'update-available',

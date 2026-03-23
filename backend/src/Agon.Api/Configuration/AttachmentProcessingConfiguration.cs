@@ -31,5 +31,5 @@ public sealed class OpenAiVisionProcessingConfiguration
     public string FallbackModel { get; set; } = string.Empty;
     public int MaxTokens { get; set; } = 1200;
     public string Detail { get; set; } = "auto";
-    public int MaxImageBytes { get; set; } = 6291456;
+    public int MaxImageBytes { get; set; } = 20971520;
 }
