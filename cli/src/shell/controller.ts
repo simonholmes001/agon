@@ -30,6 +30,7 @@ interface SessionManagerLike {
   getCurrentSessionId(): Promise<string | null>;
   listSessions(): Promise<SessionResponse[]>;
   getSession(sessionId: string): Promise<SessionResponse | null>;
+  clearSession?(sessionId: string): Promise<void>;
   getArtifact(sessionId: string, type: ArtifactType): Promise<string | null>;
   saveArtifact(sessionId: string, type: ArtifactType, content: string): Promise<void>;
 }
@@ -124,36 +125,45 @@ export class ShellController {
       throw new Error('No active session found.');
     }
 
-    const beforeMessages = await this.apiClient.getMessages(sessionId);
-    const previousAssistant = getLatestPostDeliveryAssistantMessage(beforeMessages);
-    const previousResponseTimestamp = this.getLatestMessageCreatedAt(beforeMessages);
+    try {
+      const beforeMessages = await this.apiClient.getMessages(sessionId);
+      const previousAssistant = getLatestPostDeliveryAssistantMessage(beforeMessages);
+      const previousResponseTimestamp = this.getLatestMessageCreatedAt(beforeMessages);
 
-    const updated = await this.apiClient.submitMessage(sessionId, content);
-    await this.sessionManager.saveSession(updated);
+      const updated = await this.apiClient.submitMessage(sessionId, content);
+      await this.sessionManager.saveSession(updated);
 
-    this.shellSessionId = sessionId;
-    this.awaitingNewIdea = false;
+      this.shellSessionId = sessionId;
+      this.awaitingNewIdea = false;
 
-    let latestSession = updated;
-    const currentMessages = await this.apiClient.getMessages(sessionId);
-    let latest = this.getLatestResponseForPhase(updated.phase, currentMessages, {
-      afterCreatedAt: previousResponseTimestamp,
-      previousPostDeliveryCreatedAt: previousAssistant?.createdAt
-    });
-
-    if (!latest) {
-      const polled = await this.waitForNextResponse(sessionId, {
+      let latestSession = updated;
+      const currentMessages = await this.apiClient.getMessages(sessionId);
+      let latest = this.getLatestResponseForPhase(updated.phase, currentMessages, {
         afterCreatedAt: previousResponseTimestamp,
         previousPostDeliveryCreatedAt: previousAssistant?.createdAt
       });
-      latestSession = polled.session;
-      latest = polled.responseMessage;
-    }
 
-    return {
-      session: latestSession,
-      responseMessage: latest
-    };
+      if (!latest) {
+        const polled = await this.waitForNextResponse(sessionId, {
+          afterCreatedAt: previousResponseTimestamp,
+          previousPostDeliveryCreatedAt: previousAssistant?.createdAt
+        });
+        latestSession = polled.session;
+        latest = polled.responseMessage;
+      }
+
+      return {
+        session: latestSession,
+        responseMessage: latest
+      };
+    } catch (error) {
+      if (!explicitSessionId && this.isSessionNotFoundError(error)) {
+        await this.clearStaleSessionState(sessionId);
+        return this.startIdea(content);
+      }
+
+      throw error;
+    }
   }
 
   async setParam(key: ShellSettableKey, value: string): Promise<void> {
@@ -427,6 +437,19 @@ export class ShellController {
 
   private isSessionNotFoundError(error: unknown): boolean {
     return error instanceof AgonError && error.code === ErrorCode.SESSION_NOT_FOUND;
+  }
+
+  private async clearStaleSessionState(sessionId: string): Promise<void> {
+    if (this.shellSessionId === sessionId) {
+      this.shellSessionId = null;
+    }
+
+    this.awaitingNewIdea = true;
+    await this.sessionManager.setCurrentSessionId('');
+
+    if (this.sessionManager.clearSession) {
+      await this.sessionManager.clearSession(sessionId);
+    }
   }
 
   private async createSessionForAttachment(filePath: string): Promise<string> {

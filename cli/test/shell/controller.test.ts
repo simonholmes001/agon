@@ -35,6 +35,7 @@ describe('shell controller', () => {
       getCurrentSessionId: vi.fn(),
       listSessions: vi.fn(),
       getSession: vi.fn(),
+      clearSession: vi.fn(),
       getArtifact: vi.fn(),
       saveArtifact: vi.fn()
     };
@@ -175,6 +176,41 @@ describe('shell controller', () => {
     expect(result.session.phase).toBe('AnalysisRound');
     expect(result.responseMessage?.agentId).toBe('gpt_agent');
     expect(result.responseMessage?.message).toBe('Initial analysis from debate');
+  });
+
+  it('recovers from stale session on follow-up by starting a fresh session', async () => {
+    const freshSession: SessionResponse = {
+      ...baseSession,
+      id: 'session-fresh',
+      phase: 'Clarification'
+    };
+    const moderatorMessage: Message = {
+      agentId: 'moderator',
+      message: 'What should I focus on in this image?',
+      round: 0,
+      createdAt: '2026-03-10T10:01:00Z'
+    };
+
+    sessionManager.getCurrentSessionId.mockResolvedValue('session-stale');
+    apiClient.getMessages.mockRejectedValueOnce(
+      new AgonError(ErrorCode.SESSION_NOT_FOUND, 'Session session-stale not found')
+    );
+    apiClient.createSession.mockResolvedValue(freshSession);
+    apiClient.startSession.mockResolvedValue(undefined);
+    apiClient.getSession.mockResolvedValue(freshSession);
+    apiClient.getMessages.mockResolvedValueOnce([moderatorMessage]);
+
+    const result = await controller.submitFollowUp('Describe this image');
+
+    expect(sessionManager.setCurrentSessionId).toHaveBeenCalledWith('');
+    expect(sessionManager.clearSession).toHaveBeenCalledWith('session-stale');
+    expect(apiClient.createSession).toHaveBeenCalledWith({
+      idea: 'Describe this image',
+      friction: 50,
+      researchEnabled: true
+    });
+    expect(result.session.id).toBe('session-fresh');
+    expect(result.responseMessage?.message).toBe('What should I focus on in this image?');
   });
 
   it('sets parameter values with key-specific parsing', async () => {

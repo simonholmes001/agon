@@ -165,7 +165,11 @@ export class ShellEngine {
       );
       this.printAttachmentExtractionMessage(result.attachment.contentType, result.attachment.hasExtractedText);
 
-      plainText = inlineAttach.remainingText;
+      plainText = composeAttachmentScopedFollowUp(
+        inlineAttach.remainingText,
+        result.attachment.fileName,
+        result.attachment.contentType
+      );
     }
 
     if (!inlineAttach) {
@@ -193,7 +197,11 @@ export class ShellEngine {
           );
           this.printAttachmentExtractionMessage(result.attachment.contentType, result.attachment.hasExtractedText);
 
-          plainText = implicitAttach.remainingText;
+          plainText = composeAttachmentScopedFollowUp(
+            implicitAttach.remainingText,
+            result.attachment.fileName,
+            result.attachment.contentType
+          );
         } else {
           this.print(`File not found: ${implicitAttach.path}`);
           this.print('Attachment was not sent. Provide a valid local file path, then retry.');
@@ -475,6 +483,16 @@ async function resolvePathIfExisting(inputPath: string): Promise<string | null> 
   } catch {
     return null;
   }
+}
+
+function composeAttachmentScopedFollowUp(
+  remainingText: string,
+  fileName: string,
+  contentType: string
+): string {
+  const normalizedMessage = remainingText.trim();
+  const fileKind = contentType.toLowerCase().startsWith('image/') ? 'image' : 'document';
+  return `${normalizedMessage}\n\nFocus on the newly attached ${fileKind}: ${fileName}.`;
 }
 
 function expandTilde(value: string): string {

@@ -72,6 +72,9 @@ public sealed class AttachmentTextExtractor : IAttachmentTextExtractor
         "image/heic",
         "image/heif"
     };
+    private static readonly Regex ModelRefusalRegex = new(
+        @"\b(i\s*(?:am|'m)\s*unable\s*to\s*(?:assist|help)|i\s*cannot\s*(?:assist|help)|i\s*can'?t\s*(?:assist|help)|can'?t\s*access\s*(?:the\s*)?(?:attached\s*)?(?:image|file)|unable\s*to\s*access\s*(?:the\s*)?(?:image|attachment))\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly AttachmentExtractionOptions _options;
@@ -108,9 +111,10 @@ public sealed class AttachmentTextExtractor : IAttachmentTextExtractor
         if (IsImage(fileName, normalizedContentType))
         {
             var visionResult = await ExtractWithOpenAiVisionAsync(content, normalizedContentType, cancellationToken);
-            if (!string.IsNullOrWhiteSpace(visionResult))
+            var normalizedVision = NormalizeText(visionResult);
+            if (!string.IsNullOrWhiteSpace(normalizedVision))
             {
-                return NormalizeText(visionResult);
+                return normalizedVision;
             }
 
             var imageOcrResult = await ExtractWithDocumentIntelligenceAsync(content, cancellationToken);
@@ -332,7 +336,7 @@ public sealed class AttachmentTextExtractor : IAttachmentTextExtractor
                         new
                         {
                             type = "text",
-                            text = "Extract all readable text and key visual context that would help engineering/product analysis."
+                            text = "Describe what is visible in the image in plain text. Include readable text, objects, scene, and key details. If there is little/no text, still provide a concise scene description."
                         },
                         new
                         {
@@ -454,6 +458,11 @@ public sealed class AttachmentTextExtractor : IAttachmentTextExtractor
         normalized = Regex.Replace(normalized, @"[\u0000-\u0008\u000B\u000C\u000E-\u001F]", " ").Trim();
 
         if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return null;
+        }
+
+        if (ModelRefusalRegex.IsMatch(normalized))
         {
             return null;
         }

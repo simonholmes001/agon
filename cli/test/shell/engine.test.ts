@@ -294,7 +294,9 @@ describe('shell engine', () => {
     const outcome = await engine.handleInput(`${escapedPath} summarize key risks`);
 
     expect(controller.attachDocument).toHaveBeenCalledWith(filePath);
-    expect(controller.submitFollowUp).toHaveBeenCalledWith('summarize key risks');
+    expect(controller.submitFollowUp).toHaveBeenCalledWith(
+      'summarize key risks\n\nFocus on the newly attached document: spec.md.'
+    );
     expect(outcome).toEqual({
       kind: 'follow-up',
       sessionId: 'session-123',
@@ -317,7 +319,9 @@ describe('shell engine', () => {
     const outcome = await engine.handleInput(`Describe this image -> ${escapedPath}`);
 
     expect(controller.attachDocument).toHaveBeenCalledWith(filePath);
-    expect(controller.submitFollowUp).toHaveBeenCalledWith('Describe this image');
+    expect(controller.submitFollowUp).toHaveBeenCalledWith(
+      'Describe this image\n\nFocus on the newly attached document: spec.md.'
+    );
     expect(outcome).toEqual({
       kind: 'follow-up',
       sessionId: 'session-123',
