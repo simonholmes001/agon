@@ -9,7 +9,7 @@
 [![.NET](https://img.shields.io/badge/.NET-9-512BD4?style=flat-square&logo=dotnet&logoColor=fff)](https://dotnet.microsoft.com)
 [![Vitest](https://img.shields.io/badge/Tested_with-Vitest-6E9F18?style=flat-square&logo=vitest&logoColor=fff)](https://vitest.dev)
 [![xUnit](https://img.shields.io/badge/Tested_with-xUnit-512BD4?style=flat-square&logo=dotnet&logoColor=fff)](https://xunit.net)
-[![Tests](https://img.shields.io/badge/Tests-1055_passing-brightgreen?style=flat-square)]()
+[![Tests](https://img.shields.io/badge/Tests-1058_passing-brightgreen?style=flat-square)]()
 [![Coverage](https://img.shields.io/badge/Coverage-39%25_lines-red?style=flat-square)]()
 [![TDD](https://img.shields.io/badge/Methodology-TDD-red?style=flat-square)]()
 [![Licence](https://img.shields.io/badge/Licence-Private-lightgrey?style=flat-square)]()
@@ -320,6 +320,21 @@ ATTACHMENTPROCESSING__DOCUMENTINTELLIGENCE__ENABLED=false
 ATTACHMENTPROCESSING__OPENAIVISION__ENABLED=false
 ```
 
+Optional runtime guardrails:
+
+```bash
+# API throttling (per-user/per-IP fixed-window limits)
+APIRATELIMITING__ENABLED=true
+APIRATELIMITING__SESSIONCREATE__PERMITLIMIT=10
+APIRATELIMITING__SESSIONMESSAGE__PERMITLIMIT=30
+APIRATELIMITING__ATTACHMENTUPLOAD__PERMITLIMIT=12
+
+# Attachment retention cleanup worker
+ATTACHMENTOPERATIONS__RETENTION__CLEANUPENABLED=true
+ATTACHMENTOPERATIONS__RETENTION__RETENTIONDAYS=90
+ATTACHMENTOPERATIONS__RETENTION__CLEANUPINTERVALMINUTES=60
+```
+
 #### 3) Run backend API locally
 
 ```bash
@@ -483,6 +498,7 @@ Run in CLI shell:
 
 Expected:
 - `/attach` returns upload success details (file name, content type, uploaded timestamp).
+- attachment `accessUrl` points to authenticated API proxy route (`/sessions/{id}/attachments/{attachmentId}/content`) instead of direct public blob URLs.
 - `/follow-up` uses attachment context without 503 errors.
 - `/attach` with trailing text (for example `/attach ./README.md summarize this`) is rejected with deterministic usage guidance.
 
@@ -496,17 +512,26 @@ Expected:
   - backend persistence wiring is missing in current runtime profile.
 - `503` + `ATTACHMENT_METADATA_UNAVAILABLE`:
   - database path is unhealthy; verify PostgreSQL connectivity and backend logs.
+- `429` + `RATE_LIMIT_EXCEEDED`:
+  - request burst exceeded configured API limit; retry after `Retry-After` seconds.
 - `Attachment file not found` from CLI:
   - verify local path exists and use quotes for spaces.
 
-#### 7) Stop local data services
+#### 7) Attachment access model (security)
+
+- Agon uses an **authenticated API download proxy** (`GET /sessions/{id}/attachments/{attachmentId}/content`) as the primary attachment access model.
+- Blob containers remain private (`publicAccess: None`, `allowBlobPublicAccess: false`).
+- CLI/API clients receive proxy `accessUrl` values, not long-lived public blob links.
+- Session ownership checks are enforced before any attachment metadata or content is returned.
+
+#### 8) Stop local data services
 
 ```bash
 cd backend
 docker compose down
 ```
 
-#### 8) Run local tests (repo root)
+#### 9) Run local tests (repo root)
 
 ```bash
 cd /Users/simonholmes/Projects/Applications/Agon

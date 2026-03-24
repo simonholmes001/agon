@@ -10,6 +10,14 @@ public interface IAttachmentStorageService
         Stream content,
         string contentType,
         CancellationToken cancellationToken = default);
+
+    Task<Stream?> OpenReadAsync(
+        string blobName,
+        CancellationToken cancellationToken = default);
+
+    Task DeleteIfExistsAsync(
+        string blobName,
+        CancellationToken cancellationToken = default);
 }
 
 public sealed record AttachmentUploadResult(

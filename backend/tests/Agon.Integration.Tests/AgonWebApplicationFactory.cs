@@ -36,7 +36,8 @@ public class AgonWebApplicationFactory : WebApplicationFactory<Program>
                 // Set connection strings to null/empty so PostgreSQL and Redis won't be registered
                 ["ConnectionStrings:PostgreSQL"] = null,
                 ["ConnectionStrings:Redis"] = "localhost:6379", // Keep Redis connection string but we'll mock it
-                ["ConnectionStrings:BlobStorage"] = string.Empty
+                ["ConnectionStrings:BlobStorage"] = string.Empty,
+                ["ApiRateLimiting:Enabled"] = "false"
             });
         });
 

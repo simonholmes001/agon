@@ -1,6 +1,8 @@
 using Agon.Api.Configuration;
 using Agon.Api.Middleware;
 using Agon.Api.Auth;
+using Agon.Api.Observability;
+using Agon.Api.Services;
 using Agon.Application.Interfaces;
 using Agon.Application.Orchestration;
 using Agon.Application.Services;
@@ -27,6 +29,10 @@ using Mscc.GenerativeAI.Microsoft;
 using Npgsql;
 using OpenAI;
 using StackExchange.Redis;
+using System.Globalization;
+using System.Security.Claims;
+using System.Threading.RateLimiting;
+using Microsoft.AspNetCore.RateLimiting;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -66,6 +72,17 @@ var attachmentProcessingConfig = builder.Configuration
 var storageConfig = builder.Configuration
     .GetSection(StorageConfiguration.SectionName)
     .Get<StorageConfiguration>() ?? new();
+var attachmentOperationsConfig = builder.Configuration
+    .GetSection(AttachmentOperationsConfiguration.SectionName)
+    .Get<AttachmentOperationsConfiguration>() ?? new();
+var rateLimitingConfig = builder.Configuration
+    .GetSection(ApiRateLimitingConfiguration.SectionName)
+    .Get<ApiRateLimitingConfiguration>() ?? new();
+var forceRateLimitingInTesting = builder.Configuration.GetValue<bool>("ApiRateLimiting:ForceEnableInTesting");
+if (builder.Environment.IsEnvironment("Testing") && !forceRateLimitingInTesting)
+{
+    rateLimitingConfig.Enabled = false;
+}
 var authEnabled = builder.Configuration.GetValue<bool>("Authentication:Enabled");
 var authTenantId = builder.Configuration["Authentication:AzureAd:TenantId"] ?? string.Empty;
 var authAuthority = builder.Configuration["Authentication:AzureAd:Authority"] ?? string.Empty;
@@ -102,6 +119,8 @@ attachmentProcessingConfig.DocumentIntelligence.ApiKey = NormalizeSecretValue(at
 
 builder.Services.AddSingleton(llmConfig);
 builder.Services.AddSingleton(agonConfig);
+builder.Services.AddSingleton(attachmentOperationsConfig);
+builder.Services.AddSingleton(rateLimitingConfig);
 builder.Services.AddSingleton(new AttachmentExtractionOptions
 {
     MaxExtractedTextChars = attachmentProcessingConfig.MaxExtractedTextChars,
@@ -191,6 +210,57 @@ builder.Services.AddCors(options =>
     });
 });
 
+if (rateLimitingConfig.Enabled)
+{
+    builder.Services.AddRateLimiter(options =>
+    {
+        options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(context =>
+        {
+            if (!TryResolveEndpointRateLimit(context, rateLimitingConfig, out var endpointName, out var endpointConfig))
+            {
+                return RateLimitPartition.GetNoLimiter("unlimited");
+            }
+
+            var partitionKey = $"{endpointName}:{ResolveRateLimitPartitionKey(context)}";
+            return BuildFixedWindowRateLimiter(partitionKey, endpointConfig);
+        });
+
+        options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+        options.OnRejected = async (context, cancellationToken) =>
+        {
+            var endpoint = context.HttpContext.Request.Path.Value ?? "unknown";
+            var method = context.HttpContext.Request.Method;
+            var partitionKey = ResolveRateLimitPartitionKey(context.HttpContext);
+
+            if (context.Lease.TryGetMetadata(MetadataName.RetryAfter, out TimeSpan retryAfter) && retryAfter > TimeSpan.Zero)
+            {
+                context.HttpContext.Response.Headers.RetryAfter = Math.Ceiling(retryAfter.TotalSeconds)
+                    .ToString(CultureInfo.InvariantCulture);
+            }
+
+            AttachmentMetrics.RateLimitRejected.Add(
+                1,
+                new KeyValuePair<string, object?>("endpoint", endpoint),
+                new KeyValuePair<string, object?>("method", method));
+
+            var logger = context.HttpContext.RequestServices.GetRequiredService<ILoggerFactory>()
+                .CreateLogger("RateLimiting");
+            logger.LogWarning(
+                "Rate limit rejected request. Endpoint={Endpoint}, Method={Method}, Key={PartitionKey}",
+                endpoint,
+                method,
+                partitionKey);
+
+            await context.HttpContext.Response.WriteAsJsonAsync(new
+            {
+                errorCode = "RATE_LIMIT_EXCEEDED",
+                error = "Too many requests. Please retry later.",
+                endpoint
+            }, cancellationToken);
+        };
+    });
+}
+
 // ── SignalR for Real-Time Events ────────────────────────────────────────
 builder.Services.AddSignalR();
 
@@ -268,6 +338,10 @@ builder.Services.AddScoped<ISessionService>(sp => new SessionService(
     sp.GetService<IEventBroadcaster>(),
     sp.GetService<Lazy<IOrchestrator>>()));
 builder.Services.AddScoped<ConversationHistoryService>();
+if (!builder.Environment.IsEnvironment("Testing"))
+{
+    builder.Services.AddHostedService<AttachmentRetentionCleanupService>();
+}
 
 // ── Domain: RoundPolicy (Session Configuration) ─────────────────────────
 // Create RoundPolicy from configuration (immutable, so singleton is fine)
@@ -468,7 +542,7 @@ if (app.Environment.IsDevelopment())
 }
 
 app.Logger.LogInformation(
-    "Startup summary: EnvFileExists={EnvFileExists}, EnvKeysLoaded={EnvKeysLoaded}, AuthEnabled={AuthEnabled}, CorsOriginCount={CorsOriginCount}, OpenAIConfigured={OpenAIConfigured}, AnthropicConfigured={AnthropicConfigured}, GoogleConfigured={GoogleConfigured}, DeepSeekConfigured={DeepSeekConfigured}, DocumentIntelligenceEndpointConfigured={DocumentIntelligenceEndpointConfigured}, AttachmentStorageMode={AttachmentStorageMode}",
+    "Startup summary: EnvFileExists={EnvFileExists}, EnvKeysLoaded={EnvKeysLoaded}, AuthEnabled={AuthEnabled}, CorsOriginCount={CorsOriginCount}, OpenAIConfigured={OpenAIConfigured}, AnthropicConfigured={AnthropicConfigured}, GoogleConfigured={GoogleConfigured}, DeepSeekConfigured={DeepSeekConfigured}, DocumentIntelligenceEndpointConfigured={DocumentIntelligenceEndpointConfigured}, AttachmentStorageMode={AttachmentStorageMode}, ApiRateLimitingEnabled={ApiRateLimitingEnabled}, AttachmentRetentionDays={AttachmentRetentionDays}, AttachmentCleanupEnabled={AttachmentCleanupEnabled}",
     envFileExists,
     envKeysLoaded,
     authEnabled,
@@ -478,7 +552,10 @@ app.Logger.LogInformation(
     !string.IsNullOrEmpty(llmConfig.Google.ApiKey),
     !string.IsNullOrEmpty(llmConfig.DeepSeek.ApiKey),
     !string.IsNullOrWhiteSpace(attachmentProcessingConfig.DocumentIntelligence.Endpoint),
-    attachmentStorageMode);
+    attachmentStorageMode,
+    rateLimitingConfig.Enabled,
+    attachmentOperationsConfig.Retention.RetentionDays,
+    attachmentOperationsConfig.Retention.CleanupEnabled);
 
 if (allowedCorsOrigins.Length == 0)
 {
@@ -497,6 +574,10 @@ if (authEnabled)
 {
     app.UseAuthentication();
     app.UseAuthorization();
+}
+if (rateLimitingConfig.Enabled)
+{
+    app.UseRateLimiter();
 }
 
 // ── Map Endpoints ───────────────────────────────────────────────────────
@@ -558,6 +639,81 @@ static string NormalizeSecretValue(string? value)
     }
 
     return value!.Trim();
+}
+
+static RateLimitPartition<string> BuildFixedWindowRateLimiter(
+    string partitionKey,
+    EndpointRateLimitConfiguration endpointConfig)
+{
+    var permitLimit = Math.Max(1, endpointConfig.PermitLimit);
+    var windowSeconds = Math.Max(1, endpointConfig.WindowSeconds);
+    var queueLimit = Math.Max(0, endpointConfig.QueueLimit);
+
+    return RateLimitPartition.GetFixedWindowLimiter(
+        partitionKey,
+        _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = permitLimit,
+            Window = TimeSpan.FromSeconds(windowSeconds),
+            QueueLimit = queueLimit,
+            QueueProcessingOrder = QueueProcessingOrder.OldestFirst
+        });
+}
+
+static bool TryResolveEndpointRateLimit(
+    HttpContext context,
+    ApiRateLimitingConfiguration config,
+    out string endpointName,
+    out EndpointRateLimitConfiguration endpointConfig)
+{
+    endpointName = string.Empty;
+    endpointConfig = default!;
+
+    var method = context.Request.Method;
+    var path = context.Request.Path.Value ?? string.Empty;
+    if (!HttpMethods.IsPost(method))
+    {
+        return false;
+    }
+
+    if (string.Equals(path, "/sessions", StringComparison.OrdinalIgnoreCase))
+    {
+        endpointName = "session-create";
+        endpointConfig = config.SessionCreate;
+        return true;
+    }
+
+    if (path.EndsWith("/messages", StringComparison.OrdinalIgnoreCase))
+    {
+        endpointName = "session-message";
+        endpointConfig = config.SessionMessage;
+        return true;
+    }
+
+    if (path.EndsWith("/attachments", StringComparison.OrdinalIgnoreCase))
+    {
+        endpointName = "attachment-upload";
+        endpointConfig = config.AttachmentUpload;
+        return true;
+    }
+
+    return false;
+}
+
+static string ResolveRateLimitPartitionKey(HttpContext context)
+{
+    var userClaim =
+        context.User.FindFirstValue("oid")
+        ?? context.User.FindFirstValue(ClaimTypes.NameIdentifier)
+        ?? context.User.FindFirstValue("sub");
+
+    if (!string.IsNullOrWhiteSpace(userClaim))
+    {
+        return $"user:{userClaim.Trim()}";
+    }
+
+    var ip = context.Connection.RemoteIpAddress?.ToString();
+    return string.IsNullOrWhiteSpace(ip) ? "ip:unknown" : $"ip:{ip}";
 }
 
 static string ConfigureAttachmentStorage(

@@ -54,6 +54,33 @@ public sealed class AttachmentRepository : IAttachmentRepository
         return entities.Select(ToModel).ToList();
     }
 
+    public async Task<IReadOnlyList<SessionAttachment>> ListExpiredAsync(
+        DateTimeOffset uploadedBefore,
+        int limit,
+        CancellationToken cancellationToken = default)
+    {
+        if (limit <= 0)
+        {
+            return Array.Empty<SessionAttachment>();
+        }
+
+        var entities = await _dbContext.SessionAttachments
+            .Where(a => a.UploadedAt < uploadedBefore.UtcDateTime)
+            .OrderBy(a => a.UploadedAt)
+            .Take(limit)
+            .AsNoTracking()
+            .ToListAsync(cancellationToken);
+
+        return entities.Select(ToModel).ToList();
+    }
+
+    public async Task DeleteAsync(Guid attachmentId, CancellationToken cancellationToken = default)
+    {
+        await _dbContext.SessionAttachments
+            .Where(a => a.Id == attachmentId)
+            .ExecuteDeleteAsync(cancellationToken);
+    }
+
     private static SessionAttachment ToModel(SessionAttachmentEntity entity) =>
         new(
             entity.Id,

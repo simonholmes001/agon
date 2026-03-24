@@ -10,4 +10,11 @@ public interface IAttachmentRepository
     Task<SessionAttachment> CreateAsync(SessionAttachment attachment, CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<SessionAttachment>> ListBySessionAsync(Guid sessionId, CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<SessionAttachment>> ListExpiredAsync(
+        DateTimeOffset uploadedBefore,
+        int limit,
+        CancellationToken cancellationToken = default);
+
+    Task DeleteAsync(Guid attachmentId, CancellationToken cancellationToken = default);
 }
