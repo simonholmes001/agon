@@ -16,13 +16,14 @@ import chalk from 'chalk';
 import inquirer from 'inquirer';
 import ora from 'ora';
 import { AuthManager } from '../auth/auth-manager.js';
-import { AgonAPIClient } from '../api/agon-client.js';
+import { AgonAPIClient, type AuthStatusResponse } from '../api/agon-client.js';
 import { ConfigManager } from '../state/config-manager.js';
 import {
   acquireTokenFromAzureCli,
   AzureCliTokenProviderError,
   normalizeAzureScope,
 } from '../auth/azure-cli-token-provider.js';
+import { resolveDiscoveredScope, resolveDiscoveredTenantId } from '../auth/auth-discovery.js';
 
 type TokenSource = 'manual' | 'azure-cli';
 
@@ -98,23 +99,36 @@ export default class Login extends Command {
       this.error('Use either --token or --azure-cli, not both.', { exit: 1 });
     }
 
-    const defaultScope = process.env.AGON_AUTH_SCOPE?.trim() ?? process.env.AGON_AUTH_RESOURCE?.trim() ?? '';
+    const envScope = process.env.AGON_AUTH_SCOPE?.trim() ?? process.env.AGON_AUTH_RESOURCE?.trim() ?? '';
+    const envTenant = process.env.AGON_AUTH_TENANT?.trim() ?? '';
+    const discoveredScope = resolveDiscoveredScope(authStatus);
+    const discoveredTenant = resolveDiscoveredTenantId(authStatus);
     const scopeFlag = flags.scope?.trim() ?? '';
     const tenantFlag = flags.tenant?.trim() ?? '';
+    const resolvedScope = scopeFlag || envScope || discoveredScope;
+    const resolvedTenant = tenantFlag || envTenant || discoveredTenant;
 
     let token: string;
     let tokenSource: TokenSource = 'manual';
 
     if (flags.azureCli) {
-      token = await this.acquireAzureCliToken(scopeFlag || defaultScope, tenantFlag);
+      token = await this.acquireAzureCliToken(resolvedScope, resolvedTenant);
       tokenSource = 'azure-cli';
     } else if (flags.token) {
       token = flags.token.trim();
       if (!token) {
         this.error('--token must not be empty.', { exit: 1 });
       }
+    } else if (authStatus?.required && resolvedScope) {
+      this.log(chalk.dim(`Using backend-discovered sign-in scope: ${resolvedScope}`));
+      if (resolvedTenant) {
+        this.log(chalk.dim(`Using tenant: ${resolvedTenant}`));
+      }
+      this.log('');
+      token = await this.acquireAzureCliToken(resolvedScope, resolvedTenant);
+      tokenSource = 'azure-cli';
     } else {
-      const prompted = await this.promptForToken(defaultScope, tenantFlag);
+      const prompted = await this.promptForToken(resolvedScope, resolvedTenant);
       token = prompted.token;
       tokenSource = prompted.source;
     }
@@ -153,7 +167,7 @@ export default class Login extends Command {
 
   private async fetchAuthStatus(
     apiUrl: string
-  ): Promise<{ required: boolean; scheme: string } | null> {
+  ): Promise<AuthStatusResponse | null> {
     try {
       const client = new AgonAPIClient(
         apiUrl,
@@ -183,7 +197,7 @@ export default class Login extends Command {
     } else {
       this.log(chalk.yellow('✗ No bearer token configured.'));
       this.log(chalk.dim('  Run `agon login` to save a token, or set AGON_AUTH_TOKEN.'));
-      this.log(chalk.dim('  Azure CLI flow: `agon login --azure-cli --scope api://<app-id>/.default`'));
+      this.log(chalk.dim('  `agon login` auto-discovers tenant/scope from backend when available.'));
     }
 
     const authStatus = await this.fetchAuthStatus(apiUrl);
@@ -191,6 +205,14 @@ export default class Login extends Command {
       this.log('');
       if (authStatus.required) {
         this.log(chalk.cyan(`  Backend requires authentication (scheme: ${authStatus.scheme})`));
+        const discoveredScope = resolveDiscoveredScope(authStatus);
+        const discoveredTenant = resolveDiscoveredTenantId(authStatus);
+        if (discoveredScope) {
+          this.log(chalk.dim(`  Suggested scope: ${discoveredScope}`));
+        }
+        if (discoveredTenant) {
+          this.log(chalk.dim(`  Suggested tenant: ${discoveredTenant}`));
+        }
       } else {
         this.log(chalk.dim('  Backend does not require authentication.'));
         this.log(chalk.dim('  CLI startup still enforces a local token by default.'));

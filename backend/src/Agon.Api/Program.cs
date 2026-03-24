@@ -1,5 +1,6 @@
 using Agon.Api.Configuration;
 using Agon.Api.Middleware;
+using Agon.Api.Auth;
 using Agon.Application.Interfaces;
 using Agon.Application.Orchestration;
 using Agon.Application.Services;
@@ -66,7 +67,21 @@ var storageConfig = builder.Configuration
     .GetSection(StorageConfiguration.SectionName)
     .Get<StorageConfiguration>() ?? new();
 var authEnabled = builder.Configuration.GetValue<bool>("Authentication:Enabled");
+var authTenantId = builder.Configuration["Authentication:AzureAd:TenantId"] ?? string.Empty;
+var authAuthority = builder.Configuration["Authentication:AzureAd:Authority"] ?? string.Empty;
+var authAudience = builder.Configuration["Authentication:AzureAd:Audience"] ?? string.Empty;
+var authClientId = builder.Configuration["Authentication:AzureAd:ClientId"] ?? string.Empty;
 var allowedCorsOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? [];
+
+if (string.IsNullOrWhiteSpace(authAuthority) && !string.IsNullOrWhiteSpace(authTenantId))
+{
+    authAuthority = $"https://login.microsoftonline.com/{authTenantId}/v2.0";
+}
+
+if (string.IsNullOrWhiteSpace(authAudience))
+{
+    authAudience = authClientId;
+}
 
 // Replace ${ENV_VAR} placeholders with actual environment variables
 llmConfig.OpenAI.ApiKey = ReplaceEnvVars(llmConfig.OpenAI.ApiKey);
@@ -121,22 +136,7 @@ builder.Services.AddScoped<IAttachmentTextExtractor, AttachmentTextExtractor>();
 
 if (authEnabled)
 {
-    var tenantId = builder.Configuration["Authentication:AzureAd:TenantId"] ?? string.Empty;
-    var authority = builder.Configuration["Authentication:AzureAd:Authority"] ?? string.Empty;
-    var audience = builder.Configuration["Authentication:AzureAd:Audience"] ?? string.Empty;
-    var clientId = builder.Configuration["Authentication:AzureAd:ClientId"] ?? string.Empty;
-
-    if (string.IsNullOrWhiteSpace(authority) && !string.IsNullOrWhiteSpace(tenantId))
-    {
-        authority = $"https://login.microsoftonline.com/{tenantId}/v2.0";
-    }
-
-    if (string.IsNullOrWhiteSpace(audience))
-    {
-        audience = clientId;
-    }
-
-    if (string.IsNullOrWhiteSpace(authority) || string.IsNullOrWhiteSpace(audience))
+    if (string.IsNullOrWhiteSpace(authAuthority) || string.IsNullOrWhiteSpace(authAudience))
     {
         throw new InvalidOperationException(
             "Authentication is enabled but Azure AD JWT settings are incomplete. Configure Authentication:AzureAd:Authority and Authentication:AzureAd:Audience (or ClientId).");
@@ -146,13 +146,13 @@ if (authEnabled)
         .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
         .AddJwtBearer(options =>
         {
-            options.Authority = authority;
+            options.Authority = authAuthority;
             options.RequireHttpsMetadata = !builder.Environment.IsDevelopment();
             options.TokenValidationParameters = new TokenValidationParameters
             {
                 ValidateIssuer = true,
                 ValidateAudience = true,
-                ValidAudiences = new[] { audience, clientId }.Where(value => !string.IsNullOrWhiteSpace(value))
+                ValidAudiences = new[] { authAudience, authClientId }.Where(value => !string.IsNullOrWhiteSpace(value))
             };
         });
 
@@ -503,7 +503,11 @@ app.MapGet("/health", () => Results.Ok(new { status = "Healthy" })).AllowAnonymo
 
 // Always anonymous: clients use this to discover whether the backend requires a bearer token
 // before making any authenticated API calls. Returns { required: bool, scheme: string }.
-var authStatusPayload = new { required = authEnabled, scheme = authEnabled ? "bearer" : "none" };
+var authStatusPayload = AuthStatusResponseFactory.Create(
+    authEnabled: authEnabled,
+    authority: authAuthority,
+    audience: authAudience,
+    tenantIdHint: authTenantId);
 app.MapGet("/auth/status", () => Results.Ok(authStatusPayload)).AllowAnonymous();
 var controllers = app.MapControllers();
 if (authEnabled)

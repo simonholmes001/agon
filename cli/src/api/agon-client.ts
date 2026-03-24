@@ -27,6 +27,10 @@ import type {
 export interface AuthStatusResponse {
   required: boolean;
   scheme: 'bearer' | 'none';
+  authority?: string;
+  audience?: string;
+  tenantId?: string;
+  scope?: string;
 }
 
 export class AgonAPIClient {
