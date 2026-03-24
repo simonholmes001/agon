@@ -1,5 +1,11 @@
 # @agon_agents/cli
 
+## 0.6.3
+
+### Patch Changes
+
+- chore(deps): bump ora from 8.2.0 to 9.3.0
+
 ## 0.6.2
 
 ### Patch Changes
