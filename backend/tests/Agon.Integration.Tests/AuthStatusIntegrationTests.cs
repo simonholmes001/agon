@@ -86,11 +86,13 @@ public class AuthStatusIntegrationTests : IClassFixture<AgonWebApplicationFactor
         root.TryGetProperty("tenantId", out var tenantIdProperty).Should().BeTrue();
         root.TryGetProperty("authority", out var authorityProperty).Should().BeTrue();
         root.TryGetProperty("audience", out var audienceProperty).Should().BeTrue();
+        root.TryGetProperty("interactiveClientId", out var interactiveClientIdProperty).Should().BeTrue();
 
         scopeProperty.ValueKind.Should().Be(JsonValueKind.Null);
         tenantIdProperty.ValueKind.Should().Be(JsonValueKind.Null);
         authorityProperty.ValueKind.Should().Be(JsonValueKind.Null);
         audienceProperty.ValueKind.Should().Be(JsonValueKind.Null);
+        interactiveClientIdProperty.ValueKind.Should().Be(JsonValueKind.Null);
     }
 
 }

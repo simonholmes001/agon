@@ -62,3 +62,29 @@ export function resolveDiscoveredTenantId(authStatus: AuthStatusResponse | null)
 
   return firstPathSegment;
 }
+
+export function resolveDiscoveredAuthority(authStatus: AuthStatusResponse | null): string {
+  if (!authStatus) {
+    return '';
+  }
+
+  const explicitAuthority = toTrimmedOrEmpty(authStatus.authority);
+  if (explicitAuthority) {
+    return explicitAuthority;
+  }
+
+  const tenantId = resolveDiscoveredTenantId(authStatus);
+  if (!tenantId) {
+    return '';
+  }
+
+  return `https://login.microsoftonline.com/${tenantId}/v2.0`;
+}
+
+export function resolveDiscoveredInteractiveClientId(authStatus: AuthStatusResponse | null): string {
+  if (!authStatus) {
+    return '';
+  }
+
+  return toTrimmedOrEmpty(authStatus.interactiveClientId);
+}

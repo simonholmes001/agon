@@ -71,6 +71,7 @@ var authTenantId = builder.Configuration["Authentication:AzureAd:TenantId"] ?? s
 var authAuthority = builder.Configuration["Authentication:AzureAd:Authority"] ?? string.Empty;
 var authAudience = builder.Configuration["Authentication:AzureAd:Audience"] ?? string.Empty;
 var authClientId = builder.Configuration["Authentication:AzureAd:ClientId"] ?? string.Empty;
+var authInteractiveClientId = builder.Configuration["Authentication:AzureAd:InteractiveClientId"] ?? string.Empty;
 var allowedCorsOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? [];
 
 if (string.IsNullOrWhiteSpace(authAuthority) && !string.IsNullOrWhiteSpace(authTenantId))
@@ -507,7 +508,8 @@ var authStatusPayload = AuthStatusResponseFactory.Create(
     authEnabled: authEnabled,
     authority: authAuthority,
     audience: authAudience,
-    tenantIdHint: authTenantId);
+    tenantIdHint: authTenantId,
+    interactiveClientId: authInteractiveClientId);
 app.MapGet("/auth/status", () => Results.Ok(authStatusPayload)).AllowAnonymous();
 var controllers = app.MapControllers();
 if (authEnabled)

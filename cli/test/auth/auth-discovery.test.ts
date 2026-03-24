@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  resolveDiscoveredAuthority,
+  resolveDiscoveredInteractiveClientId,
   resolveDiscoveredScope,
   resolveDiscoveredTenantId,
 } from '../../src/auth/auth-discovery.js';
@@ -69,5 +71,54 @@ describe('resolveDiscoveredTenantId', () => {
     };
 
     expect(resolveDiscoveredTenantId(authStatus)).toBe('');
+  });
+});
+
+describe('resolveDiscoveredAuthority', () => {
+  it('returns authority as-is when present', () => {
+    const authStatus: AuthStatusResponse = {
+      required: true,
+      scheme: 'bearer',
+      authority: 'https://login.microsoftonline.com/17ca2540-dd3e-4204-b2f7-a3e3ad209719/v2.0',
+    };
+
+    expect(resolveDiscoveredAuthority(authStatus)).toBe(
+      'https://login.microsoftonline.com/17ca2540-dd3e-4204-b2f7-a3e3ad209719/v2.0',
+    );
+  });
+
+  it('derives authority from tenantId when explicit authority is absent', () => {
+    const authStatus: AuthStatusResponse = {
+      required: true,
+      scheme: 'bearer',
+      tenantId: '17ca2540-dd3e-4204-b2f7-a3e3ad209719',
+    };
+
+    expect(resolveDiscoveredAuthority(authStatus)).toBe(
+      'https://login.microsoftonline.com/17ca2540-dd3e-4204-b2f7-a3e3ad209719/v2.0',
+    );
+  });
+});
+
+describe('resolveDiscoveredInteractiveClientId', () => {
+  it('returns interactive client id when provided by backend', () => {
+    const authStatus: AuthStatusResponse = {
+      required: true,
+      scheme: 'bearer',
+      interactiveClientId: '12345678-1111-4222-8333-abcdefabcdef',
+    };
+
+    expect(resolveDiscoveredInteractiveClientId(authStatus)).toBe(
+      '12345678-1111-4222-8333-abcdefabcdef',
+    );
+  });
+
+  it('returns empty string when interactive client id is not provided', () => {
+    const authStatus: AuthStatusResponse = {
+      required: true,
+      scheme: 'bearer',
+    };
+
+    expect(resolveDiscoveredInteractiveClientId(authStatus)).toBe('');
   });
 });

@@ -6,7 +6,8 @@ public sealed record AuthStatusResponse(
     string? Authority,
     string? Audience,
     string? TenantId,
-    string? Scope);
+    string? Scope,
+    string? InteractiveClientId);
 
 public static class AuthStatusResponseFactory
 {
@@ -21,7 +22,8 @@ public static class AuthStatusResponseFactory
         bool authEnabled,
         string authority,
         string audience,
-        string tenantIdHint)
+        string tenantIdHint,
+        string interactiveClientId)
     {
         if (!authEnabled)
         {
@@ -31,7 +33,8 @@ public static class AuthStatusResponseFactory
                 Authority: null,
                 Audience: null,
                 TenantId: null,
-                Scope: null);
+                Scope: null,
+                InteractiveClientId: null);
         }
 
         var normalizedAuthority = Normalize(authority);
@@ -45,7 +48,8 @@ public static class AuthStatusResponseFactory
             Authority: normalizedAuthority,
             Audience: normalizedAudience,
             TenantId: tenantId,
-            Scope: scope);
+            Scope: scope,
+            InteractiveClientId: Normalize(interactiveClientId));
     }
 
     private static string? ResolveTenantId(string? authority, string? tenantIdHint)

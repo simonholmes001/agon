@@ -130,6 +130,7 @@ jobs:
           BLOB_STORAGE_CONNECTION_STRING: ${{ secrets.BLOB_STORAGE_CONNECTION_STRING }}
           AGON_JWT_AUTHORITY: ${{ secrets.AGON_JWT_AUTHORITY }}
           AGON_JWT_AUDIENCE: ${{ secrets.AGON_JWT_AUDIENCE }}
+          AGON_JWT_INTERACTIVE_CLIENT_ID: ${{ secrets.AGON_JWT_INTERACTIVE_CLIENT_ID }}
         with:
           inlineScript: |
             az account show --query "{name:name, subscriptionId:id}" -o table
@@ -146,4 +147,5 @@ jobs:
               --parameters blobStorageConnectionString="${BLOB_STORAGE_CONNECTION_STRING:-}" \
               --parameters authEnabled=true \
               --parameters jwtAuthority="${AGON_JWT_AUTHORITY}" \
-              --parameters jwtAudience="${AGON_JWT_AUDIENCE}"
+              --parameters jwtAudience="${AGON_JWT_AUDIENCE}" \
+              --parameters jwtInteractiveClientId="${AGON_JWT_INTERACTIVE_CLIENT_ID:-}"

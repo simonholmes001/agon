@@ -31,6 +31,7 @@ export interface AuthStatusResponse {
   audience?: string;
   tenantId?: string;
   scope?: string;
+  interactiveClientId?: string;
 }
 
 export class AgonAPIClient {
