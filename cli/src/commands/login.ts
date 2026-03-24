@@ -182,6 +182,8 @@ export default class Login extends Command {
         this.log(chalk.cyan(`  Backend requires authentication (scheme: ${authStatus.scheme})`));
       } else {
         this.log(chalk.dim('  Backend does not require authentication.'));
+        this.log(chalk.dim('  CLI startup still enforces a local token by default.'));
+        this.log(chalk.dim('  Local-dev bypass: set AGON_ALLOW_ANONYMOUS=true'));
       }
     }
     this.log('');

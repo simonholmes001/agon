@@ -8,6 +8,7 @@ import { AgonAPIClient } from '../api/agon-client.js';
 import { ConfigManager } from '../state/config-manager.js';
 import { SessionManager } from '../state/session-manager.js';
 import { AuthManager } from '../auth/auth-manager.js';
+import { allowsAnonymousBypass, hasConfiguredAuthToken } from '../auth/auth-policy.js';
 import { ShellController } from '../shell/controller.js';
 import { createKeypressInitializer } from '../shell/keypress.js';
 import {
@@ -147,18 +148,18 @@ export default class Shell extends Command {
     // user has no token configured. We do not block on network errors so
     // that self-hosted setups still work while the backend is starting up.
     const authStatus = await apiClient.getAuthStatus();
-    const hasToken =
-      !!process.env.AGON_AUTH_TOKEN?.trim() ||
-      !!process.env.AGON_BEARER_TOKEN?.trim() ||
-      storedToken !== null;
+    const hasToken = hasConfiguredAuthToken(storedToken);
+    const allowAnonymous = allowsAnonymousBypass();
 
-    if (authStatus?.required && !hasToken) {
+    if (!hasToken && !allowAnonymous) {
       this.log('');
       this.log(chalk.red('✗ Authentication required'));
       this.log('');
-      this.log(
-        `The Agon backend at ${chalk.cyan(config.apiUrl)} requires a bearer token.`
-      );
+      if (authStatus?.required) {
+        this.log(`The Agon backend at ${chalk.cyan(config.apiUrl)} requires a bearer token.`);
+      } else {
+        this.log(`No bearer token is configured for backend ${chalk.cyan(config.apiUrl)}.`);
+      }
       this.log('');
       this.log('First-time setup:');
       this.log(`  ${chalk.cyan('agon login')}              Save your bearer token`);
@@ -167,6 +168,18 @@ export default class Shell extends Command {
       this.log(chalk.dim('If you do not have a token, contact your Agon administrator.'));
       this.log('');
       this.exit(1);
+    }
+
+    if (!hasToken && allowAnonymous) {
+      this.log('');
+      this.log(chalk.yellow('ℹ Running without bearer token (anonymous bypass enabled).'));
+      this.log(chalk.dim(`  Backend: ${config.apiUrl}`));
+      this.log(chalk.dim('  Set AGON_ALLOW_ANONYMOUS=false (or unset it) to enforce login.'));
+      this.log('');
+      this.log('Recommended first-time setup:');
+      this.log(`  ${chalk.cyan('agon login')}              Save your bearer token`);
+      this.log(`  ${chalk.cyan('agon login --status')}     Check current auth status`);
+      this.log('');
     }
 
     const controller = new ShellController({

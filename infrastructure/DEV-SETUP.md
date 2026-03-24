@@ -115,6 +115,8 @@ Required:
 - `AZURE_SUBSCRIPTION_ID`
 - `AZURE_POSTGRES_ADMIN_PASSWORD`
 - `BLOB_STORAGE_CONNECTION_STRING`
+- `AGON_JWT_AUTHORITY` (for example: `https://login.microsoftonline.com/<tenant-id>/v2.0`)
+- `AGON_JWT_AUDIENCE` (API audience, for example: `api://<agon-api-app-id>`)
 
 Required for backend container deployment (Docker Hub):
 
@@ -139,6 +141,31 @@ Optional (required for HTTPS edge listener rollout):
 Notes:
 - `BLOB_STORAGE_CONNECTION_STRING` is now deployed to Key Vault and referenced by App Service as `BLOB_STORAGE_CONNECTION_STRING`.
 - Attachment container remains controlled via `Storage__AttachmentContainer` (default: `session-attachments`).
+- Dev infra workflows force `authEnabled=true`; deployment fails fast if `AGON_JWT_AUTHORITY` or `AGON_JWT_AUDIENCE` is missing.
+
+## Backend API App Registration (Entra JWT)
+
+Create a separate app registration for the Agon API audience:
+
+1. Azure Portal -> `Microsoft Entra ID` -> `App registrations` -> `New registration`
+2. Name: `agon-api-dev` (or your naming standard)
+3. Accounts: single tenant
+4. Open `Expose an API`:
+   - Set Application ID URI (for example: `api://<application-client-id>`)
+5. Use this value for GitHub secret `AGON_JWT_AUDIENCE`
+6. Use tenant v2 issuer URL for `AGON_JWT_AUTHORITY`:
+   - `https://login.microsoftonline.com/<tenant-id>/v2.0`
+
+## Getting a CLI Token (Developer Flow)
+
+Once dev infra has been deployed with auth enabled:
+
+```bash
+az login
+az account get-access-token --scope "api://<agon-api-app-id>/.default" --query accessToken -o tsv
+agon login --token "<access-token>"
+agon login --status
+```
 
 ## Where to Find IDs in Azure Portal
 
