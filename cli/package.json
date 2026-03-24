@@ -54,7 +54,7 @@
     "chalk": "^5.3.0",
     "cli-table3": "^0.6.3",
     "cosmiconfig": "^9.0.0",
-    "eventsource": "^2.0.2",
+    "eventsource": "^4.1.0",
     "ink": "^4.4.1",
     "inquirer": "^9.2.12",
     "marked": "^11.0.0",
