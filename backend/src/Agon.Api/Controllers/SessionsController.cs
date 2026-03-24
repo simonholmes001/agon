@@ -1,8 +1,10 @@
+using Agon.Api.Observability;
 using Agon.Application.Interfaces;
 using Agon.Application.Models;
 using Agon.Application.Services;
 using Agon.Domain.Sessions;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
@@ -49,6 +51,7 @@ public class SessionsController : ControllerBase
     /// POST /sessions — Creates a new debate session.
     /// </summary>
     [HttpPost]
+    [EnableRateLimiting("session-create")]
     [ProducesResponseType(typeof(SessionResponse), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> CreateSession(
@@ -160,6 +163,7 @@ public class SessionsController : ControllerBase
     /// POST /sessions/{id}/messages — Submit a user message (clarification response or post-delivery question).
     /// </summary>
     [HttpPost("{id}/messages")]
+    [EnableRateLimiting("session-message")]
     [ProducesResponseType(StatusCodes.Status202Accepted)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -357,6 +361,7 @@ public class SessionsController : ControllerBase
     /// enforced globally by the application's authorization policy.
     /// </summary>
     [HttpPost("{id}/attachments")]
+    [EnableRateLimiting("attachment-upload")]
     [RequestSizeLimit(MaxAttachmentSizeBytes)]
     [ProducesResponseType(typeof(SessionAttachmentResponse), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -369,6 +374,7 @@ public class SessionsController : ControllerBase
     {
         if (_attachmentStorage is null)
         {
+            AttachmentMetrics.UploadFailure.Add(1);
             return AttachmentServiceUnavailable(
                 AttachmentStorageNotConfiguredCode,
                 "Attachment storage is not configured.",
@@ -421,6 +427,7 @@ public class SessionsController : ControllerBase
         }
         catch (Exception ex)
         {
+            AttachmentMetrics.UploadFailure.Add(1);
             _logger.LogError(
                 ex,
                 "Attachment upload failed for session {SessionId}. ErrorCode={ErrorCode}, FileName={FileName}, ContentType={ContentType}, SizeBytes={SizeBytes}",
@@ -450,6 +457,7 @@ public class SessionsController : ControllerBase
         }
         catch (Exception ex)
         {
+            AttachmentMetrics.ExtractionFailure.Add(1);
             _logger.LogWarning(
                 ex,
                 "Attachment text extraction failed for session {SessionId}. Category=AttachmentExtractionFailed, FileName={FileName}, ContentType={ContentType}, SizeBytes={SizeBytes}",
@@ -459,8 +467,9 @@ public class SessionsController : ControllerBase
                 request.File.Length);
         }
 
+        var attachmentId = Guid.NewGuid();
         var attachment = new SessionAttachment(
-            AttachmentId: Guid.NewGuid(),
+            AttachmentId: attachmentId,
             SessionId: id,
             UserId: session.UserId,
             FileName: safeFileName,
@@ -468,7 +477,7 @@ public class SessionsController : ControllerBase
             SizeBytes: request.File.Length,
             BlobName: uploaded.BlobName,
             BlobUri: uploaded.BlobUri,
-            AccessUrl: uploaded.AccessUrl,
+            AccessUrl: BuildAttachmentDownloadPath(id, attachmentId),
             ExtractedText: extractedText,
             UploadedAt: DateTimeOffset.UtcNow);
 
@@ -479,6 +488,7 @@ public class SessionsController : ControllerBase
         }
         catch (InvalidOperationException ex)
         {
+            AttachmentMetrics.UploadFailure.Add(1);
             _logger.LogWarning(
                 ex,
                 "Attachment metadata persistence is not configured for session {SessionId}. ErrorCode={ErrorCode}",
@@ -495,6 +505,7 @@ public class SessionsController : ControllerBase
         }
         catch (Exception ex)
         {
+            AttachmentMetrics.UploadFailure.Add(1);
             _logger.LogError(
                 ex,
                 "Attachment metadata persistence failed for session {SessionId}. ErrorCode={ErrorCode}, FileName={FileName}",
@@ -515,6 +526,7 @@ public class SessionsController : ControllerBase
             saved.ContentType,
             saved.SizeBytes,
             !string.IsNullOrWhiteSpace(saved.ExtractedText));
+        AttachmentMetrics.UploadSuccess.Add(1);
 
         return CreatedAtAction(
             nameof(ListAttachments),
@@ -543,6 +555,69 @@ public class SessionsController : ControllerBase
         var attachments = await _sessionService.ListAttachmentsAsync(id, cancellationToken);
         var response = attachments.Select(MapAttachmentResponse).ToList();
         return Ok(response);
+    }
+
+    /// <summary>
+    /// GET /sessions/{id}/attachments/{attachmentId}/content — Streams attachment content for authorized session owner.
+    /// </summary>
+    [HttpGet("{id}/attachments/{attachmentId}/content")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
+    public async Task<IActionResult> DownloadAttachmentContent(
+        [FromRoute] Guid id,
+        [FromRoute] Guid attachmentId,
+        CancellationToken cancellationToken)
+    {
+        var session = await _sessionService.GetAsync(id, cancellationToken);
+        if (session is null || !IsOwnedByCurrentUser(session))
+        {
+            return NotFound(new { error = $"Session {id} not found" });
+        }
+
+        var attachments = await _sessionService.ListAttachmentsAsync(id, cancellationToken);
+        var attachment = attachments.FirstOrDefault(a => a.AttachmentId == attachmentId);
+        if (attachment is null)
+        {
+            return NotFound(new { error = $"Attachment {attachmentId} not found for session {id}" });
+        }
+
+        if (_attachmentStorage is null)
+        {
+            return AttachmentServiceUnavailable(
+                AttachmentStorageNotConfiguredCode,
+                "Attachment storage is not configured.",
+                "Set ConnectionStrings:BlobStorage and restart the backend.");
+        }
+
+        try
+        {
+            var contentStream = await _attachmentStorage.OpenReadAsync(attachment.BlobName, cancellationToken);
+            if (contentStream is null)
+            {
+                return NotFound(new { error = $"Attachment {attachmentId} content is not available" });
+            }
+
+            return File(contentStream, attachment.ContentType, attachment.FileName, enableRangeProcessing: true);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(
+                ex,
+                "Attachment download failed for AttachmentId={AttachmentId}, SessionId={SessionId}, BlobName={BlobName}",
+                attachmentId,
+                id,
+                attachment.BlobName);
+
+            return AttachmentServiceUnavailable(
+                AttachmentStorageUnavailableCode,
+                "Attachment storage is temporarily unavailable.",
+                "Verify blob storage connectivity and retry.");
+        }
     }
 
     /// <summary>
@@ -717,11 +792,14 @@ public class SessionsController : ControllerBase
             attachment.FileName,
             attachment.ContentType,
             attachment.SizeBytes,
-            attachment.AccessUrl,
+            BuildAttachmentDownloadPath(attachment.SessionId, attachment.AttachmentId),
             attachment.UploadedAt,
             !string.IsNullOrWhiteSpace(attachment.ExtractedText),
             preview);
     }
+
+    private static string BuildAttachmentDownloadPath(Guid sessionId, Guid attachmentId) =>
+        $"/sessions/{sessionId}/attachments/{attachmentId}/content";
 
     private static string SanitizeFileName(string fileName)
     {

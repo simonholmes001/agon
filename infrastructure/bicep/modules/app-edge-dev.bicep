@@ -125,6 +125,10 @@ param documentIntelligenceModelId string = 'prebuilt-layout'
 @description('Blob service endpoint used by backend attachment storage (managed identity mode).')
 param attachmentStorageBlobEndpoint string = ''
 
+@description('Retention window (days) for attachment lifecycle and backend cleanup alignment.')
+@minValue(1)
+param attachmentRetentionDays int = 90
+
 var tags = {
   environment: environment
   workload: workloadName
@@ -432,6 +436,14 @@ resource appService 'Microsoft.Web/sites@2023-12-01' = {
         {
           name: 'Storage__AttachmentContainer'
           value: attachmentContainerName
+        }
+        {
+          name: 'AttachmentOperations__Retention__CleanupEnabled'
+          value: 'true'
+        }
+        {
+          name: 'AttachmentOperations__Retention__RetentionDays'
+          value: string(attachmentRetentionDays)
         }
         {
           name: 'OPENAI_KEY'

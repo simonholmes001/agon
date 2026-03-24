@@ -1,5 +1,6 @@
 using Agon.Application.Interfaces;
 using Azure.Core;
+using Azure;
 using Azure.Storage;
 using Azure.Storage.Blobs;
 using Azure.Storage.Blobs.Models;
@@ -80,6 +81,30 @@ public sealed class AzureBlobAttachmentStorageService : IAttachmentStorageServic
         var accessUrl = GenerateReadOnlySasUrl(blobClient) ?? blobUri;
 
         return new AttachmentUploadResult(blobName, blobUri, accessUrl);
+    }
+
+    public async Task<Stream?> OpenReadAsync(
+        string blobName,
+        CancellationToken cancellationToken = default)
+    {
+        var blobClient = _container.GetBlobClient(blobName);
+        try
+        {
+            var response = await blobClient.OpenReadAsync(cancellationToken: cancellationToken);
+            return response;
+        }
+        catch (RequestFailedException ex) when (ex.Status == 404)
+        {
+            return null;
+        }
+    }
+
+    public async Task DeleteIfExistsAsync(
+        string blobName,
+        CancellationToken cancellationToken = default)
+    {
+        var blobClient = _container.GetBlobClient(blobName);
+        await blobClient.DeleteIfExistsAsync(cancellationToken: cancellationToken);
     }
 
     private async Task EnsureContainerExistsAsync(CancellationToken cancellationToken)
