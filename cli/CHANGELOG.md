@@ -1,5 +1,20 @@
 # @agon_agents/cli
 
+## 0.6.4
+
+### Patch Changes
+
+- Enforce token-first startup for backend-interacting CLI commands:
+
+  - `agon shell` and `agon start` now require a configured bearer token by default
+  - when no token exists, CLI exits with explicit setup guidance (`agon login`, `agon login --status`)
+  - local development bypass remains available with `AGON_ALLOW_ANONYMOUS=true`
+
+- Improve command discoverability by surfacing top-level launcher commands directly in help surfaces:
+
+  - add a full command catalog to `agon --help`
+  - show the same top-level launcher command list in in-shell `/help`
+
 ## 0.6.3
 
 ### Patch Changes
