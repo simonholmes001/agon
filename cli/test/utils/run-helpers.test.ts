@@ -48,4 +48,13 @@ describe('run helpers', () => {
     expect(text).toContain('--version');
     expect(text).toContain('--self-update');
   });
+
+  it('includes a top-level command catalog in help output', () => {
+    const text = buildTopLevelHelp('agon');
+    expect(text).toContain('COMMANDS');
+    expect(text).toContain('agon start <idea>');
+    expect(text).toContain('agon shell');
+    expect(text).toContain('agon login');
+    expect(text).toContain('agon keys <subcommand>');
+  });
 });

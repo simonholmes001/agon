@@ -122,6 +122,11 @@ describe('shell engine', () => {
     expect(print).toHaveBeenCalledWith(expect.stringContaining('/attach <file-path>'));
     expect(print).toHaveBeenCalledWith(expect.stringContaining('/exit'));
     expect(print).toHaveBeenCalledWith(expect.stringContaining('/update'));
+    expect(print).toHaveBeenCalledWith('Launcher commands (same surface as `agon --help`):');
+    expect(print).toHaveBeenCalledWith(expect.stringContaining('agon --help'));
+    expect(print).toHaveBeenCalledWith(expect.stringContaining('agon --version'));
+    expect(print).toHaveBeenCalledWith(expect.stringContaining('agon start <idea>'));
+    expect(print).toHaveBeenCalledWith(expect.stringContaining('agon login'));
     expect(print).toHaveBeenCalledWith('  /set defaultFriction 75');
     expect(print).toHaveBeenCalledWith('  /set apiUrl https://api-dev.agon-agents.org');
     expect(print).toHaveBeenCalledWith('  /unset apiUrl');

@@ -9,7 +9,7 @@
 [![.NET](https://img.shields.io/badge/.NET-9-512BD4?style=flat-square&logo=dotnet&logoColor=fff)](https://dotnet.microsoft.com)
 [![Vitest](https://img.shields.io/badge/Tested_with-Vitest-6E9F18?style=flat-square&logo=vitest&logoColor=fff)](https://vitest.dev)
 [![xUnit](https://img.shields.io/badge/Tested_with-xUnit-512BD4?style=flat-square&logo=dotnet&logoColor=fff)](https://xunit.net)
-[![Tests](https://img.shields.io/badge/Tests-1021_passing-brightgreen?style=flat-square)]()
+[![Tests](https://img.shields.io/badge/Tests-1028_passing-brightgreen?style=flat-square)]()
 [![Coverage](https://img.shields.io/badge/Coverage-38%25_lines-red?style=flat-square)]()
 [![TDD](https://img.shields.io/badge/Methodology-TDD-red?style=flat-square)]()
 [![Licence](https://img.shields.io/badge/Licence-Private-lightgrey?style=flat-square)]()
@@ -343,7 +343,7 @@ npm install
 AGON_API_URL=http://localhost:5000 npm exec -- agon
 ```
 
-Optional auth token for secured API (JWT bearer):
+Optional auth token via environment variable (JWT bearer):
 
 ```bash
 AGON_AUTH_TOKEN="<jwt-token>" AGON_API_URL=http://localhost:5000 node cli/bin/run.js
@@ -351,14 +351,14 @@ AGON_AUTH_TOKEN="<jwt-token>" AGON_API_URL=http://localhost:5000 node cli/bin/ru
 
 ### Authentication: first-time setup
 
-If the Agon backend is configured with `Authentication:Enabled = true`, a bearer
-token is required for all API calls. On first run without a token the shell will
-display an error and exit:
+Agon CLI now enforces a local bearer token by default for backend-interacting
+commands (`agon shell`, `agon start`). On first run without a token the shell
+displays an error and exits:
 
 ```
 ✗ Authentication required
 
-The Agon backend at https://your-agon-host requires a bearer token.
+No bearer token is configured for backend https://your-agon-host.
 
 First-time setup:
   agon login              Save your bearer token
@@ -373,6 +373,14 @@ agon login
 
 # Or non-interactively:
 agon login --token "<your-bearer-token>"
+```
+
+If you use Microsoft Entra for Agon API auth, you can mint a token via Azure CLI:
+
+```bash
+az login
+az account get-access-token --scope "api://<agon-api-app-id>/.default" --query accessToken -o tsv
+agon login --token "<access-token>"
 ```
 
 The token is stored in `~/.agon/credentials` with mode `0600` (owner read/write
@@ -390,6 +398,15 @@ Additional `agon login` flags:
 **Returning users:** if you already set `AGON_AUTH_TOKEN` or `AGON_BEARER_TOKEN`
 as environment variables those continue to work unchanged. The environment variable
 takes precedence over a stored credentials file.
+
+**Local-only bypass (developer use):**
+
+```bash
+export AGON_ALLOW_ANONYMOUS=true
+```
+
+Use bypass only for local development and integration tests. Production and shared
+environments should keep token enforcement enabled.
 
 Web frontend (WIP):
 

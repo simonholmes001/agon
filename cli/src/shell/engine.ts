@@ -273,6 +273,27 @@ export class ShellEngine {
         for (const { token, description } of commands) {
           this.print(`  ${token.padEnd(30)}${description}`);
         }
+        const launcherCommands: Array<{ token: string; description: string }> = [
+          { token: 'agon --help',                  description: 'Show top-level CLI help' },
+          { token: 'agon --self-update',           description: 'Update CLI to latest version' },
+          { token: 'agon --version',               description: 'Show installed CLI version' },
+          { token: 'agon answer <message>',        description: 'Submit clarification/follow-up message' },
+          { token: 'agon config [key] [value]',    description: 'Display or modify configuration' },
+          { token: 'agon keys <subcommand>',       description: 'Manage provider API keys' },
+          { token: 'agon login',                   description: 'Set up authentication for backend' },
+          { token: 'agon resume [session-id]',     description: 'Resume a session and set it as current' },
+          { token: 'agon self-update [--check]',   description: 'Update CLI (command form)' },
+          { token: 'agon sessions',                description: 'List cached sessions' },
+          { token: 'agon shell',                   description: 'Open codex-style interactive shell' },
+          { token: 'agon show <artifact>',         description: 'Display an artifact from current session' },
+          { token: 'agon start <idea>',            description: 'Start a new strategy debate session' },
+          { token: 'agon status [session-id]',     description: 'Show current session status' },
+        ].sort((a, b) => a.token.localeCompare(b.token));
+        this.print('');
+        this.print('Launcher commands (same surface as `agon --help`):');
+        for (const { token, description } of launcherCommands) {
+          this.print(`  ${token.padEnd(30)}${description}`);
+        }
         this.print('Examples:');
         this.print('  /set defaultFriction 75');
         this.print('  /set researchEnabled false');
