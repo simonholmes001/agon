@@ -10,7 +10,7 @@ jobs:
   cli-changeset:
     name: CLI Changeset Check
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && github.actor != 'dependabot[bot]'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6

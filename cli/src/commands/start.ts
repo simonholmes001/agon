@@ -17,6 +17,7 @@ import { AgonAPIClient } from '../api/agon-client.js';
 import { SessionManager } from '../state/session-manager.js';
 import { ConfigManager } from '../state/config-manager.js';
 import { AuthManager } from '../auth/auth-manager.js';
+import { allowsAnonymousBypass, hasConfiguredAuthToken } from '../auth/auth-policy.js';
 import { renderMarkdown } from '../utils/markdown.js';
 import { formatElapsedTimer, buildInterruptHint } from '../shell/renderer.js';
 import { buildRuntimeExecutionProfile } from '../runtime/user-runtime-profile.js';
@@ -99,6 +100,29 @@ export default class Start extends Command {
         storedToken ?? undefined,
         runtimeProfile.profile
       );
+
+      const hasToken = hasConfiguredAuthToken(storedToken);
+      const allowAnonymous = allowsAnonymousBypass();
+      const authStatus = await apiClient.getAuthStatus();
+      if (!hasToken && !allowAnonymous) {
+        this.log('');
+        this.log(chalk.red('✗ Authentication required'));
+        this.log('');
+        if (authStatus?.required) {
+          this.log(`The Agon backend at ${chalk.cyan(config.apiUrl)} requires a bearer token.`);
+        } else {
+          this.log(`No bearer token is configured for backend ${chalk.cyan(config.apiUrl)}.`);
+        }
+        this.log('');
+        this.log('First-time setup:');
+        this.log(`  ${chalk.cyan('agon login')}              Save your bearer token`);
+        this.log(`  ${chalk.cyan('agon login --status')}     Check current auth status`);
+        this.log('');
+        this.log(chalk.dim('If you do not have a token, contact your Agon administrator.'));
+        this.log(chalk.dim('Local-dev bypass: set AGON_ALLOW_ANONYMOUS=true'));
+        this.log('');
+        this.exit(1);
+      }
 
       // Create session
       const createSpinner = ora({
