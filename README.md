@@ -370,6 +370,7 @@ No bearer token is configured for backend https://your-agon-host.
 
 First-time setup:
   agon login              Save your bearer token
+  agon login --azure-cli --scope api://<app-id>/.default
   agon login --status     Check current auth status
 ```
 
@@ -383,7 +384,16 @@ agon login
 agon login --token "<your-bearer-token>"
 ```
 
-If you use Microsoft Entra for Agon API auth, you can mint a token via Azure CLI:
+Recommended for Microsoft Entra-backed APIs:
+
+```bash
+agon login --azure-cli --scope "api://<agon-api-app-id>/.default"
+```
+
+Notes:
+- You can also set `AGON_AUTH_SCOPE` to pre-fill the scope for interactive login.
+- `--tenant <tenant-id>` is supported if you need to pin the tenant.
+- Manual Azure flow remains valid if preferred:
 
 ```bash
 az login
@@ -400,6 +410,9 @@ Additional `agon login` flags:
 | Flag | Description |
 |---|---|
 | `--token <token>` | Supply token directly (non-interactive) |
+| `--azure-cli` | Obtain token from Azure CLI and store it |
+| `--scope <scope>` | Scope/App ID URI for `--azure-cli` mode |
+| `--tenant <tenant-id>` | Optional tenant for `--azure-cli` mode |
 | `--clear` | Remove the stored token |
 | `--status` | Show whether a token is configured and whether the backend requires one |
 
