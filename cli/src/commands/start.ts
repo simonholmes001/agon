@@ -116,9 +116,10 @@ export default class Start extends Command {
         this.log('');
         this.log('First-time setup:');
         this.log(`  ${chalk.cyan('agon login')}              Save your bearer token`);
+        this.log(`  ${chalk.cyan('agon login --azure-cli --scope api://<app-id>/.default')}  Obtain token via Azure CLI`);
         this.log(`  ${chalk.cyan('agon login --status')}     Check current auth status`);
         this.log('');
-        this.log(chalk.dim('If you do not have a token, contact your Agon administrator.'));
+        this.log(chalk.dim('Tip: set AGON_AUTH_SCOPE to avoid re-typing the app scope.'));
         this.log(chalk.dim('Local-dev bypass: set AGON_ALLOW_ANONYMOUS=true'));
         this.log('');
         this.exit(1);
