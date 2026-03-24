@@ -10,6 +10,10 @@ import { readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { Logger } from '../utils/logger.js';
 import { AgonError, ErrorCode } from '../utils/error-handler.js';
+import {
+  encodeAgentModelHeader,
+  type RuntimeExecutionProfile,
+} from '../runtime/user-runtime-profile.js';
 import type { 
   CreateSessionRequest, 
   SessionResponse, 
@@ -31,29 +35,35 @@ export class AgonAPIClient {
   private readonly logger: Logger;
   private readonly packageName: string;
   private readonly cliVersion: string;
+  private runtimeProfile?: RuntimeExecutionProfile;
 
   constructor(
     baseURL: string = 'http://localhost:5000',
     packageName: string = '@agon_agents/cli',
     cliVersion: string = '0.0.0',
-    authToken?: string
+    authToken?: string,
+    runtimeProfile?: RuntimeExecutionProfile
   ) {
     this.logger = new Logger('AgonAPIClient');
     this.packageName = packageName;
     this.cliVersion = cliVersion;
+    this.runtimeProfile = runtimeProfile;
     // Resolve auth token: explicit parameter > AGON_AUTH_TOKEN env > AGON_BEARER_TOKEN env
     const resolvedAuthToken =
       authToken?.trim() ||
       process.env.AGON_AUTH_TOKEN?.trim() ||
       process.env.AGON_BEARER_TOKEN?.trim();
+    const headers: Record<string, string> = {
+      'X-Agon-CLI-Version': this.cliVersion,
+      'User-Agent': `${this.packageName}/${this.cliVersion}`,
+      ...(resolvedAuthToken ? { Authorization: `Bearer ${resolvedAuthToken}` } : {})
+    };
+    this.applyRuntimeIdentityHeaders(headers, runtimeProfile);
+
     this.client = axios.create({
       baseURL,
       timeout: 30000, // 30 seconds
-      headers: {
-        'X-Agon-CLI-Version': this.cliVersion,
-        'User-Agent': `${this.packageName}/${this.cliVersion}`,
-        ...(resolvedAuthToken ? { Authorization: `Bearer ${resolvedAuthToken}` } : {})
-      }
+      headers
     });
 
     // Request interceptor for logging
@@ -91,6 +101,19 @@ export class AgonAPIClient {
   }
 
   /**
+   * Update runtime profile headers without recreating the client.
+   */
+  setRuntimeProfile(runtimeProfile: RuntimeExecutionProfile | undefined): void {
+    this.runtimeProfile = runtimeProfile;
+    const nextHeaders = {
+      ...(this.client.defaults.headers.common as Record<string, string>)
+    };
+    this.clearRuntimeHeaders(nextHeaders);
+    this.applyRuntimeIdentityHeaders(nextHeaders, runtimeProfile);
+    this.client.defaults.headers.common = nextHeaders;
+  }
+
+  /**
    * Create a new debate session
    */
   async createSession(request: CreateSessionRequest): Promise<SessionResponse> {
@@ -111,7 +134,11 @@ export class AgonAPIClient {
     }
 
     this.logger.debug('Creating new session', { ideaLength: request.idea.length });
-    const response = await this.client.post<SessionResponse>('/sessions', request);
+    const response = await this.client.post<SessionResponse>(
+      '/sessions',
+      request,
+      { headers: this.getExecutionRequestHeaders() }
+    );
     this.logger.debug('Session created successfully', { sessionId: response.data.id });
     return response.data;
   }
@@ -137,7 +164,11 @@ export class AgonAPIClient {
    */
   async startSession(sessionId: string): Promise<void> {
     this.logger.debug('Starting session', { sessionId });
-    await this.client.post(`/sessions/${sessionId}/start`);
+    await this.client.post(
+      `/sessions/${sessionId}/start`,
+      undefined,
+      { headers: this.getExecutionRequestHeaders() }
+    );
     this.logger.debug('Session started successfully', { sessionId });
   }
 
@@ -191,7 +222,10 @@ export class AgonAPIClient {
     const response = await this.client.post<SessionResponse | null>(
       `/sessions/${sessionId}/messages`,
       request,
-      { timeout: 120000 } // Follow-up responses can take longer than default request timeout.
+      {
+        timeout: 120000, // Follow-up responses can take longer than default request timeout.
+        headers: this.getExecutionRequestHeaders(),
+      }
     );
     this.logger.debug('Message submitted successfully', { sessionId });
 
@@ -479,6 +513,43 @@ export class AgonAPIClient {
 
   private delay(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  private applyRuntimeIdentityHeaders(
+    headers: Record<string, string>,
+    runtimeProfile?: RuntimeExecutionProfile,
+  ): void {
+    if (!runtimeProfile) {
+      return;
+    }
+
+    headers['X-Agon-User-Scope'] = runtimeProfile.userScope;
+    headers['X-Agon-Agent-Models'] = encodeAgentModelHeader(runtimeProfile.agentModels);
+  }
+
+  private clearRuntimeHeaders(headers: Record<string, string>): void {
+    delete headers['X-Agon-User-Scope'];
+    delete headers['X-Agon-Agent-Models'];
+
+    for (const key of Object.keys(headers)) {
+      if (key.toLowerCase().startsWith('x-agon-provider-key-')) {
+        delete headers[key];
+      }
+    }
+  }
+
+  private getExecutionRequestHeaders(): Record<string, string> {
+    const headers: Record<string, string> = {};
+    if (!this.runtimeProfile) {
+      return headers;
+    }
+
+    for (const [provider, key] of Object.entries(this.runtimeProfile.providerKeys)) {
+      if (!key) continue;
+      headers[`X-Agon-Provider-Key-${provider}`] = key;
+    }
+
+    return headers;
   }
 }
 

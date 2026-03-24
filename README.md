@@ -246,6 +246,14 @@ After launching `agon`, use these in-shell commands:
 /exit
 ```
 
+Outside the shell, run one-time runtime onboarding:
+
+```bash
+agon command onboard
+agon command show
+agon command recover-key openai --yes
+```
+
 Notes:
 - `agon --version` prints the installed CLI version and exits.
 - `agon --help` shows launcher help.
@@ -390,6 +398,38 @@ Additional `agon login` flags:
 **Returning users:** if you already set `AGON_AUTH_TOKEN` or `AGON_BEARER_TOKEN`
 as environment variables those continue to work unchanged. The environment variable
 takes precedence over a stored credentials file.
+
+### Per-user runtime setup (models + provider keys)
+
+Agon CLI stores model routing and provider API keys per user scope under
+`~/.agon/profiles` and the encrypted secret store.
+
+Use:
+
+```bash
+agon command onboard
+```
+
+to configure the agent-to-model mapping and required provider keys interactively.
+
+Review current mapping and key status:
+
+```bash
+agon command show
+```
+
+Manage keys explicitly:
+
+```bash
+agon command set-key <provider> --key <value>
+agon command rotate-key <provider> --key <value>
+agon command delete-key <provider> --yes
+agon command recover-key <provider> --yes
+```
+
+Provider naming note:
+- `google` is canonical for Gemini models.
+- `gemini` is accepted as a compatibility alias and normalized to `google`.
 
 Web frontend (WIP):
 

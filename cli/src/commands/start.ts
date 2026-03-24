@@ -19,6 +19,7 @@ import { ConfigManager } from '../state/config-manager.js';
 import { AuthManager } from '../auth/auth-manager.js';
 import { renderMarkdown } from '../utils/markdown.js';
 import { formatElapsedTimer, buildInterruptHint } from '../shell/renderer.js';
+import { buildRuntimeExecutionProfile } from '../runtime/user-runtime-profile.js';
 
 export default class Start extends Command {
   static override readonly description = 'Start a new strategy debate session';
@@ -82,13 +83,21 @@ export default class Start extends Command {
 
       // Resolve auth token: env var > stored credentials
       const storedToken = await authManager.getToken();
+      const runtimeProfile = await buildRuntimeExecutionProfile(storedToken);
+      if (runtimeProfile.missingProviders.length > 0) {
+        throw new Error(
+          `Missing API keys for providers: ${runtimeProfile.missingProviders.join(', ')}. ` +
+          'Run `agon command onboard` (recommended) or `agon keys set <provider>` before starting.',
+        );
+      }
 
       // Initialize API client
       const apiClient = new AgonAPIClient(
         config.apiUrl,
         this.config.pjson.name ?? '@agon_agents/cli',
         this.config.pjson.version ?? '0.0.0',
-        storedToken ?? undefined
+        storedToken ?? undefined,
+        runtimeProfile.profile
       );
 
       // Create session

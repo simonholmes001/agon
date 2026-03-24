@@ -31,7 +31,7 @@ export default class Keys extends Command {
     '<%= config.bin %> keys set openai',
     '<%= config.bin %> keys set openai --key sk-...',
     '<%= config.bin %> keys rotate anthropic',
-    '<%= config.bin %> keys delete gemini',
+    '<%= config.bin %> keys delete google',
   ];
 
   static override readonly flags = {
@@ -48,7 +48,7 @@ export default class Keys extends Command {
     }),
     provider: Args.string({
       description:
-        'LLM provider name (e.g. openai, anthropic, gemini, deepseek)',
+        'LLM provider name (e.g. openai, anthropic, google|gemini, deepseek)',
       required: false,
     }),
   };

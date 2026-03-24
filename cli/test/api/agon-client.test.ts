@@ -35,6 +35,11 @@ describe('AgonAPIClient', () => {
       post: vi.fn(),
       put: vi.fn(),
       delete: vi.fn(),
+      defaults: {
+        headers: {
+          common: {},
+        },
+      },
       interceptors: {
         request: { use: vi.fn(), eject: vi.fn(), clear: vi.fn() },
         response: { use: vi.fn(), eject: vi.fn(), clear: vi.fn() }
@@ -69,7 +74,11 @@ describe('AgonAPIClient', () => {
       const result = await client.createSession(request);
 
       // Assert
-      expect(mockAxios.post).toHaveBeenCalledWith('/sessions', request);
+      expect(mockAxios.post).toHaveBeenCalledWith(
+        '/sessions',
+        request,
+        expect.objectContaining({ headers: {} })
+      );
       expect(result).toEqual(mockResponse);
     });
 
@@ -454,7 +463,10 @@ describe('AgonAPIClient', () => {
       expect(mockAxios.post).toHaveBeenCalledWith(
         `/sessions/${sessionId}/messages`,
         { content },
-        expect.objectContaining({ timeout: 120000 })
+        expect.objectContaining({
+          timeout: 120000,
+          headers: {}
+        })
       );
       expect(result).toEqual(mockResponse);
     });
@@ -575,6 +587,95 @@ describe('AgonAPIClient', () => {
       const shouldRetry = (client as any).shouldRetry(networkError);
 
       expect(shouldRetry).toBe(false);
+    });
+  });
+
+  describe('runtime execution profile headers', () => {
+    it('sets user-scope and agent-model headers on client defaults', () => {
+      new AgonAPIClient(
+        'http://localhost:5000',
+        '@agon_agents/cli',
+        '0.1.3',
+        undefined,
+        {
+          userScope: 'auth_abc',
+          agentModels: {
+            moderator: { provider: 'openai', model: 'gpt-5.2' },
+            gpt_agent: { provider: 'openai', model: 'gpt-5.2' },
+            gemini_agent: { provider: 'google', model: 'gemini-3-flash-preview' },
+            claude_agent: { provider: 'anthropic', model: 'claude-opus-4-6' },
+            synthesizer: { provider: 'openai', model: 'gpt-5.2' },
+            post_delivery_assistant: { provider: 'openai', model: 'gpt-5.2' },
+          },
+          providerKeys: {
+            openai: 'sk-openai',
+          },
+        }
+      );
+
+      expect(axios.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          headers: expect.objectContaining({
+            'X-Agon-User-Scope': 'auth_abc',
+            'X-Agon-Agent-Models': expect.any(String),
+          }),
+        })
+      );
+
+      const callArgs = (axios.create as any).mock.calls[0][0];
+      expect(callArgs.headers['X-Agon-Provider-Key-openai']).toBeUndefined();
+    });
+
+    it('sends provider key headers only on execution requests', async () => {
+      const runtimeProfile = {
+        userScope: 'auth_abc',
+        agentModels: {
+          moderator: { provider: 'openai', model: 'gpt-5.2' },
+          gpt_agent: { provider: 'openai', model: 'gpt-5.2' },
+          gemini_agent: { provider: 'google', model: 'gemini-3-flash-preview' },
+          claude_agent: { provider: 'anthropic', model: 'claude-opus-4-6' },
+          synthesizer: { provider: 'openai', model: 'gpt-5.2' },
+          post_delivery_assistant: { provider: 'openai', model: 'gpt-5.2' },
+        },
+        providerKeys: {
+          openai: 'sk-openai',
+          anthropic: 'sk-anth',
+        },
+      } as const;
+
+      const runtimeClient = new AgonAPIClient(
+        'http://localhost:5000',
+        '@agon_agents/cli',
+        '0.1.3',
+        undefined,
+        runtimeProfile
+      );
+      (mockAxios.post as any).mockResolvedValue({
+        data: {
+          id: 'session-1',
+          status: 'active',
+          phase: 'INTAKE',
+          createdAt: '2026-03-07T10:00:00Z',
+          updatedAt: '2026-03-07T10:00:00Z',
+        },
+      });
+
+      await runtimeClient.createSession({
+        idea: 'A sufficiently long product idea for validation',
+        friction: 60,
+        researchEnabled: true,
+      });
+
+      expect(mockAxios.post).toHaveBeenCalledWith(
+        '/sessions',
+        expect.any(Object),
+        expect.objectContaining({
+          headers: expect.objectContaining({
+            'X-Agon-Provider-Key-openai': 'sk-openai',
+            'X-Agon-Provider-Key-anthropic': 'sk-anth',
+          }),
+        })
+      );
     });
   });
 });

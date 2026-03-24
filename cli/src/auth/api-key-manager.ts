@@ -16,6 +16,12 @@
  */
 
 import { SecretStore, redactSecret } from './secret-store.js';
+import {
+  buildScopedSecretName,
+  parseLegacySecretName,
+  parseScopedSecretName,
+  resolveUserScope,
+} from './user-scope.js';
 
 // ── Known provider identifiers ────────────────────────────────────────────────
 
@@ -23,19 +29,30 @@ import { SecretStore, redactSecret } from './secret-store.js';
  * Canonical provider names recognised by Agon.
  * Callers may use any of these or a custom string for self-hosted providers.
  */
-export const KNOWN_PROVIDERS = ['openai', 'anthropic', 'gemini', 'deepseek'] as const;
+export const KNOWN_PROVIDERS = ['openai', 'anthropic', 'google', 'deepseek', 'gemini'] as const;
 export type KnownProvider = (typeof KNOWN_PROVIDERS)[number];
 
-/** Prefix used for all secret names inside the SecretStore. */
-const KEY_PREFIX = 'apikey:';
+const PROVIDER_ALIASES: Record<string, string> = {
+  gemini: 'google',
+};
+
+export interface ApiKeyManagerOptions {
+  store?: SecretStore;
+  userScope?: string;
+  allowLegacyRead?: boolean;
+}
 
 // ── ApiKeyManager ─────────────────────────────────────────────────────────────
 
 export class ApiKeyManager {
   private readonly store: SecretStore;
+  private readonly userScope: string;
+  private readonly allowLegacyRead: boolean;
 
-  constructor(store?: SecretStore) {
-    this.store = store ?? new SecretStore();
+  constructor(options?: ApiKeyManagerOptions) {
+    this.store = options?.store ?? new SecretStore();
+    this.userScope = options?.userScope?.trim() || resolveUserScope();
+    this.allowLegacyRead = options?.allowLegacyRead ?? true;
   }
 
   // ── Public API ──────────────────────────────────────────────────────────────
@@ -46,12 +63,13 @@ export class ApiKeyManager {
    * Throws a sanitized error if the value is empty; never logs the value.
    */
   async set(provider: string, value: string): Promise<void> {
-    this.validateProvider(provider);
+    const normalizedProvider = this.validateProvider(provider);
     const trimmed = value.trim();
     if (!trimmed) {
-      throw new Error(`API key for "${provider}" must not be empty.`);
+      throw new Error(`API key for "${normalizedProvider}" must not be empty.`);
     }
-    await this.store.set(this.storeKey(provider), trimmed);
+
+    await this.store.set(this.scopedStoreKey(normalizedProvider), trimmed);
   }
 
   /**
@@ -63,8 +81,29 @@ export class ApiKeyManager {
    * partial representation is needed.
    */
   async get(provider: string): Promise<string | null> {
-    this.validateProvider(provider);
-    return this.store.get(this.storeKey(provider));
+    const normalizedProvider = this.validateProvider(provider);
+    const scopedKey = this.scopedStoreKey(normalizedProvider);
+    const scopedValue = await this.store.get(scopedKey);
+    if (scopedValue !== null) {
+      return scopedValue;
+    }
+
+    if (!this.allowLegacyRead) {
+      return null;
+    }
+
+    // Migration behavior: read legacy unscoped key, then copy into scoped slot.
+    for (const legacyKey of this.legacyStoreKeys(normalizedProvider)) {
+      const legacyValue = await this.store.get(legacyKey);
+      if (legacyValue === null) {
+        continue;
+      }
+
+      await this.store.set(scopedKey, legacyValue);
+      return legacyValue;
+    }
+
+    return null;
   }
 
   /**
@@ -73,12 +112,13 @@ export class ApiKeyManager {
    * a moment when the key is absent from the store during rotation.
    */
   async rotate(provider: string, newValue: string): Promise<void> {
-    this.validateProvider(provider);
+    const normalizedProvider = this.validateProvider(provider);
     const trimmed = newValue.trim();
     if (!trimmed) {
-      throw new Error(`New API key for "${provider}" must not be empty.`);
+      throw new Error(`New API key for "${normalizedProvider}" must not be empty.`);
     }
-    await this.store.rotate(this.storeKey(provider), trimmed);
+
+    await this.store.rotate(this.scopedStoreKey(normalizedProvider), trimmed);
   }
 
   /**
@@ -86,8 +126,24 @@ export class ApiKeyManager {
    * Returns true when the key existed and was deleted, false otherwise.
    */
   async delete(provider: string): Promise<boolean> {
-    this.validateProvider(provider);
-    return this.store.delete(this.storeKey(provider));
+    const normalizedProvider = this.validateProvider(provider);
+    const scopedDeleted = await this.store.delete(this.scopedStoreKey(normalizedProvider));
+    if (scopedDeleted) {
+      return true;
+    }
+
+    if (!this.allowLegacyRead) {
+      return false;
+    }
+
+    let deleted = false;
+    for (const legacyKey of this.legacyStoreKeys(normalizedProvider)) {
+      if (await this.store.delete(legacyKey)) {
+        deleted = true;
+      }
+    }
+
+    return deleted;
   }
 
   /**
@@ -96,18 +152,53 @@ export class ApiKeyManager {
    */
   async list(): Promise<string[]> {
     const names = await this.store.list();
-    return names
-      .filter(n => n.startsWith(KEY_PREFIX))
-      .map(n => n.slice(KEY_PREFIX.length))
-      .sort();
+    const scoped = new Set<string>();
+    const legacy = new Set<string>();
+
+    for (const name of names) {
+      const parsedScoped = parseScopedSecretName(name);
+      if (parsedScoped) {
+        if (parsedScoped.userScope === this.userScope) {
+          scoped.add(this.canonicalizeProvider(parsedScoped.provider));
+        }
+        continue;
+      }
+
+      const parsedLegacy = parseLegacySecretName(name);
+      if (parsedLegacy) {
+        legacy.add(this.canonicalizeProvider(parsedLegacy.provider));
+      }
+    }
+
+    // Backward compatibility: only expose legacy keys if no scoped key exists.
+    if (this.allowLegacyRead) {
+      for (const provider of legacy) {
+        if (!scoped.has(provider)) {
+          scoped.add(provider);
+        }
+      }
+    }
+
+    return [...scoped].sort();
   }
 
   /**
    * Return true when a key is stored for the given provider.
    */
   async has(provider: string): Promise<boolean> {
-    this.validateProvider(provider);
-    return this.store.has(this.storeKey(provider));
+    const normalizedProvider = this.validateProvider(provider);
+    const hasScoped = await this.store.has(this.scopedStoreKey(normalizedProvider));
+    if (hasScoped || !this.allowLegacyRead) {
+      return hasScoped;
+    }
+
+    for (const legacyKey of this.legacyStoreKeys(normalizedProvider)) {
+      if (await this.store.has(legacyKey)) {
+        return true;
+      }
+    }
+
+    return false;
   }
 
   /**
@@ -121,11 +212,36 @@ export class ApiKeyManager {
     return redactSecret(value);
   }
 
+  /**
+   * Return the full key value for explicit recovery workflows.
+   * Callers must treat this value as highly sensitive and must never log it.
+   */
+  async reveal(provider: string): Promise<string | null> {
+    return this.get(provider);
+  }
+
+  /**
+   * Return the resolved user-scope this manager is bound to.
+   */
+  getUserScope(): string {
+    return this.userScope;
+  }
+
   // ── Private helpers ─────────────────────────────────────────────────────────
 
-  /** Build the namespaced key used inside SecretStore. */
-  private storeKey(provider: string): string {
-    return `${KEY_PREFIX}${provider}`;
+  /** Build the namespaced scoped key used inside SecretStore. */
+  private scopedStoreKey(provider: string): string {
+    return buildScopedSecretName(this.userScope, this.canonicalizeProvider(provider));
+  }
+
+  /** Build the legacy pre-scope keys used before per-user isolation. */
+  private legacyStoreKeys(provider: string): string[] {
+    const canonical = this.canonicalizeProvider(provider);
+    if (canonical === 'google') {
+      return ['apikey:google', 'apikey:gemini'];
+    }
+
+    return [`apikey:${canonical}`];
   }
 
   /**
@@ -134,16 +250,23 @@ export class ApiKeyManager {
    * Does NOT restrict to KNOWN_PROVIDERS so custom providers are supported,
    * but does prevent path traversal and injection via dangerous characters.
    */
-  private validateProvider(provider: string): void {
+  private validateProvider(provider: string): string {
     if (!provider || !provider.trim()) {
       throw new Error('Provider name must not be empty.');
     }
-    if (!/^[a-z0-9_-]+$/i.test(provider.trim())) {
+    const normalized = provider.trim().toLowerCase();
+    if (!/^[a-z0-9_-]+$/i.test(normalized)) {
       throw new Error(
         `Provider name "${provider}" contains invalid characters. ` +
           'Use only letters, digits, hyphens, and underscores.',
       );
     }
+
+    return this.canonicalizeProvider(normalized);
+  }
+
+  private canonicalizeProvider(provider: string): string {
+    return PROVIDER_ALIASES[provider] ?? provider;
   }
 }
 

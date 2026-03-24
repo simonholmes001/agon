@@ -282,6 +282,8 @@ export class ShellEngine {
         this.print('  /attach ./docs/product-brief.md');
         this.print('  /Users/simonholmes/Documents/brief.pdf');
         this.print('  /Users/simonholmes/Documents/brief.pdf summarize the risks');
+        this.print('Outside shell:');
+        this.print('  agon command onboard');
         return { kind: 'noop' };
       }
       case 'params': {
