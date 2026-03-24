@@ -65,6 +65,9 @@ jobs:
       - name: Install dependencies
         run: npm ci --workspaces=false
 
+      - name: Build CLI (TypeScript type-check)
+        run: npm run build
+
       - name: Run CLI unit tests
         run: |
           npm run test
