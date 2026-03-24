@@ -12,6 +12,7 @@ import { Command, Args, Flags } from '@oclif/core';
 import { AgonAPIClient } from '../api/agon-client.js';
 import { SessionManager } from '../state/session-manager.js';
 import { ConfigManager } from '../state/config-manager.js';
+import { AuthManager } from '../auth/auth-manager.js';
 import { Logger } from '../utils/logger.js';
 import { formatError } from '../utils/error-handler.js';
 import chalk from 'chalk';
@@ -25,6 +26,7 @@ import {
   isPostDeliveryPhase,
   normalizePhase
 } from '../utils/session-flow.js';
+import { buildRuntimeExecutionProfile } from '../runtime/user-runtime-profile.js';
 
 export { normalizePhase, getLatestResponseMessage, getLatestPostDeliveryAssistantMessage };
 
@@ -55,6 +57,7 @@ export default class Answer extends Command {
   private readonly logger = new Logger('AnswerCommand');
   private readonly sessionManager = new SessionManager();
   private readonly configManager = new ConfigManager();
+  private readonly authManager = new AuthManager();
 
   public async run(): Promise<void> {
     const { args, flags } = await this.parse(Answer);
@@ -77,10 +80,21 @@ export default class Answer extends Command {
 
       // Get API client
       const config = await this.configManager.load();
+      const storedToken = await this.authManager.getToken();
+      const runtimeProfile = await buildRuntimeExecutionProfile(storedToken);
+      if (runtimeProfile.missingProviders.length > 0) {
+        throw new Error(
+          `Missing API keys for providers: ${runtimeProfile.missingProviders.join(', ')}. ` +
+          'Run `agon command onboard` (recommended) or `agon keys set <provider>` before submitting follow-ups.',
+        );
+      }
+
       const apiClient = new AgonAPIClient(
         config.apiUrl,
         this.config.pjson.name ?? '@agon_agents/cli',
-        this.config.pjson.version ?? '0.0.0'
+        this.config.pjson.version ?? '0.0.0',
+        storedToken ?? undefined,
+        runtimeProfile.profile
       );
       const messagesBeforeSubmit = await apiClient.getMessages(sessionId);
       const previousAssistantMessage = getLatestPostDeliveryAssistantMessage(messagesBeforeSubmit);

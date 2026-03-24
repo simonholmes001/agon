@@ -41,6 +41,7 @@ import {
   getSelfUpdateGuidance,
   runNpmGlobalInstall
 } from '../utils/self-update.js';
+import { buildRuntimeExecutionProfile } from '../runtime/user-runtime-profile.js';
 
 /**
  * Sentinel value returned from promptForInput when the user presses Ctrl+C
@@ -132,16 +133,28 @@ export default class Shell extends Command {
 
     // Resolve auth token: env var > stored credentials
     const storedToken = await authManager.getToken();
+    const runtimeProfile = await buildRuntimeExecutionProfile(storedToken);
 
     const apiClient = new AgonAPIClient(
       config.apiUrl,
       this.config.pjson.name ?? '@agon_agents/cli',
       this.config.pjson.version ?? '0.0.0',
-      storedToken ?? undefined
+      storedToken ?? undefined,
+      runtimeProfile.profile
     );
     this.apiClient = apiClient;
     this.sessionManager = sessionManager;
     this.initializeKeypressEvents = createKeypressInitializer(input);
+
+    if (runtimeProfile.missingProviders.length > 0) {
+      this.log(
+        chalk.yellow(
+          `Missing API keys for providers: ${runtimeProfile.missingProviders.join(', ')}.`,
+        ),
+      );
+      this.log(chalk.dim('Run `agon command onboard` (recommended) or `agon keys set <provider>` before starting a debate.'));
+      this.log('');
+    }
 
     // Pre-flight: auth check
     // Only block when the backend explicitly requires authentication AND the

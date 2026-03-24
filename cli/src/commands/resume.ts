@@ -11,6 +11,7 @@ import { Command, Args } from '@oclif/core';
 import { AgonAPIClient } from '../api/agon-client.js';
 import { SessionManager } from '../state/session-manager.js';
 import { ConfigManager } from '../state/config-manager.js';
+import { AuthManager } from '../auth/auth-manager.js';
 
 export default class Resume extends Command {
   static override readonly description = 'Resume a session (set as current)';
@@ -35,11 +36,14 @@ export default class Resume extends Command {
       // Initialize managers
       const configManager = new ConfigManager();
       const sessionManager = new SessionManager();
+      const authManager = new AuthManager();
       const config = await configManager.load();
+      const storedToken = await authManager.getToken();
       const apiClient = new AgonAPIClient(
         config.apiUrl,
         this.config.pjson.name ?? '@agon_agents/cli',
-        this.config.pjson.version ?? '0.0.0'
+        this.config.pjson.version ?? '0.0.0',
+        storedToken ?? undefined
       );
 
       this.log('');
