@@ -71,4 +71,28 @@ public class AuthStatusIntegrationTests : IClassFixture<AgonWebApplicationFactor
         root.GetProperty("scheme").GetString().Should().Be("none",
             "scheme should be 'none' when authentication is disabled");
     }
+
+    [Fact]
+    public async Task GET_Auth_Status_Contains_Discovery_Fields_When_Auth_Disabled()
+    {
+        var response = await _client.GetAsync("/auth/status");
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var content = await response.Content.ReadAsStringAsync();
+        using var doc = JsonDocument.Parse(content);
+        var root = doc.RootElement;
+
+        root.TryGetProperty("scope", out var scopeProperty).Should().BeTrue();
+        root.TryGetProperty("tenantId", out var tenantIdProperty).Should().BeTrue();
+        root.TryGetProperty("authority", out var authorityProperty).Should().BeTrue();
+        root.TryGetProperty("audience", out var audienceProperty).Should().BeTrue();
+        root.TryGetProperty("interactiveClientId", out var interactiveClientIdProperty).Should().BeTrue();
+
+        scopeProperty.ValueKind.Should().Be(JsonValueKind.Null);
+        tenantIdProperty.ValueKind.Should().Be(JsonValueKind.Null);
+        authorityProperty.ValueKind.Should().Be(JsonValueKind.Null);
+        audienceProperty.ValueKind.Should().Be(JsonValueKind.Null);
+        interactiveClientIdProperty.ValueKind.Should().Be(JsonValueKind.Null);
+    }
+
 }

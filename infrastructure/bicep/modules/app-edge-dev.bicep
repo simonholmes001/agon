@@ -66,6 +66,9 @@ param jwtAuthority string = ''
 @description('JWT audience expected by the API.')
 param jwtAudience string = ''
 
+@description('Optional public client ID used by CLI device-code login.')
+param jwtInteractiveClientId string = ''
+
 @description('PFX certificate for Application Gateway HTTPS listener (base64-encoded).')
 @secure()
 param appGatewaySslCertificatePfxBase64 string = ''
@@ -492,6 +495,10 @@ resource appService 'Microsoft.Web/sites@2023-12-01' = {
         {
           name: 'Authentication__AzureAd__Audience'
           value: jwtAudience
+        }
+        {
+          name: 'Authentication__AzureAd__InteractiveClientId'
+          value: jwtInteractiveClientId
         }
       ]
     }

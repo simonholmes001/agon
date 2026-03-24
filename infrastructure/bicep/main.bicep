@@ -127,6 +127,9 @@ param jwtAuthority string = ''
 @description('JWT audience expected by the backend API.')
 param jwtAudience string = ''
 
+@description('Optional public client ID used by CLI device-code login.')
+param jwtInteractiveClientId string = ''
+
 @description('PFX certificate for Application Gateway HTTPS listener (base64-encoded).')
 @secure()
 param appGatewaySslCertificatePfxBase64 string = ''
@@ -236,6 +239,7 @@ module appEdge './modules/app-edge-dev.bicep' = {
     authEnabled: authEnabled
     jwtAuthority: jwtAuthority
     jwtAudience: jwtAudience
+    jwtInteractiveClientId: jwtInteractiveClientId
     appGatewaySslCertificatePfxBase64: appGatewaySslCertificatePfxBase64
     appGatewaySslCertificatePassword: appGatewaySslCertificatePassword
     appGatewayPublicHostName: appGatewayPublicHostName
