@@ -1,5 +1,11 @@
 # @agon_agents/cli
 
+## 0.6.5
+
+### Patch Changes
+
+- chore(deps-dev): align lockfile for eslint 10 upgrade so CI install is reproducible.
+
 ## 0.6.4
 
 ### Patch Changes
