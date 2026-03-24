@@ -116,4 +116,61 @@ describe('acquireTokenFromAzureCli', () => {
       code: 'AZURE_CLI_NOT_FOUND',
     });
   });
+
+  it('passes --tenant during interactive Azure CLI login when tenant is provided', async () => {
+    let accountShowCalls = 0;
+    execFileMock.mockImplementation((_: string, args: string[], __: unknown, cb: Function) => {
+      if (args[0] === 'account' && args[1] === 'show' && args[2] === '--output') {
+        accountShowCalls += 1;
+        if (accountShowCalls === 1) {
+          const error = Object.assign(new Error('not logged in'), { code: 1 });
+          cb(error, '', 'Please run az login');
+          return;
+        }
+        cb(null, '', '');
+        return;
+      }
+      if (args[0] === 'login') {
+        expect(args).toContain('--tenant');
+        expect(args).toContain('11111111-2222-4333-8444-555555555555');
+        cb(null, '', '');
+        return;
+      }
+      if (args[0] === 'account' && args[1] === 'get-access-token') {
+        cb(null, 'token-after-login\n', '');
+        return;
+      }
+      cb(new Error(`Unexpected az args: ${args.join(' ')}`), '', '');
+    });
+
+    const token = await acquireTokenFromAzureCli({
+      scope: 'api://app-id/.default',
+      tenant: '11111111-2222-4333-8444-555555555555',
+      interactiveLogin: true,
+    });
+
+    expect(token).toBe('token-after-login');
+  });
+
+  it('throws login-required when current Azure tenant differs in non-interactive mode', async () => {
+    execFileMock.mockImplementation((_: string, args: string[], __: unknown, cb: Function) => {
+      if (args[0] === 'account' && args[1] === 'show' && args[2] === '--output') {
+        cb(null, '', '');
+        return;
+      }
+      if (args[0] === 'account' && args[1] === 'show' && args[2] === '--query') {
+        cb(null, 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\n', '');
+        return;
+      }
+      cb(new Error(`Unexpected az args: ${args.join(' ')}`), '', '');
+    });
+
+    await expect(acquireTokenFromAzureCli({
+      scope: 'api://app-id/.default',
+      tenant: '11111111-2222-4333-8444-555555555555',
+      interactiveLogin: false,
+    })).rejects.toMatchObject({
+      code: 'AZURE_CLI_LOGIN_REQUIRED',
+    });
+  });
 });

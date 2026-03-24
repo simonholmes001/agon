@@ -77,10 +77,26 @@ async function runAz(args: string[]): Promise<string> {
   });
 }
 
-async function ensureAzureAccount(interactiveLogin: boolean): Promise<void> {
+async function ensureAzureAccount(interactiveLogin: boolean, tenant?: string): Promise<void> {
+  const requestedTenant = tenant?.trim();
+  const needsTenantSpecificLogin = async (): Promise<boolean> => {
+    if (!requestedTenant) {
+      return false;
+    }
+
+    try {
+      const activeTenant = (await runAz(['account', 'show', '--query', 'tenantId', '-o', 'tsv'])).trim();
+      return !activeTenant || activeTenant.toLowerCase() !== requestedTenant.toLowerCase();
+    } catch {
+      return true;
+    }
+  };
+
   try {
     await runAz(['account', 'show', '--output', 'none']);
-    return;
+    if (!(await needsTenantSpecificLogin())) {
+      return;
+    }
   } catch (error) {
     const err = error as AzureCliTokenProviderError;
     if (err.code === 'AZURE_CLI_NOT_FOUND') {
@@ -96,8 +112,22 @@ async function ensureAzureAccount(interactiveLogin: boolean): Promise<void> {
     }
   }
 
+  if (!interactiveLogin) {
+    throw new AzureCliTokenProviderError(
+      'AZURE_CLI_LOGIN_REQUIRED',
+      'Azure CLI is logged into a different tenant than requested.',
+      requestedTenant
+        ? `Run \`az login --tenant "${requestedTenant}"\` and retry \`agon login --azure-cli --scope <scope> --tenant "${requestedTenant}"\`.`
+        : 'Run `az login` and retry.',
+    );
+  }
+
   try {
-    await runAz(['login', '--use-device-code', '--output', 'none']);
+    const loginArgs = ['login', '--use-device-code', '--output', 'none'];
+    if (requestedTenant) {
+      loginArgs.push('--tenant', requestedTenant);
+    }
+    await runAz(loginArgs);
     await runAz(['account', 'show', '--output', 'none']);
   } catch (error) {
     const err = error as AzureCliTokenProviderError;
@@ -115,7 +145,7 @@ async function ensureAzureAccount(interactiveLogin: boolean): Promise<void> {
 
 export async function acquireTokenFromAzureCli(options: AzureCliTokenOptions): Promise<string> {
   const scope = normalizeAzureScope(options.scope);
-  await ensureAzureAccount(options.interactiveLogin ?? false);
+  await ensureAzureAccount(options.interactiveLogin ?? false, options.tenant);
 
   const args = [
     'account',

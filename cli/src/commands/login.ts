@@ -291,6 +291,7 @@ export default class Login extends Command {
         if (error.causeDetail) {
           this.log(chalk.dim(`  ${error.causeDetail}`));
         }
+        this.printAzureConsentHint(error.causeDetail);
         this.log('');
         this.log(chalk.yellow('You can also run: agon login --token "<bearer-token>"'));
         this.exit(1);
@@ -298,5 +299,20 @@ export default class Login extends Command {
 
       throw error;
     }
+  }
+
+  private printAzureConsentHint(causeDetail?: string): void {
+    const detail = (causeDetail ?? '').toLowerCase();
+    if (!detail.includes('aadsts65001')) {
+      return;
+    }
+
+    this.log('');
+    this.log(chalk.yellow('Azure admin consent is required for Microsoft Azure CLI to request this API token.'));
+    this.log(chalk.dim('Fix in Entra app registration (API app):'));
+    this.log(chalk.dim('  1. Expose an API -> ensure a scope exists (for example: access_as_user).'));
+    this.log(chalk.dim('  2. Expose an API -> Authorized client applications -> add Azure CLI client ID:'));
+    this.log(chalk.dim('     04b07795-8ddb-461a-bbee-02f9e1bf7b46'));
+    this.log(chalk.dim('  3. Select your scope and grant admin consent for the tenant.'));
   }
 }
