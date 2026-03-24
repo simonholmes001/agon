@@ -1,5 +1,11 @@
 # @agon_agents/cli
 
+## 0.6.6
+
+### Patch Changes
+
+- chore(deps): make markdown rendering compatible with marked@17 and remove marked-terminal peer conflict so CI installs and builds cleanly.
+
 ## 0.6.5
 
 ### Patch Changes
