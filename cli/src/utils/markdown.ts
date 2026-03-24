@@ -1,29 +1,9 @@
 /**
  * Markdown Renderer
- * 
- * Renders Markdown to styled terminal output.
+ *
+ * Renders Markdown to readable terminal text without relying on marked-terminal.
+ * This keeps rendering compatible with marked@17.
  */
-
-import { marked } from 'marked';
-import TerminalRenderer from 'marked-terminal';
-import chalk from 'chalk';
-
-// Configure marked to use terminal renderer
-marked.setOptions({
-  renderer: new TerminalRenderer({
-    // Remove raw `##` prefixes so headings look like styled terminal sections.
-    showSectionPrefix: false,
-    heading: chalk.cyan.bold,
-    firstHeading: chalk.blueBright.bold,
-    strong: chalk.bold.white,
-    link: chalk.cyan,
-    href: chalk.cyan.underline,
-    codespan: chalk.yellowBright,
-    code: chalk.yellowBright,
-    reflowText: true,
-    width: Math.max(80, (process.stdout.columns ?? 100) - 6)
-  })
-});
 
 /**
  * Normalize markdown produced by LLMs so numbered items and "Examples" bullets
@@ -136,11 +116,49 @@ export function renderMarkdown(markdown: string): string {
   
   try {
     const normalized = normalizeMarkdownStructure(markdown);
-    // Escape ordered-list prefixes (including indented items) so marked-terminal
-    // doesn't auto-renumber and collapse spacing in moderator-style question blocks.
-    const safeForRenderer = normalized.replace(/^(\s*)(\d+)([.)])\s+/gm, '$1$2\\$3 ');
-    const rendered = marked(safeForRenderer) as string;
-    return rendered.trim();
+    const lines = normalized.split('\n');
+    const rendered: string[] = [];
+    let insideCodeFence = false;
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+
+      if (/^```/.test(trimmed)) {
+        insideCodeFence = !insideCodeFence;
+        continue;
+      }
+
+      if (insideCodeFence) {
+        rendered.push(line);
+        continue;
+      }
+
+      let output = line;
+
+      // Headings: remove markdown prefix while preserving text.
+      output = output.replace(/^(\s*)#{1,6}\s+/, '$1');
+
+      // Blockquotes: remove quote marker.
+      output = output.replace(/^(\s*)>\s?/, '$1');
+
+      // Convert markdown links to visible label only.
+      output = output.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1');
+
+      // Normalize parenthesized ordered markers.
+      output = output.replace(/^(\s*)(\d+)\)\s+/, '$1$2. ');
+
+      // Normalize unicode/star bullets for consistent shell rendering.
+      output = output.replace(/^(\s*)[•●▪◦∙·*]\s+/, '$1- ');
+
+      // Inline styles.
+      output = output.replace(/\*\*([^*]+)\*\*/g, '$1');
+      output = output.replace(/(^|[^\w])\*([^*\n]+)\*(?=[^\w]|$)/g, '$1$2');
+      output = output.replace(/`([^`]+)`/g, '$1');
+
+      rendered.push(output);
+    }
+
+    return rendered.join('\n').replace(/\n{3,}/g, '\n\n').trim();
   } catch {
     // If markdown parsing fails, return the original text
     return markdown;
