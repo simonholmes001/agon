@@ -45,6 +45,8 @@ jobs:
           APP_GATEWAY_SSL_CERTIFICATE_PASSWORD: ${{ secrets.APP_GATEWAY_SSL_CERTIFICATE_PASSWORD }}
           AGON_API_HOSTNAME: ${{ secrets.AGON_API_HOSTNAME }}
           BLOB_STORAGE_CONNECTION_STRING: ${{ secrets.BLOB_STORAGE_CONNECTION_STRING }}
+          AGON_JWT_AUTHORITY: ${{ secrets.AGON_JWT_AUTHORITY }}
+          AGON_JWT_AUDIENCE: ${{ secrets.AGON_JWT_AUDIENCE }}
         run: |
           set -euo pipefail
           if [ -z "${AZURE_POSTGRES_ADMIN_PASSWORD:-}" ]; then
@@ -68,6 +70,16 @@ jobs:
 
           if [ -n "${APP_GATEWAY_SSL_CERTIFICATE_PFX_BASE64:-}" ] && [ -z "${AGON_API_HOSTNAME:-}" ]; then
             echo "::error::Missing AGON_API_HOSTNAME. HTTPS listener deployments require a public hostname for certificate validation."
+            exit 1
+          fi
+
+          if [ -z "${AGON_JWT_AUTHORITY:-}" ]; then
+            echo "::error::Missing AGON_JWT_AUTHORITY secret."
+            exit 1
+          fi
+
+          if [ -z "${AGON_JWT_AUDIENCE:-}" ]; then
+            echo "::error::Missing AGON_JWT_AUDIENCE secret."
             exit 1
           fi
 
@@ -118,6 +130,8 @@ jobs:
           APP_GATEWAY_SSL_CERTIFICATE_PASSWORD: ${{ secrets.APP_GATEWAY_SSL_CERTIFICATE_PASSWORD }}
           AGON_API_HOSTNAME: ${{ secrets.AGON_API_HOSTNAME }}
           APP_GATEWAY_SSL_POLICY_NAME: ${{ secrets.APP_GATEWAY_SSL_POLICY_NAME }}
+          AGON_JWT_AUTHORITY: ${{ secrets.AGON_JWT_AUTHORITY }}
+          AGON_JWT_AUDIENCE: ${{ secrets.AGON_JWT_AUDIENCE }}
         with:
           inlineScript: |
             az account show --query "{name:name, subscriptionId:id}" -o table
@@ -135,4 +149,7 @@ jobs:
               --parameters appGatewaySslCertificatePassword="${APP_GATEWAY_SSL_CERTIFICATE_PASSWORD:-}" \
               --parameters appGatewayPublicHostName="${AGON_API_HOSTNAME:-}" \
               --parameters appGatewaySslPolicyName="${APP_GATEWAY_SSL_POLICY_NAME:-AppGwSslPolicy20220101S}" \
-              --parameters blobStorageConnectionString="${BLOB_STORAGE_CONNECTION_STRING:-}"
+              --parameters blobStorageConnectionString="${BLOB_STORAGE_CONNECTION_STRING:-}" \
+              --parameters authEnabled=true \
+              --parameters jwtAuthority="${AGON_JWT_AUTHORITY}" \
+              --parameters jwtAudience="${AGON_JWT_AUDIENCE}"
