@@ -51,6 +51,10 @@ param blobStorageConnectionString string = ''
 @description('Blob container name used for session attachments.')
 param attachmentContainerName string = 'session-attachments'
 
+@description('Retention window (days) for attachment blobs before lifecycle deletion.')
+@minValue(1)
+param attachmentRetentionDays int = 90
+
 @description('Address space for the workload VNet.')
 param vnetAddressSpace string = '10.42.0.0/16'
 
@@ -209,6 +213,7 @@ module data './modules/data-dev.bicep' = {
     googleApiKey: googleApiKey
     deepSeekApiKey: deepSeekApiKey
     blobStorageConnectionString: blobStorageConnectionString
+    attachmentRetentionDays: attachmentRetentionDays
   }
 }
 
@@ -249,6 +254,7 @@ module appEdge './modules/app-edge-dev.bicep' = {
     deepSeekSecretUri: data.outputs.deepSeekSecretUri
     blobStorageConnectionStringSecretUri: data.outputs.blobStorageConnectionStringSecretUri
     attachmentContainerName: attachmentContainerName
+    attachmentRetentionDays: attachmentRetentionDays
     documentIntelligenceEndpoint: data.outputs.documentIntelligenceEndpoint
     documentIntelligenceModelId: documentIntelligenceModelId
     attachmentStorageBlobEndpoint: data.outputs.attachmentStorageBlobEndpoint

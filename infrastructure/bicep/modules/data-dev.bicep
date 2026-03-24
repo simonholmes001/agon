@@ -59,6 +59,10 @@ param deepSeekApiKey string
 @secure()
 param blobStorageConnectionString string = ''
 
+@description('Retention window (days) for attachment blobs before lifecycle deletion.')
+@minValue(1)
+param attachmentRetentionDays int = 90
+
 var tags = {
   environment: environment
   workload: workloadName
@@ -238,6 +242,39 @@ resource attachmentContainer 'Microsoft.Storage/storageAccounts/blobServices/con
   name: '${attachmentStorage.name}/default/${attachmentContainerName}'
   properties: {
     publicAccess: 'None'
+  }
+}
+
+resource attachmentLifecycleManagementPolicy 'Microsoft.Storage/storageAccounts/managementPolicies@2023-05-01' = {
+  parent: attachmentStorage
+  name: 'default'
+  properties: {
+    policy: {
+      rules: [
+        {
+          name: 'attachment-retention'
+          enabled: true
+          type: 'Lifecycle'
+          definition: {
+            filters: {
+              blobTypes: [
+                'blockBlob'
+              ]
+              prefixMatch: [
+                '${attachmentContainerName}/'
+              ]
+            }
+            actions: {
+              baseBlob: {
+                delete: {
+                  daysAfterModificationGreaterThan: attachmentRetentionDays
+                }
+              }
+            }
+          }
+        }
+      ]
+    }
   }
 }
 
