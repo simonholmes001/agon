@@ -1,5 +1,13 @@
 # @agon_agents/cli
 
+## 0.8.1
+
+### Patch Changes
+
+- Improve first-run authentication UX by auto-discovering tenant/scope from backend `/auth/status` metadata and defaulting `agon login` to Azure CLI sign-in when auth is required.
+- Add native Entra device-code login to `agon login` and make it the default auth path when backend metadata is available, while retaining Azure CLI and manual token fallbacks.
+- Improve JWT login onboarding with tenant-aware Azure CLI login behavior and clearer admin-consent guidance when token acquisition fails with AADSTS65001.
+
 ## 0.8.0
 
 ### Minor Changes
