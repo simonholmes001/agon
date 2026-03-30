@@ -1,5 +1,11 @@
 # @agon_agents/cli
 
+## 0.8.2
+
+### Patch Changes
+
+- Make device-code sign-in link clickable and improve login messaging.
+
 ## 0.8.1
 
 ### Patch Changes
