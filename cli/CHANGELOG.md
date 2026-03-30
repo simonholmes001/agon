@@ -1,5 +1,12 @@
 # @agon_agents/cli
 
+## 0.8.3
+
+### Patch Changes
+
+- List key subcommands in top-level help output.
+- Improve shell onboarding UX, add onboard command alias, and grow the prompt input box with long text.
+
 ## 0.8.2
 
 ### Patch Changes
