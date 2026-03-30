@@ -90,6 +90,15 @@ var authAudience = builder.Configuration["Authentication:AzureAd:Audience"] ?? s
 var authClientId = builder.Configuration["Authentication:AzureAd:ClientId"] ?? string.Empty;
 var authInteractiveClientId = builder.Configuration["Authentication:AzureAd:InteractiveClientId"] ?? string.Empty;
 var allowedCorsOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? [];
+var normalizedAuthAudience = NormalizeAudience(authAudience);
+var normalizedAuthClientId = NormalizeAudience(authClientId);
+var derivedClientId = ResolveClientIdFromAudience(normalizedAuthAudience);
+var effectiveTenantId = ResolveTenantId(authTenantId, authAuthority);
+
+if (string.IsNullOrWhiteSpace(normalizedAuthClientId) && !string.IsNullOrWhiteSpace(derivedClientId))
+{
+    normalizedAuthClientId = derivedClientId;
+}
 
 if (string.IsNullOrWhiteSpace(authAuthority) && !string.IsNullOrWhiteSpace(authTenantId))
 {
@@ -162,6 +171,9 @@ if (authEnabled)
             "Authentication is enabled but Azure AD JWT settings are incomplete. Configure Authentication:AzureAd:Authority and Authentication:AzureAd:Audience (or ClientId).");
     }
 
+    var validAudiences = BuildValidAudiences(normalizedAuthAudience, normalizedAuthClientId);
+    var validIssuers = BuildValidIssuers(authAuthority, effectiveTenantId);
+
     builder.Services
         .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
         .AddJwtBearer(options =>
@@ -172,7 +184,8 @@ if (authEnabled)
             {
                 ValidateIssuer = true,
                 ValidateAudience = true,
-                ValidAudiences = new[] { authAudience, authClientId }.Where(value => !string.IsNullOrWhiteSpace(value))
+                ValidAudiences = validAudiences,
+                ValidIssuers = validIssuers
             };
         });
 
@@ -639,6 +652,98 @@ static string NormalizeSecretValue(string? value)
     }
 
     return value!.Trim();
+}
+
+static string NormalizeAudience(string? value)
+{
+    return string.IsNullOrWhiteSpace(value) ? string.Empty : value.Trim().TrimEnd('/');
+}
+
+static string ResolveClientIdFromAudience(string? audience)
+{
+    if (string.IsNullOrWhiteSpace(audience))
+    {
+        return string.Empty;
+    }
+
+    var trimmed = audience.Trim();
+    if (Guid.TryParse(trimmed, out _))
+    {
+        return trimmed;
+    }
+
+    const string prefix = "api://";
+    if (trimmed.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+    {
+        var candidate = trimmed[prefix.Length..].Trim('/');
+        return Guid.TryParse(candidate, out _) ? candidate : string.Empty;
+    }
+
+    return string.Empty;
+}
+
+static IEnumerable<string> BuildValidAudiences(string? audience, string? clientId)
+{
+    var values = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    if (!string.IsNullOrWhiteSpace(audience))
+    {
+        values.Add(audience.Trim().TrimEnd('/'));
+    }
+    if (!string.IsNullOrWhiteSpace(clientId))
+    {
+        var normalizedClientId = clientId.Trim();
+        values.Add(normalizedClientId);
+        values.Add($"api://{normalizedClientId}");
+    }
+    return values;
+}
+
+static string ResolveTenantId(string? tenantId, string? authority)
+{
+    if (!string.IsNullOrWhiteSpace(tenantId))
+    {
+        return tenantId.Trim();
+    }
+
+    if (string.IsNullOrWhiteSpace(authority))
+    {
+        return string.Empty;
+    }
+
+    if (!Uri.TryCreate(authority.Trim(), UriKind.Absolute, out var authorityUri))
+    {
+        return string.Empty;
+    }
+
+    var firstSegment = authorityUri.AbsolutePath
+        .Split('/')
+        .Select(segment => segment.Trim())
+        .FirstOrDefault(segment => !string.IsNullOrWhiteSpace(segment)) ?? string.Empty;
+
+    if (string.IsNullOrWhiteSpace(firstSegment))
+    {
+        return string.Empty;
+    }
+
+    return firstSegment;
+}
+
+static IEnumerable<string>? BuildValidIssuers(string? authority, string? tenantId)
+{
+    var values = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    if (!string.IsNullOrWhiteSpace(authority))
+    {
+        values.Add(authority.Trim().TrimEnd('/'));
+    }
+
+    if (!string.IsNullOrWhiteSpace(tenantId))
+    {
+        var trimmedTenant = tenantId.Trim();
+        values.Add($"https://login.microsoftonline.com/{trimmedTenant}/v2.0");
+        values.Add($"https://sts.windows.net/{trimmedTenant}/");
+    }
+
+    return values.Count > 0 ? values : null;
 }
 
 static RateLimitPartition<string> BuildFixedWindowRateLimiter(
