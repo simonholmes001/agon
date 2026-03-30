@@ -16,6 +16,17 @@ if (!pr) {
   process.exit(1);
 }
 
+const prAuthor = pr.user?.login || '';
+const isDependabotPr =
+  prAuthor === 'dependabot[bot]' ||
+  process.env.GITHUB_ACTOR === 'dependabot[bot]' ||
+  (pr.head?.ref || '').startsWith('dependabot/');
+
+if (isDependabotPr) {
+  console.log('Dependabot PR detected; skipping Codex review by design.');
+  process.exit(0);
+}
+
 const repoSlug = process.env.GITHUB_REPOSITORY || '';
 const [owner, repo] = repoSlug.split('/');
 if (!owner || !repo) {
@@ -119,7 +130,7 @@ const openAiResponse = await fetch('https://api.openai.com/v1/chat/completions',
   body: JSON.stringify({
     model,
     temperature: 0.2,
-    max_tokens: 1500,
+    max_completion_tokens: 1500,
     messages: [
       { role: 'system', content: systemPrompt },
       { role: 'user', content: userPrompt },
