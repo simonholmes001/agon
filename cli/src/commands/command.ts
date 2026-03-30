@@ -24,12 +24,13 @@ const PROVIDER_MODEL_SUGGESTIONS: Record<ProviderId, string[]> = {
 };
 
 export default class CommandCommand extends Command {
-  static override readonly description = 'Manage per-user model routing and provider keys';
+  static override readonly description = 'Manage per-user model routing and provider keys (see also: agon onboard)';
 
   static override readonly examples = [
     '<%= config.bin %> command',
     '<%= config.bin %> command show',
     '<%= config.bin %> command onboard',
+    '<%= config.bin %> onboard',
     '<%= config.bin %> command set-model moderator openai gpt-5.2',
     '<%= config.bin %> command set-key openai --key sk-...',
     '<%= config.bin %> command recover-key openai --yes',

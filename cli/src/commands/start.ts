@@ -88,7 +88,8 @@ export default class Start extends Command {
       if (runtimeProfile.missingProviders.length > 0) {
         throw new Error(
           `Missing API keys for providers: ${runtimeProfile.missingProviders.join(', ')}. ` +
-          'Run `agon command onboard` (recommended) or `agon keys set <provider>` before starting.',
+          'Run in your terminal (outside the Agon shell): `agon command onboard` (recommended) ' +
+          'or `agon keys set <provider>` before starting.',
         );
       }
 
