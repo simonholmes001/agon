@@ -37,6 +37,7 @@ import { PromptHistory } from '../shell/history.js';
 import { renderMarkdown } from '../utils/markdown.js';
 import { normalizeStatus } from '../utils/session-flow.js';
 import { checkForCliUpdate } from '../utils/update-check.js';
+import { AgonError, ErrorCode } from '../utils/error-handler.js';
 import {
   describeSelfUpdateFailure,
   getSelfUpdateGuidance,
@@ -190,6 +191,17 @@ export default class Shell extends Command {
       this.exit(1);
     }
 
+    if (authStatus?.required && hasToken) {
+      try {
+        await apiClient.listSessions();
+      } catch (error) {
+        if (isUnauthenticatedError(error)) {
+          this.printAuthRejectedMessage(config.apiUrl);
+          this.exit(1);
+        }
+      }
+    }
+
     if (!hasToken && allowAnonymous) {
       this.log('');
       this.log(chalk.yellow('ℹ Running without bearer token (anonymous bypass enabled).'));
@@ -325,6 +337,9 @@ export default class Shell extends Command {
           this.flushPendingLines();
           if (isAbortError(error)) {
             this.log(chalk.dim('Interrupted. Shell still active.'));
+          } else if (isUnauthenticatedError(error)) {
+            this.printAuthRejectedMessage(config.apiUrl);
+            return;
           } else {
             const message = error instanceof Error ? error.message : String(error);
             this.log(chalk.red(`Error: ${message}`));
@@ -753,6 +768,20 @@ export default class Shell extends Command {
 
     input.pause();
     output.write('\u001b[0m\u001b[?25h\r\n');
+  }
+
+  private printAuthRejectedMessage(apiUrl: string): void {
+    this.log('');
+    this.log(chalk.red('✗ Authentication required'));
+    this.log('');
+    this.log(`The Agon backend at ${chalk.cyan(apiUrl)} rejected your token.`);
+    this.log('');
+    this.log('Run in terminal:');
+    this.log(`  ${chalk.cyan('agon login')}              Refresh or save bearer token`);
+    this.log(`  ${chalk.cyan('agon login --status')}     Check current auth status`);
+    this.log('');
+    this.log(chalk.dim('After login, restart `agon` and retry.'));
+    this.log('');
   }
 
   private buildLiveAttachmentPreview(
@@ -1187,6 +1216,10 @@ function formatBytes(bytes: number): string {
   }
 
   return `${value.toFixed(1)} ${units[unitIndex]}`;
+}
+
+function isUnauthenticatedError(error: unknown): boolean {
+  return error instanceof AgonError && error.code === ErrorCode.UNAUTHENTICATED;
 }
 
 export function isExitInput(inputText: string): boolean {
