@@ -19,6 +19,30 @@ const githubApi = process.env.GITHUB_API_URL || 'https://api.github.com';
 const rulesetName = process.env.CODEX_RULESET_NAME || 'Require Codex Review';
 const requiredCheck = process.env.CODEX_REVIEW_CHECK || 'Codex Review';
 const targetBranch = process.env.CODEX_RULESET_BRANCH || 'refs/heads/main';
+const githubActionsAppId = Number.parseInt(
+  process.env.CODEX_BYPASS_GITHUB_ACTIONS_APP_ID || '15368',
+  10,
+);
+
+function ensureBypassActors(existingBypassActors = []) {
+  const actors = Array.isArray(existingBypassActors) ? [...existingBypassActors] : [];
+  const hasGitHubActionsBypass = actors.some(
+    (actor) =>
+      actor?.actor_type === 'Integration' &&
+      Number(actor?.actor_id) === githubActionsAppId &&
+      actor?.bypass_mode === 'always',
+  );
+
+  if (!hasGitHubActionsBypass) {
+    actors.push({
+      actor_id: githubActionsAppId,
+      actor_type: 'Integration',
+      bypass_mode: 'always',
+    });
+  }
+
+  return actors;
+}
 
 async function githubRequest(path, options = {}) {
   const response = await fetch(`${githubApi}${path}`, {
@@ -103,6 +127,7 @@ if (!existing) {
         },
       },
     ],
+    bypass_actors: ensureBypassActors(),
   };
 
   await githubRequest(`/repos/${owner}/${repo}/rulesets`, {
@@ -127,7 +152,7 @@ const updatePayload = {
   enforcement: rulesetDetails.enforcement,
   conditions: rulesetDetails.conditions,
   rules: updatedRules,
-  bypass_actors: rulesetDetails.bypass_actors || [],
+  bypass_actors: ensureBypassActors(rulesetDetails.bypass_actors || []),
 };
 
 await githubRequest(`/repos/${owner}/${repo}/rulesets/${existing.id}`, {
