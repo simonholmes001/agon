@@ -389,7 +389,9 @@ export class AgonAPIClient {
       const errorCode = typeof data?.errorCode === 'string' ? data.errorCode : undefined;
       const correlationId = typeof data?.correlationId === 'string' ? data.correlationId : undefined;
 
-      this.logger.error('API error', { status, message, errorCode });
+      // Keep default UX clean: surface structured errors to callers and reserve
+      // raw HTTP diagnostics for debug-level logs.
+      this.logger.debug('API error', { status, message, errorCode });
 
       switch (status) {
         case 401:

@@ -36,9 +36,12 @@ export function buildTopLevelHelp(binName = 'agon') {
     { command: 'start <idea>', description: 'Start a new strategy debate session' },
     { command: 'status [session-id]', description: 'Show current session status' }
   ];
-  const commandLines = commandRows
-    .sort((a, b) => a.command.localeCompare(b.command))
-    .map(({ command, description }) => `  ${binName} ${command}`.padEnd(34) + description);
+  const sortedRows = commandRows.sort((a, b) => a.command.localeCompare(b.command));
+  const commandLabels = sortedRows.map(({ command }) => `  ${binName} ${command}`);
+  const commandColumnWidth = Math.max(...commandLabels.map((label) => label.length)) + 2;
+  const commandLines = sortedRows.map(({ description }, index) =>
+    `${commandLabels[index].padEnd(commandColumnWidth)}${description}`
+  );
 
   return [
     'Agon CLI',
