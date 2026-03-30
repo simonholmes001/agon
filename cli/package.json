@@ -59,7 +59,7 @@
     "inquirer": "^13.3.2",
     "marked": "^17.0.5",
     "ora": "^9.3.0",
-    "react": "^18.2.0",
+    "react": "^19.2.4",
     "yaml": "^2.8.3",
     "zod": "^3.22.4"
   },
@@ -68,7 +68,7 @@
     "@types/eventsource": "^1.1.15",
     "@types/inquirer": "^9.0.7",
     "@types/node": "^20.10.0",
-    "@types/react": "^18.2.0",
+    "@types/react": "^19.2.14",
     "@typescript-eslint/eslint-plugin": "^8.0.0",
     "@typescript-eslint/parser": "^8.0.0",
     "@vitest/coverage-v8": "^4.1.0",
