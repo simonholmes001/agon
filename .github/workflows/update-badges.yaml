@@ -21,6 +21,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -138,11 +139,13 @@ jobs:
           if git diff --cached --quiet; then
             echo "No badge changes to commit."
           else
-            git commit -m "chore: update test & coverage badges [skip ci]"
-            if [ -n "${REPO_ADMIN_TOKEN}" ]; then
-              git config --local --unset-all http.https://github.com/.extraheader || true
-              git remote set-url origin "https://x-access-token:${REPO_ADMIN_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+            if [ -z "${REPO_ADMIN_TOKEN}" ]; then
+              echo "::error::REPO_ADMIN_TOKEN is required for deterministic pushes to protected main."
+              exit 1
             fi
+            git commit -m "chore: update test & coverage badges [skip ci]"
+            git config --local --unset-all http.https://github.com/.extraheader || true
+            git remote set-url origin "https://x-access-token:${REPO_ADMIN_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
             if ! git push origin HEAD:main; then
               echo "::error::Failed to push badge update to main. Ensure REPO_ADMIN_TOKEN is configured and ruleset bypass includes the configured repository role."
               exit 1

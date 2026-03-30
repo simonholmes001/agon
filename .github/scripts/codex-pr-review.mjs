@@ -17,13 +17,23 @@ if (!pr) {
 }
 
 const prAuthor = pr.user?.login || '';
+const headRef = pr.head?.ref || '';
 const isDependabotPr =
   prAuthor === 'dependabot[bot]' ||
   process.env.GITHUB_ACTOR === 'dependabot[bot]' ||
-  (pr.head?.ref || '').startsWith('dependabot/');
+  headRef.startsWith('dependabot/');
+
+const isChangesetReleasePr =
+  headRef.startsWith('changeset-release/') ||
+  (prAuthor === 'github-actions[bot]' && /^Version Packages/i.test(pr.title || ''));
 
 if (isDependabotPr) {
   console.log('Dependabot PR detected; skipping Codex review by design.');
+  process.exit(0);
+}
+
+if (isChangesetReleasePr) {
+  console.log('Changeset release PR detected; bypassing Codex review by design.');
   process.exit(0);
 }
 
