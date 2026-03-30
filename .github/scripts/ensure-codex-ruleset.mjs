@@ -19,24 +19,24 @@ const githubApi = process.env.GITHUB_API_URL || 'https://api.github.com';
 const rulesetName = process.env.CODEX_RULESET_NAME || 'Require Codex Review';
 const requiredCheck = process.env.CODEX_REVIEW_CHECK || 'Codex Review';
 const targetBranch = process.env.CODEX_RULESET_BRANCH || 'refs/heads/main';
-const githubActionsAppId = Number.parseInt(
-  process.env.CODEX_BYPASS_GITHUB_ACTIONS_APP_ID || '15368',
+const bypassRepositoryRoleId = Number.parseInt(
+  process.env.CODEX_BYPASS_REPOSITORY_ROLE_ID || '5',
   10,
 );
 
 function ensureBypassActors(existingBypassActors = []) {
   const actors = Array.isArray(existingBypassActors) ? [...existingBypassActors] : [];
-  const hasGitHubActionsBypass = actors.some(
+  const hasRepositoryRoleBypass = actors.some(
     (actor) =>
-      actor?.actor_type === 'Integration' &&
-      Number(actor?.actor_id) === githubActionsAppId &&
+      actor?.actor_type === 'RepositoryRole' &&
+      Number(actor?.actor_id) === bypassRepositoryRoleId &&
       actor?.bypass_mode === 'always',
   );
 
-  if (!hasGitHubActionsBypass) {
+  if (!hasRepositoryRoleBypass) {
     actors.push({
-      actor_id: githubActionsAppId,
-      actor_type: 'Integration',
+      actor_id: bypassRepositoryRoleId,
+      actor_type: 'RepositoryRole',
       bypass_mode: 'always',
     });
   }
