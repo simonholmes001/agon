@@ -20,7 +20,7 @@ const rulesetName = process.env.CODEX_RULESET_NAME || 'Require Codex Review';
 const requiredCheck = process.env.CODEX_REVIEW_CHECK || 'Codex Review';
 const targetBranch = process.env.CODEX_RULESET_BRANCH || 'refs/heads/main';
 const bypassRepositoryRoleId = Number.parseInt(
-  process.env.CODEX_BYPASS_REPOSITORY_ROLE_ID || '5',
+  process.env.CODEX_BYPASS_REPOSITORY_ROLE_ID || '2',
   10,
 );
 

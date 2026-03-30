@@ -24,5 +24,5 @@ jobs:
           CODEX_RULESET_NAME: Require Codex Review
           CODEX_REVIEW_CHECK: Codex Review
           CODEX_RULESET_BRANCH: refs/heads/main
-          CODEX_BYPASS_REPOSITORY_ROLE_ID: "5"
+          CODEX_BYPASS_REPOSITORY_ROLE_ID: "2"
         run: node .github/scripts/ensure-codex-ruleset.mjs

@@ -140,10 +140,11 @@ jobs:
           else
             git commit -m "chore: update test & coverage badges [skip ci]"
             if [ -n "${REPO_ADMIN_TOKEN}" ]; then
+              git config --local --unset-all http.https://github.com/.extraheader || true
               git remote set-url origin "https://x-access-token:${REPO_ADMIN_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
             fi
             if ! git push origin HEAD:main; then
-              echo "::error::Failed to push badge update to main. Ensure REPO_ADMIN_TOKEN is configured and ruleset bypass includes repository admin role."
+              echo "::error::Failed to push badge update to main. Ensure REPO_ADMIN_TOKEN is configured and ruleset bypass includes the configured repository role."
               exit 1
             fi
           fi
