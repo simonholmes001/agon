@@ -312,12 +312,30 @@ export class ShellController {
 
     const cached = await this.sessionManager.getSession(sessionId);
     if (cached) {
-      return cached;
+      try {
+        const live = await this.apiClient.getSession(sessionId);
+        await this.sessionManager.saveSession(live);
+        return live;
+      } catch (error) {
+        if (this.isSessionNotFoundError(error)) {
+          await this.clearStaleSessionState(sessionId);
+          return null;
+        }
+        return cached;
+      }
     }
 
-    const live = await this.apiClient.getSession(sessionId);
-    await this.sessionManager.saveSession(live);
-    return live;
+    try {
+      const live = await this.apiClient.getSession(sessionId);
+      await this.sessionManager.saveSession(live);
+      return live;
+    } catch (error) {
+      if (this.isSessionNotFoundError(error)) {
+        await this.clearStaleSessionState(sessionId);
+        return null;
+      }
+      throw error;
+    }
   }
 
   private parseSetValue(key: ShellSettableKey, value: string): string | number | boolean {

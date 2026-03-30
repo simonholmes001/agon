@@ -387,6 +387,7 @@ export class AgonAPIClient {
       const data = error.response.data as any;
       const message = data?.detail || data?.message || data?.error || error.message;
       const errorCode = typeof data?.errorCode === 'string' ? data.errorCode : undefined;
+      const correlationId = typeof data?.correlationId === 'string' ? data.correlationId : undefined;
 
       this.logger.error('API error', { status, message, errorCode });
 
@@ -429,6 +430,20 @@ export class AgonAPIClient {
               `Or run \`npm install -g ${this.packageName}@latest\``
             ]
           );
+        case 409: {
+          const suggestions = [
+            'Run /status to check the current session phase',
+            'Run /new to start a fresh idea if the session is stuck',
+          ];
+          if (correlationId) {
+            suggestions.push(`Share correlation ID with support: ${correlationId}`);
+          }
+          return new AgonError(
+            ErrorCode.API_ERROR,
+            message || 'Operation not allowed in current state.',
+            suggestions
+          );
+        }
         case 500:
         case 502:
         case 503:

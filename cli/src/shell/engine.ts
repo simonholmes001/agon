@@ -281,6 +281,7 @@ export class ShellEngine {
           { token: 'agon config [key] [value]',    description: 'Display or modify configuration' },
           { token: 'agon keys <subcommand>',       description: 'Manage provider API keys' },
           { token: 'agon login',                   description: 'Set up authentication for backend' },
+          { token: 'agon onboard',                 description: 'Run interactive onboarding (keys + models)' },
           { token: 'agon resume [session-id]',     description: 'Resume a session and set it as current' },
           { token: 'agon self-update [--check]',   description: 'Update CLI (command form)' },
           { token: 'agon sessions',                description: 'List cached sessions' },
@@ -304,7 +305,7 @@ export class ShellEngine {
         this.print('  /Users/simonholmes/Documents/brief.pdf');
         this.print('  /Users/simonholmes/Documents/brief.pdf summarize the risks');
         this.print('Outside shell:');
-        this.print('  agon command onboard');
+        this.print('  agon command onboard    (run from your terminal, outside the Agon shell)');
         return { kind: 'noop' };
       }
       case 'params': {

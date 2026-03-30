@@ -112,8 +112,11 @@ export interface PromptFrameContext {
   reset: string;
 }
 
-export function renderPromptBanner(print: (line: string) => void): PromptFrameContext {
-  const frame = createPromptFrame();
+export function renderPromptBanner(
+  print: (line: string) => void,
+  options?: { inputLineCount?: number }
+): PromptFrameContext {
+  const frame = createPromptFrame(options?.inputLineCount);
   print(frame.borderLine);
   for (let index = 0; index < frame.inputLineCount; index += 1) {
     if (index === frame.promptLineOffset) {
@@ -304,13 +307,13 @@ interface PromptFrame {
   reset: string;
 }
 
-function createPromptFrame(): PromptFrame {
+function createPromptFrame(inputLineCountOverride?: number): PromptFrame {
   const terminalWidth = process.stdout.columns ?? 100;
   // Codex-like wide prompt zone: keep a small side margin, but avoid runaway ultra-wide lines.
   const width = Math.max(72, Math.min(terminalWidth - 4, 180));
   // Keep the landing zone compact (Codex-style): 1 blank above and 1 blank below the prompt so
   // the `>` marker is vertically centered in the idle input box.
-  const inputLineCount = 3;
+  const inputLineCount = Math.max(3, inputLineCountOverride ?? 3);
   const promptLineOffset = 1;
   const borderLine = chalk.whiteBright('─'.repeat(width));
   const backgroundStart = '\u001b[48;2;63;111;201m';
@@ -362,6 +365,13 @@ function getVisibleCursorIndex(value: string, visibleValue: string, cursorIndex:
 interface WrappedPromptLines {
   lines: string[];
   lineStarts: number[];
+}
+
+export function getWrappedLineCount(value: string, maxWidth: number): number {
+  if (!value) {
+    return 1;
+  }
+  return wrapPromptValue(value, maxWidth).lines.length || 1;
 }
 
 function wrapPromptValue(value: string, maxWidth: number): WrappedPromptLines {

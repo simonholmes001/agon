@@ -24,6 +24,7 @@ import {
   buildShimmerText,
   buildPromptInputLineWithCursor,
   formatElapsedTimer,
+  getWrappedLineCount,
   getPromptCursorPosition,
   type PromptFrameContext,
   renderMessagePanel,
@@ -152,7 +153,12 @@ export default class Shell extends Command {
           `Missing API keys for providers: ${runtimeProfile.missingProviders.join(', ')}.`,
         ),
       );
-      this.log(chalk.dim('Run `agon command onboard` (recommended) or `agon keys set <provider>` before starting a debate.'));
+      this.log(
+        chalk.dim(
+          'Run in your terminal (outside the Agon shell): `agon command onboard` (recommended) ' +
+          'or `agon keys set <provider>` before starting a debate.'
+        )
+      );
       this.log('');
     }
 
@@ -504,19 +510,57 @@ export default class Shell extends Command {
     input.resume();
     this.inRawInputMode = true;
 
-    output.write(`\u001b[${frame.cursorUpLines}A\r`);
-    output.write(buildActivePrompt(frame));
+    let currentFrame = frame;
+    const minInputLineCount = frame.inputLineCount;
+    const maxInputLineCount = Math.max(
+      minInputLineCount,
+      Math.min((output.rows ?? 24) - 8, 18)
+    );
+
+    output.write(`\u001b[${currentFrame.cursorUpLines}A\r`);
+    output.write(buildActivePrompt(currentFrame));
 
     return await new Promise<string>((resolve) => {
       let value = '';
-      let cursorLineIndex = getPromptCursorPosition(frame, value, 0).lineIndex;
+      let cursorLineIndex = getPromptCursorPosition(currentFrame, value, 0).lineIndex;
       let cursorIndex = 0;
 
       this.promptHistory.reset();
 
+      const resizePromptFrame = (nextInputLineCount: number): void => {
+        if (nextInputLineCount <= currentFrame.inputLineCount) {
+          return;
+        }
+        const moveUpLines = cursorLineIndex + 1;
+        if (moveUpLines > 0) {
+          output.write(`\u001b[${moveUpLines}A\r`);
+        } else {
+          output.write('\r');
+        }
+        output.write('\u001b[0J');
+        currentFrame = renderPromptBanner(
+          (line) => output.write(`${line}\n`),
+          { inputLineCount: nextInputLineCount }
+        );
+        output.write(`\u001b[${currentFrame.cursorUpLines}A\r`);
+        cursorLineIndex = getPromptCursorPosition(currentFrame, value, cursorIndex).lineIndex;
+      };
+
       const redraw = (): void => {
         const preview = this.buildLiveAttachmentPreview(value, cursorIndex, activeSessionId);
-        const rendered = buildPromptInputLineWithCursor(frame, preview.displayValue, preview.displayCursorIndex);
+        const requiredLines = getWrappedLineCount(preview.displayValue, currentFrame.maxInputCharsPerLine);
+        const desiredInputLineCount = Math.min(
+          maxInputLineCount,
+          Math.max(minInputLineCount, currentFrame.promptLineOffset + requiredLines)
+        );
+        if (desiredInputLineCount > currentFrame.inputLineCount) {
+          resizePromptFrame(desiredInputLineCount);
+        }
+        const rendered = buildPromptInputLineWithCursor(
+          currentFrame,
+          preview.displayValue,
+          preview.displayCursorIndex
+        );
         const cursorAnchor = rendered.lastIndexOf('\r');
         const beforeCursor = cursorAnchor >= 0 ? rendered.slice(0, cursorAnchor) : rendered;
         const afterCursor = cursorAnchor >= 0 ? rendered.slice(cursorAnchor) : '';
@@ -532,18 +576,18 @@ export default class Shell extends Command {
         }
         output.write('\r');
         output.write(styled);
-        cursorLineIndex = getPromptCursorPosition(frame, value, cursorIndex).lineIndex;
+        cursorLineIndex = getPromptCursorPosition(currentFrame, value, cursorIndex).lineIndex;
       };
 
       const finish = (result: string): void => {
         input.off('keypress', onKeypress);
         input.setRawMode(false);
         this.inRawInputMode = false;
-        const cursorDownLines = Math.max(0, frame.cursorDownFromFirstLine - cursorLineIndex);
+        const cursorDownLines = Math.max(0, currentFrame.cursorDownFromFirstLine - cursorLineIndex);
         if (cursorDownLines > 0) {
-          output.write(`${frame.reset}\u001b[${cursorDownLines}B\r`);
+          output.write(`${currentFrame.reset}\u001b[${cursorDownLines}B\r`);
         } else {
-          output.write(`${frame.reset}\r`);
+          output.write(`${currentFrame.reset}\r`);
         }
         resolve(result);
       };
