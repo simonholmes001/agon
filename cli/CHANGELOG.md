@@ -1,5 +1,14 @@
 # @agon_agents/cli
 
+## 0.8.4
+
+### Patch Changes
+
+- Improve top-level help command formatting so long commands stay aligned and descriptions remain readable.
+- Remove the inline prompt helper sentence from inside the shell input box so the text area keeps clean formatting while expanding.
+- Improve shell authentication UX by failing fast on rejected tokens and showing clear login recovery guidance without noisy raw API error dumps.
+- Show current agent provider/model assignments in the shell header card on startup.
+
 ## 0.8.3
 
 ### Patch Changes
