@@ -1,8 +1,8 @@
 name: Ensure Codex Review Ruleset
 
 on:
-  pull_request_target:
-    types: [opened, reopened, ready_for_review]
+  push:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -13,7 +13,6 @@ jobs:
     name: Ensure Codex Review Required
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    if: github.event.pull_request.base.ref == 'main' || github.event_name == 'workflow_dispatch'
 
     steps:
       - name: Checkout repository
