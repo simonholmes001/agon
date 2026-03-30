@@ -1,0 +1,29 @@
+name: Ensure Codex Review Ruleset
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 6 * * *'
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  ensure-ruleset:
+    name: Ensure Codex Review Required
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Ensure Codex ruleset
+        env:
+          REPO_ADMIN_TOKEN: ${{ secrets.REPO_ADMIN_TOKEN }}
+          CODEX_RULESET_NAME: Require Codex Review
+          CODEX_REVIEW_CHECK: Codex Review
+          CODEX_RULESET_BRANCH: refs/heads/main
+        run: node .github/scripts/ensure-codex-ruleset.mjs
