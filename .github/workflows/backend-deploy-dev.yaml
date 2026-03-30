@@ -200,7 +200,7 @@ jobs:
       - name: Resolve App Service name
         if: steps.guard.outputs.deploy == 'true'
         id: app
-        uses: azure/cli@9f7ce6f37c31b777ec6c6b6d1dfe7db79f497956 # v2.2.0
+        uses: azure/cli@9eb25b8360668fb0ecbafa808d40e2197b2f5f52 # v3.0.0
         with:
           inlineScript: |
             set -euo pipefail
@@ -256,7 +256,7 @@ jobs:
 
       - name: Configure App Service container image
         if: steps.guard.outputs.deploy == 'true'
-        uses: azure/cli@9f7ce6f37c31b777ec6c6b6d1dfe7db79f497956 # v2.2.0
+        uses: azure/cli@9eb25b8360668fb0ecbafa808d40e2197b2f5f52 # v3.0.0
         env:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
           DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
@@ -277,7 +277,7 @@ jobs:
 
       - name: Restart App Service
         if: steps.guard.outputs.deploy == 'true'
-        uses: azure/cli@9f7ce6f37c31b777ec6c6b6d1dfe7db79f497956 # v2.2.0
+        uses: azure/cli@9eb25b8360668fb0ecbafa808d40e2197b2f5f52 # v3.0.0
         with:
           inlineScript: |
             az webapp restart \
@@ -286,7 +286,7 @@ jobs:
 
       - name: Verify health through Application Gateway
         if: steps.guard.outputs.deploy == 'true'
-        uses: azure/cli@9f7ce6f37c31b777ec6c6b6d1dfe7db79f497956 # v2.2.0
+        uses: azure/cli@9eb25b8360668fb0ecbafa808d40e2197b2f5f52 # v3.0.0
         env:
           AGON_API_HOSTNAME: ${{ secrets.AGON_API_HOSTNAME }}
         with:
