@@ -126,10 +126,6 @@ export function renderPromptBanner(
   const frame = createPromptFrame(options?.inputLineCount);
   print(frame.borderLine);
   for (let index = 0; index < frame.inputLineCount; index += 1) {
-    if (index === frame.promptLineOffset) {
-      print(frame.hintLine);
-      continue;
-    }
     print(frame.paddingLine);
   }
   print(frame.borderLine);
@@ -307,7 +303,6 @@ interface PromptFrame {
   promptLineOffset: number;
   borderLine: string;
   paddingLine: string;
-  hintLine: string;
   promptPrefix: string;
   promptStart: string;
   backgroundStart: string;
@@ -325,13 +320,7 @@ function createPromptFrame(inputLineCountOverride?: number): PromptFrame {
   const borderLine = chalk.whiteBright('─'.repeat(width));
   const backgroundStart = '\u001b[48;2;63;111;201m';
   const promptStart = `${backgroundStart}\u001b[97m`;
-  const hintStart = `${backgroundStart}\u001b[38;2;200;216;255m`;
   const promptPrefix = '  > ';
-  const hintText = `${promptPrefix}Write an idea, a follow-up, or a slash command`;
-  const clippedHint = hintText.length > width
-    ? `${hintText.slice(0, width - 1)}…`
-    : hintText;
-  const hintLine = `${hintStart}${clippedHint.padEnd(width, ' ')}\u001b[0m`;
   const paddingLine = `${backgroundStart}${' '.repeat(width)}\u001b[0m`;
   const reset = '\u001b[0m';
 
@@ -341,7 +330,6 @@ function createPromptFrame(inputLineCountOverride?: number): PromptFrame {
     promptLineOffset,
     borderLine,
     paddingLine,
-    hintLine,
     promptPrefix,
     promptStart,
     backgroundStart,

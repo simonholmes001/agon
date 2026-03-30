@@ -62,7 +62,7 @@ describe('shell renderer', () => {
     renderStatusLine((line) => lines.push(line));
 
     const text = lines.join('\n');
-    expect(text).toContain('Write an idea, a follow-up, or a slash command');
+    expect(text).not.toContain('Write an idea, a follow-up, or a slash command');
     expect((text.match(/─/g) ?? []).length).toBeGreaterThanOrEqual(2);
     expect(text).toContain('/help');
     expect(text).toContain('/set');
