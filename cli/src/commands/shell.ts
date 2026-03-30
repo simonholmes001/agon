@@ -43,6 +43,7 @@ import {
   runNpmGlobalInstall
 } from '../utils/self-update.js';
 import { buildRuntimeExecutionProfile } from '../runtime/user-runtime-profile.js';
+import { AGENT_MODEL_IDS } from '../state/agent-model-config.js';
 
 /**
  * Sentinel value returned from promptForInput when the user presses Ctrl+C
@@ -215,13 +216,18 @@ export default class Shell extends Command {
     });
 
     const snapshot = await controller.getParamsSnapshot();
+    const agentSetupLines = AGENT_MODEL_IDS.map((agentId) => {
+      const selection = runtimeProfile.profile.agentModels[agentId];
+      return `${agentId}: ${selection.provider}/${selection.model}`;
+    });
     renderShellHeader(
       {
         version: this.config.pjson.version ?? 'dev',
         modelLabel: 'OpenAI GPT (backend configured)',
         directory: process.cwd(),
         config: snapshot.config,
-        session: snapshot.session
+        session: snapshot.session,
+        agentSetup: agentSetupLines
       },
       (line) => this.log(line)
     );

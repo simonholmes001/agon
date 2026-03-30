@@ -15,6 +15,7 @@ export interface ShellHeaderData {
     logLevel: string;
   };
   session: SessionResponse | null;
+  agentSetup?: string[];
 }
 
 export function renderShellHeader(data: ShellHeaderData, print: (line: string) => void): void {
@@ -37,6 +38,12 @@ export function renderShellHeader(data: ShellHeaderData, print: (line: string) =
   print(cardBorder);
   print(cardLine('Agon CLI  codex-style shell'));
   print(cardLine(`model: ${data.modelLabel}`));
+  if (data.agentSetup?.length) {
+    print(cardLine('agents:'));
+    for (const line of data.agentSetup) {
+      print(cardLine(`  ${line}`));
+    }
+  }
   print(cardLine(`directory: ${data.directory}`));
   print(cardLine(`apiUrl: ${data.config.apiUrl} (${apiUrlMode})`));
   print(cardLine(`session: ${sessionLabel}${phase}`));
