@@ -57,4 +57,14 @@ describe('run helpers', () => {
     expect(text).toContain('agon login');
     expect(text).toContain('agon keys <subcommand>');
   });
+
+  it('renders command rows with clear spacing before descriptions', () => {
+    const text = buildTopLevelHelp('agon');
+    const lines = text.split('\n');
+    const setModelLine = lines.find((line) => line.includes('agon command set-model <agent> <provider> <model>'));
+    const setKeyLine = lines.find((line) => line.includes('agon command set-key <provider> --key <value>'));
+
+    expect(setModelLine).toMatch(/\s{2,}Update agent model routing$/);
+    expect(setKeyLine).toMatch(/\s{2,}Store provider API key$/);
+  });
 });
