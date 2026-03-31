@@ -1,5 +1,17 @@
 # @agon_agents/cli
 
+## 0.8.6
+
+### Patch Changes
+
+- Improve `agon login` device-code instructions by rendering terminal hyperlinks with better macOS compatibility and always showing a plain URL fallback line when links are not clickable.
+- Prevent URL-like follow-up text (including split `https:\n//...` forms) from being misclassified as implicit local file attachments in shell input parsing.
+- Harden multiline prompt input rendering and add regression checks so prompt growth, newline handling, and shell formatting stay stable.
+- Make multiline newline renderer assertions independent of default prompt-frame height so PR merge-context CI remains stable.
+- Harden shell renderer regression tests by removing cursor-anchor tail noise from multiline prompt assertions and snapshots so CI and local runs stay consistent.
+- Stabilize shell regression tests across CI environments by normalizing prompt-render snapshots and making TTY integration assertions deterministic.
+- Make `agon --help` exhaustive by adding missing command entries and auto-discovering command/action variants from CLI source to prevent future omissions.
+
 ## 0.8.5
 
 ### Patch Changes
