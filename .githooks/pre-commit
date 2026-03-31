@@ -32,11 +32,15 @@ else
   echo "⏭️  No CLI project found — skipping CLI tests."
 fi
 
-# Backend tests — only run if a .NET project exists
+# Backend tests — run explicit solution path for deterministic behavior
 if find backend -name '*.sln' -o -name '*.csproj' 2>/dev/null | grep -q .; then
   echo ""
   echo "🧪 Running backend tests before commit..."
-  cd backend && dotnet test --verbosity quiet
+  DOTNET_CMD="/usr/local/share/dotnet/dotnet"
+  if [ ! -x "$DOTNET_CMD" ]; then
+    DOTNET_CMD="dotnet"
+  fi
+  DOTNET_CLI_HOME=/tmp "$DOTNET_CMD" test backend/Agon.sln --verbosity minimal
 
   if [ $? -ne 0 ]; then
     echo "❌ Backend tests failed. Commit aborted."

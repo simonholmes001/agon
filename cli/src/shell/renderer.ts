@@ -138,7 +138,8 @@ export function renderPromptBanner(
     cursorDownFromFirstLine: frame.inputLineCount + 1,
     inputLineCount: frame.inputLineCount,
     promptLineOffset: frame.promptLineOffset,
-    maxInputCharsPerLine: Math.max(1, frame.width - frame.promptPrefix.length),
+    // Keep a small right gutter so wrapped lines do not visually collide with the frame edge.
+    maxInputCharsPerLine: Math.max(1, frame.width - frame.promptPrefix.length - 1),
     // Input is unbounded; renderer keeps the cursor-visible window in frame.
     maxInputChars: Number.MAX_SAFE_INTEGER,
     promptPrefix: frame.promptPrefix,
@@ -167,7 +168,8 @@ export function buildPromptInputLineWithCursor(
   cursorIndex: number,
   options?: PromptRenderOptions
 ): string {
-  const editableLineCount = getEditableLineCount(frame);
+  const overlayLineCount = options?.topOverlayText ? 1 : 0;
+  const editableLineCount = Math.max(1, frame.inputLineCount - overlayLineCount);
   const visibleValue = getVisiblePromptValue(value, frame.maxInputChars);
   const visibleCursorIndex = getVisibleCursorIndex(value, visibleValue, cursorIndex);
   const wrapped = wrapPromptValue(visibleValue, frame.maxInputCharsPerLine);
@@ -187,7 +189,7 @@ export function buildPromptInputLineWithCursor(
     const chunk = chunks[index] ?? '';
     const prefix = index === 0 ? frame.promptPrefix : frame.promptContinuationPrefix;
     const content = `${prefix}${chunk}`.padEnd(frame.width, ' ');
-    const visualLineIndex = frame.promptLineOffset + index;
+    const visualLineIndex = frame.promptLineOffset + overlayLineCount + index;
     if (visualLineIndex < frame.inputLineCount) {
       lines[visualLineIndex] = `${frame.promptStart}${content}${frame.reset}`;
     }
@@ -197,7 +199,7 @@ export function buildPromptInputLineWithCursor(
   const cursorColumn = cursorPosition.column;
   const cursorPrefix = cursorEditableLineIndex === 0 ? frame.promptPrefix : frame.promptContinuationPrefix;
   const cursorText = (chunks[cursorEditableLineIndex] ?? '').slice(0, cursorColumn);
-  const cursorLineIndex = frame.promptLineOffset + cursorEditableLineIndex;
+  const cursorLineIndex = frame.promptLineOffset + overlayLineCount + cursorEditableLineIndex;
   const linesBelowCursor = frame.inputLineCount - cursorLineIndex - 1;
   const moveUp = linesBelowCursor > 0 ? `\u001b[${linesBelowCursor}A` : '';
 
@@ -313,10 +315,9 @@ function createPromptFrame(inputLineCountOverride?: number): PromptFrame {
   const terminalWidth = process.stdout.columns ?? 100;
   // Codex-like wide prompt zone: keep a small side margin, but avoid runaway ultra-wide lines.
   const width = Math.max(72, Math.min(terminalWidth - 4, 180));
-  // Keep the landing zone compact (Codex-style): 1 blank above and 1 blank below the prompt so
-  // the `>` marker is vertically centered in the idle input box.
-  const inputLineCount = Math.max(3, inputLineCountOverride ?? 3);
-  const promptLineOffset = 1;
+  // Start as a single prompt row and let the frame grow with input.
+  const inputLineCount = Math.max(1, inputLineCountOverride ?? 1);
+  const promptLineOffset = 0;
   const borderLine = chalk.whiteBright('─'.repeat(width));
   const backgroundStart = '\u001b[48;2;63;111;201m';
   const promptStart = `${backgroundStart}\u001b[97m`;
