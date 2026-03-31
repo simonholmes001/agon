@@ -21,6 +21,10 @@ const stripAnsi = (s: string): string => s.replace(/\u001b\[[0-9;]*m/g, '');
 const stripTerminalControlSequences = (s: string): string => s
   .replace(/\u001b\[[0-9;]*[A-Za-z]/g, '')
   .replace(/\r/g, '');
+const extractPromptFrameBody = (rendered: string): string => {
+  const cursorAnchor = rendered.lastIndexOf('\r');
+  return cursorAnchor >= 0 ? rendered.slice(0, cursorAnchor) : rendered;
+};
 
 function withTerminalColumns<T>(columns: number, run: () => T): T {
   const descriptor = Object.getOwnPropertyDescriptor(process.stdout, 'columns');
@@ -41,7 +45,7 @@ function withTerminalColumns<T>(columns: number, run: () => T): T {
 }
 
 function normalizePromptSnapshot(text: string): string {
-  return stripTerminalControlSequences(text)
+  return stripTerminalControlSequences(extractPromptFrameBody(text))
     .split('\n')
     .map((line) => line.replace(/\s+$/g, ''))
     .join('\n')
@@ -178,7 +182,7 @@ describe('shell renderer', () => {
     const frame = renderPromptBanner(() => {});
     const value = 'first line\nsecond line';
     const rendered = buildPromptInputLine(frame, value);
-    const plain = stripTerminalControlSequences(rendered);
+    const plain = stripTerminalControlSequences(extractPromptFrameBody(rendered));
 
     expect(plain).toContain('  > first line');
     expect(plain).toContain('    second line');
