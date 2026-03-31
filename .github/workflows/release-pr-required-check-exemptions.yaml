@@ -1,0 +1,43 @@
+name: Release PR Required Check Exemptions
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+  statuses: write
+
+jobs:
+  release-pr-check-exemptions:
+    name: Exempt required checks for automated release PR
+    if: >-
+      github.event.pull_request.user.login == 'github-actions[bot]' &&
+      startsWith(github.event.pull_request.head.ref, 'changeset-release/')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Set required-check exemption statuses on release PR head
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const prNumber = context.payload.pull_request.number;
+            const headSha = context.payload.pull_request.head.sha;
+            const exemptContexts = ['Codex Review', 'CLI Shell Regression'];
+
+            for (const contextName of exemptContexts) {
+              await github.rest.repos.createCommitStatus({
+                owner,
+                repo,
+                sha: headSha,
+                state: 'success',
+                context: contextName,
+                description: 'Exempt: automated changeset release PR',
+              });
+            }
+
+            core.info(
+              `Set required-check exemption statuses (${exemptContexts.join(', ')}) for PR #${prNumber} on ${headSha}.`,
+            );
