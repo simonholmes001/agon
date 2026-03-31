@@ -71,6 +71,14 @@ export function selectCtrlCSentinel(inputValue: string): typeof CTRL_C_EXIT_SENT
   return inputValue.length === 0 ? CTRL_C_EXIT_SENTINEL : INTERRUPT_SENTINEL;
 }
 
+/**
+ * Normalize inserted keypress chunks so pasted multiline content keeps line
+ * breaks consistently across CRLF/LF terminals.
+ */
+export function normalizePromptInsertText(chunk: string): string {
+  return chunk.replace(/\r\n?/g, '\n');
+}
+
 
 export function raceAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
   if (signal.aborted) {
@@ -741,7 +749,7 @@ export default class Shell extends Command {
         }
 
         if (str && !isCtrl && !isMeta && str !== '\r' && str !== '\n') {
-          const clean = str.replace(/[\r\n]/g, '');
+          const clean = normalizePromptInsertText(str);
           if (clean.length === 0) {
             return;
           }

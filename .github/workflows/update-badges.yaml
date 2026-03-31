@@ -21,6 +21,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -39,7 +40,7 @@ jobs:
           OUTPUT=$(npm run test 2>&1)
           echo "$OUTPUT"
           # Strip ANSI escape codes before parsing
-          CLEAN=$(echo "$OUTPUT" | sed 's/\x1b\[[0-9;]*m//g')
+          CLEAN=$(printf '%s\n' "$OUTPUT" | awk '{ gsub(/\033\[[0-9;]*m/, ""); print }')
           TEST_COUNT=$(echo "$CLEAN" | grep -E 'Tests\s+[0-9]+\s+passed' | grep -oE '[0-9]+' | head -1 || echo "0")
           echo "test_count=$TEST_COUNT" >> "$GITHUB_OUTPUT"
         working-directory: cli

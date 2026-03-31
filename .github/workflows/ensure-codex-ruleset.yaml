@@ -23,6 +23,7 @@ jobs:
           REPO_ADMIN_TOKEN: ${{ secrets.REPO_ADMIN_TOKEN }}
           CODEX_RULESET_NAME: Require Codex Review
           CODEX_REVIEW_CHECK: Codex Review
+          CODEX_REQUIRED_CHECKS: Codex Review,CLI Shell Regression
           CODEX_RULESET_BRANCH: refs/heads/main
           CODEX_BYPASS_REPOSITORY_ROLE_IDS: "2"
           CODEX_BYPASS_INTEGRATION_ID: "15368"

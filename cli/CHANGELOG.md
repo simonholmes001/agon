@@ -1,5 +1,21 @@
 # @agon_agents/cli
 
+## 0.8.5
+
+### Patch Changes
+
+- Improve `agon login` device-code UX by forcing clickable terminal hyperlinks in interactive sessions and adding a plain URL fallback line.
+- Align shell multiline prompt rendering with Codex-style behavior by starting compact and expanding as input wraps, while preserving readable wrapping and overlay placement.
+
+## 0.8.4
+
+### Patch Changes
+
+- Improve top-level help command formatting so long commands stay aligned and descriptions remain readable.
+- Remove the inline prompt helper sentence from inside the shell input box so the text area keeps clean formatting while expanding.
+- Improve shell authentication UX by failing fast on rejected tokens and showing clear login recovery guidance without noisy raw API error dumps.
+- Show current agent provider/model assignments in the shell header card on startup.
+
 ## 0.8.3
 
 ### Patch Changes

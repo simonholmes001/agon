@@ -47,7 +47,7 @@ export function buildDeviceSignInInstructions(params: {
 }): string[] {
   const lines = [
     chalk.bold('Complete sign-in in your browser'),
-    `${chalk.cyan('1. Open:')} ${formatTerminalLink(params.deviceUrl)}`,
+    `${chalk.cyan('1. Open:')} ${formatTerminalLink(params.deviceUrl, params.deviceUrl, { force: true })}`,
     chalk.dim('   If the line above is not clickable in your terminal, open this URL directly:'),
     `   ${params.deviceUrl}`,
     chalk.cyan(`2. Enter code: ${params.userCode}`),

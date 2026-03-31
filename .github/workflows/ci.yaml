@@ -7,6 +7,22 @@ on:
     branches: [main]
 
 jobs:
+  codex-review-tests:
+    name: Codex Review Script Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 20
+
+      - name: Run Codex review script tests
+        run: node --test .github/scripts/codex-pr-review-core.test.mjs
+
   cli-changeset:
     name: CLI Changeset Check
     runs-on: ubuntu-latest
@@ -68,6 +84,30 @@ jobs:
       - name: Run CLI unit tests
         run: |
           npm run test
+
+  cli-shell-regression:
+    name: CLI Shell Regression
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cli
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: cli/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --workspaces=false
+
+      - name: Run shell regression tests
+        run: npm run test:shell-regression
 
   backend-tests:
     name: Backend Tests

@@ -1,6 +1,6 @@
 {
   "name": "@agon_agents/cli",
-  "version": "0.8.3",
+  "version": "0.8.5",
   "description": "CLI tool for Agon - AI-powered strategy debate platform",
   "author": "Simon Holmes",
   "license": "MIT",
@@ -37,6 +37,7 @@
     "build": "npm run clean && tsc",
     "dev": "tsc --watch",
     "test": "vitest run",
+    "test:shell-regression": "vitest run test/shell/renderer.test.ts test/shell/interrupt.test.ts test/shell/prompt-tty.integration.test.ts",
     "test:watch": "vitest --watch",
     "test:coverage": "vitest --coverage",
     "lint": "eslint . --ext .ts",
