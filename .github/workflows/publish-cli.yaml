@@ -11,6 +11,7 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  statuses: write
   id-token: write
 
 jobs:
@@ -53,6 +54,7 @@ jobs:
           fi
 
       - name: Version / Release with Changesets
+        id: changesets
         uses: changesets/action@6a0a831ff30acef54f2c6aa1cbbc1096b066edaf # v1.7.0
         with:
           cwd: cli
@@ -64,3 +66,54 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           NPM_CONFIG_PROVENANCE: "true"
+
+      - name: Exempt changeset release PR from Codex review check
+        if: steps.changesets.outputs.hasChangesets == 'true'
+        uses: actions/github-script@v8
+        env:
+          CHANGESET_PR_NUMBER: ${{ steps.changesets.outputs.pullRequestNumber }}
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+
+            let releasePr = null;
+            const prNumber = Number.parseInt(process.env.CHANGESET_PR_NUMBER || '', 10);
+            if (Number.isInteger(prNumber)) {
+              const prResponse = await github.rest.pulls.get({
+                owner,
+                repo,
+                pull_number: prNumber,
+              });
+              releasePr = prResponse.data;
+            } else {
+              const prs = await github.paginate(github.rest.pulls.list, {
+                owner,
+                repo,
+                state: 'open',
+                per_page: 100,
+                sort: 'updated',
+                direction: 'desc',
+              });
+
+              releasePr = prs.find((pr) =>
+                pr.user?.login === 'github-actions[bot]' &&
+                pr.head?.ref?.startsWith('changeset-release/')
+              );
+            }
+
+            if (!releasePr) {
+              core.info('No open changeset release PR found; skipping Codex Review exemption status.');
+              return;
+            }
+
+            await github.rest.repos.createCommitStatus({
+              owner,
+              repo,
+              sha: releasePr.head.sha,
+              state: 'success',
+              context: 'Codex Review',
+              description: 'Exempt: automated changeset release PR',
+            });
+
+            core.info(`Set Codex Review success status for PR #${releasePr.number} on ${releasePr.head.sha}.`);

@@ -155,9 +155,11 @@ jobs:
           set -euo pipefail
           SHORT_SHA="$(echo "${{ steps.guard.outputs.deploy_sha }}" | cut -c1-12)"
           IMAGE_NAME="${{ steps.docker_secrets.outputs.image_name }}"
-          echo "tag_sha=sha-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
-          echo "image_sha=${IMAGE_NAME}:sha-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
-          echo "image_latest=${IMAGE_NAME}:dev-latest" >> "$GITHUB_OUTPUT"
+          {
+            echo "tag_sha=sha-${SHORT_SHA}"
+            echo "image_sha=${IMAGE_NAME}:sha-${SHORT_SHA}"
+            echo "image_latest=${IMAGE_NAME}:dev-latest"
+          } >> "$GITHUB_OUTPUT"
           if [ -z "${IMAGE_NAME}" ]; then
             echo "::error::Computed image name is empty."
             exit 1
