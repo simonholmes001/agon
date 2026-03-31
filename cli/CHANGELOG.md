@@ -1,5 +1,12 @@
 # @agon_agents/cli
 
+## 0.8.5
+
+### Patch Changes
+
+- Improve `agon login` device-code UX by forcing clickable terminal hyperlinks in interactive sessions and adding a plain URL fallback line.
+- Align shell multiline prompt rendering with Codex-style behavior by starting compact and expanding as input wraps, while preserving readable wrapping and overlay placement.
+
 ## 0.8.4
 
 ### Patch Changes
