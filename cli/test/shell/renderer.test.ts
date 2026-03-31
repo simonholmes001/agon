@@ -179,7 +179,7 @@ describe('shell renderer', () => {
   });
 
   it('preserves explicit newline boundaries in prompt rendering', () => {
-    const frame = renderPromptBanner(() => {});
+    const frame = renderPromptBanner(() => {}, { inputLineCount: 3 });
     const value = 'first line\nsecond line';
     const rendered = buildPromptInputLine(frame, value);
     const plain = stripTerminalControlSequences(extractPromptFrameBody(rendered));
