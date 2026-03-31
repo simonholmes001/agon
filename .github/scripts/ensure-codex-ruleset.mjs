@@ -19,8 +19,29 @@ const githubApi = process.env.GITHUB_API_URL || 'https://api.github.com';
 const rulesetName = process.env.CODEX_RULESET_NAME || 'Require Codex Review';
 const defaultRequiredCheck = process.env.CODEX_REVIEW_CHECK || 'Codex Review';
 const targetBranch = process.env.CODEX_RULESET_BRANCH || 'refs/heads/main';
-const bypassRepositoryRoleId = Number.parseInt(
-  process.env.CODEX_BYPASS_REPOSITORY_ROLE_ID || '2',
+
+function parseRepositoryRoleIds() {
+  const rawList = process.env.CODEX_BYPASS_REPOSITORY_ROLE_IDS || '';
+  if (rawList.trim()) {
+    return [...new Set(
+      rawList
+        .split(',')
+        .map((value) => Number.parseInt(value.trim(), 10))
+        .filter((value) => Number.isInteger(value) && value > 0),
+    )];
+  }
+
+  const legacy = Number.parseInt(process.env.CODEX_BYPASS_REPOSITORY_ROLE_ID || '2', 10);
+  if (Number.isInteger(legacy) && legacy > 0) {
+    return [legacy];
+  }
+
+  return [2];
+}
+
+const bypassRepositoryRoleIds = parseRepositoryRoleIds();
+const bypassIntegrationId = Number.parseInt(
+  process.env.CODEX_BYPASS_INTEGRATION_ID || '15368',
   10,
 );
 const requiredChecks = resolveRequiredChecks();
@@ -41,19 +62,39 @@ function resolveRequiredChecks() {
 
 function ensureBypassActors(existingBypassActors = []) {
   const actors = Array.isArray(existingBypassActors) ? [...existingBypassActors] : [];
-  const hasRepositoryRoleBypass = actors.some(
-    (actor) =>
-      actor?.actor_type === 'RepositoryRole' &&
-      Number(actor?.actor_id) === bypassRepositoryRoleId &&
-      actor?.bypass_mode === 'always',
-  );
 
-  if (!hasRepositoryRoleBypass) {
-    actors.push({
-      actor_id: bypassRepositoryRoleId,
-      actor_type: 'RepositoryRole',
-      bypass_mode: 'always',
-    });
+  for (const roleId of bypassRepositoryRoleIds) {
+    const hasRepositoryRoleBypass = actors.some(
+      (actor) =>
+        actor?.actor_type === 'RepositoryRole' &&
+        Number(actor?.actor_id) === roleId &&
+        actor?.bypass_mode === 'always',
+    );
+
+    if (!hasRepositoryRoleBypass) {
+      actors.push({
+        actor_id: roleId,
+        actor_type: 'RepositoryRole',
+        bypass_mode: 'always',
+      });
+    }
+  }
+
+  if (Number.isInteger(bypassIntegrationId) && bypassIntegrationId > 0) {
+    const hasIntegrationBypass = actors.some(
+      (actor) =>
+        actor?.actor_type === 'Integration' &&
+        Number(actor?.actor_id) === bypassIntegrationId &&
+        actor?.bypass_mode === 'always',
+    );
+
+    if (!hasIntegrationBypass) {
+      actors.push({
+        actor_id: bypassIntegrationId,
+        actor_type: 'Integration',
+        bypass_mode: 'always',
+      });
+    }
   }
 
   return actors;

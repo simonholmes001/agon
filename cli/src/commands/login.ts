@@ -40,6 +40,26 @@ type TokenSource = 'manual' | 'azure-cli' | 'device-code';
 
 const defaultInteractiveClientId = '04b07795-8ddb-461a-bbee-02f9e1bf7b46';
 
+export function buildDeviceSignInInstructions(params: {
+  deviceUrl: string;
+  userCode: string;
+  message?: string;
+}): string[] {
+  const lines = [
+    chalk.bold('Complete sign-in in your browser'),
+    `${chalk.cyan('1. Open:')} ${formatTerminalLink(params.deviceUrl, params.deviceUrl, { force: true })}`,
+    chalk.dim('   If the line above is not clickable in your terminal, open this URL directly:'),
+    `   ${params.deviceUrl}`,
+    chalk.cyan(`2. Enter code: ${params.userCode}`),
+  ];
+
+  if (params.message) {
+    lines.push(chalk.dim(params.message));
+  }
+
+  return lines;
+}
+
 export default class Login extends Command {
   static override readonly description =
     'Set up authentication for the Agon backend';
@@ -440,12 +460,12 @@ export default class Login extends Command {
           spinner.stop();
           const deviceUrl = prompt.verificationUriComplete || prompt.verificationUri;
           this.log('');
-          this.log(chalk.bold('Complete sign-in in your browser'));
-          this.log(`${chalk.cyan('1. Open:')} ${formatTerminalLink(deviceUrl, deviceUrl, { force: true })}`);
-          this.log(chalk.dim(`   ${deviceUrl}`));
-          this.log(chalk.cyan(`2. Enter code: ${prompt.userCode}`));
-          if (prompt.message) {
-            this.log(chalk.dim(prompt.message));
+          for (const line of buildDeviceSignInInstructions({
+            deviceUrl,
+            userCode: prompt.userCode,
+            message: prompt.message,
+          })) {
+            this.log(line);
           }
           this.log('');
           spinner.start('Waiting for Entra sign-in completion...');

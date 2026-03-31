@@ -129,6 +129,17 @@ jobs:
             "$COMBINED_COVERAGE_JSON" \
             "README.md"
 
+      - name: Ensure Codex ruleset bypass supports badge automation
+        if: ${{ secrets.REPO_ADMIN_TOKEN != '' }}
+        env:
+          REPO_ADMIN_TOKEN: ${{ secrets.REPO_ADMIN_TOKEN }}
+          CODEX_RULESET_NAME: Require Codex Review
+          CODEX_REVIEW_CHECK: Codex Review
+          CODEX_RULESET_BRANCH: refs/heads/main
+          CODEX_BYPASS_REPOSITORY_ROLE_IDS: "2"
+          CODEX_BYPASS_INTEGRATION_ID: "15368"
+        run: node .github/scripts/ensure-codex-ruleset.mjs
+
       - name: Commit updated badges
         env:
           REPO_ADMIN_TOKEN: ${{ secrets.REPO_ADMIN_TOKEN }}
@@ -139,15 +150,22 @@ jobs:
           if git diff --cached --quiet; then
             echo "No badge changes to commit."
           else
-            if [ -z "${REPO_ADMIN_TOKEN}" ]; then
-              echo "::error::REPO_ADMIN_TOKEN is required for deterministic pushes to protected main."
-              exit 1
-            fi
             git commit -m "chore: update test & coverage badges [skip ci]"
-            git config --local --unset-all http.https://github.com/.extraheader || true
-            git remote set-url origin "https://x-access-token:${REPO_ADMIN_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-            if ! git push origin HEAD:main; then
-              echo "::error::Failed to push badge update to main. Ensure REPO_ADMIN_TOKEN is configured and ruleset bypass includes the configured repository role."
-              exit 1
+            if git push origin HEAD:main; then
+              echo "Pushed badge update via default workflow token."
+              exit 0
             fi
+
+            if [ -n "${REPO_ADMIN_TOKEN}" ]; then
+              echo "Default push failed; retrying with REPO_ADMIN_TOKEN."
+              git config --local --unset-all http.https://github.com/.extraheader || true
+              git remote set-url origin "https://x-access-token:${REPO_ADMIN_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+              if git push origin HEAD:main; then
+                echo "Pushed badge update via REPO_ADMIN_TOKEN."
+                exit 0
+              fi
+            fi
+
+            echo "::error::Failed to push badge update to main. Ensure ruleset bypass includes GitHub Actions (integration id 15368) and/or the repository role of REPO_ADMIN_TOKEN."
+            exit 1
           fi

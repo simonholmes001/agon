@@ -36,6 +36,14 @@ function supportsHyperlinks(force: boolean): boolean {
 }
 
 function resolveOscTerminator(): string {
+  const override = (process.env.AGON_HYPERLINK_TERMINATOR ?? '').toLowerCase();
+  if (override === 'bel') {
+    return BEL;
+  }
+  if (override === 'st') {
+    return ST;
+  }
+
   // Apple Terminal consistently recognizes OSC8 links with ST terminators.
   if ((process.env.TERM_PROGRAM ?? '').toLowerCase() === 'apple_terminal') {
     return ST;

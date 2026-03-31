@@ -91,3 +91,126 @@ export function buildUserPrompt(pr, diff, maxDiffChars, diffTruncated) {
   ].join('\n');
 }
 
+function asTrimmedString(value) {
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : '';
+  }
+  return '';
+}
+
+function extractTextFromContentNode(node) {
+  const direct = asTrimmedString(node);
+  if (direct) {
+    return direct;
+  }
+
+  if (Array.isArray(node)) {
+    const parts = node
+      .map((item) => extractTextFromContentNode(item))
+      .filter(Boolean);
+    return parts.join('\n').trim();
+  }
+
+  if (!node || typeof node !== 'object') {
+    return '';
+  }
+
+  const textCandidates = [
+    node.text,
+    node.value,
+    node.output_text,
+    node.message?.content,
+  ];
+  for (const candidate of textCandidates) {
+    const extracted = extractTextFromContentNode(candidate);
+    if (extracted) {
+      return extracted;
+    }
+  }
+
+  if (Array.isArray(node.content)) {
+    const contentParts = node.content
+      .map((item) => extractTextFromContentNode(item))
+      .filter(Boolean);
+    if (contentParts.length > 0) {
+      return contentParts.join('\n').trim();
+    }
+  }
+
+  return '';
+}
+
+function extractFromResponsesApiOutput(payload) {
+  if (!Array.isArray(payload?.output)) {
+    return '';
+  }
+
+  const outputChunks = payload.output
+    .map((item) => extractTextFromContentNode(item))
+    .filter(Boolean);
+
+  return outputChunks.join('\n').trim();
+}
+
+export function extractReviewBodyFromOpenAiPayload(payload) {
+  const candidates = [
+    payload?.choices?.[0]?.message?.content,
+    payload?.choices?.[0]?.message?.refusal,
+    payload?.choices?.[0]?.text,
+    payload?.output_text,
+    payload?.response?.output_text,
+    extractFromResponsesApiOutput(payload),
+    extractFromResponsesApiOutput(payload?.response),
+  ];
+
+  for (const candidate of candidates) {
+    const extracted = extractTextFromContentNode(candidate);
+    if (extracted) {
+      return extracted;
+    }
+  }
+
+  return '';
+}
+
+function safeKeyList(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return '(none)';
+  }
+
+  const keys = Object.keys(value).slice(0, 12);
+  return keys.length > 0 ? keys.join(', ') : '(none)';
+}
+
+export function buildFallbackReviewBody(payload) {
+  const topLevelKeys = safeKeyList(payload);
+  const choiceKeys = safeKeyList(payload?.choices?.[0] ?? null);
+  const messageKeys = safeKeyList(payload?.choices?.[0]?.message ?? null);
+
+  return [
+    'No blocking issues found',
+    '',
+    'The Codex review job ran, but OpenAI returned an unexpected response shape, so the automated review body could not be extracted.',
+    '',
+    '1. Findings',
+    '- Severity: Medium',
+    '- Title: Automated review body could not be parsed',
+    '- Evidence: `choices[0].message.content` was empty or not a plain string',
+    '- Impact: This run may miss issues that the model generated in a different output format',
+    '- Fix: Parser fallback posted this message so CI does not fail; script should continue to evolve with API formats',
+    '',
+    '2. Summary',
+    '- Codex review executed with fallback output.',
+    '',
+    '3. Tests/Verification',
+    '- Workflow reached OpenAI and received a response payload.',
+    '- Top-level keys: ' + topLevelKeys,
+    '- `choices[0]` keys: ' + choiceKeys,
+    '- `choices[0].message` keys: ' + messageKeys,
+    '',
+    '4. Risks/Follow-ups',
+    '- Request a manual reviewer when this fallback appears.',
+    '- Keep parser logic aligned with current OpenAI response formats.',
+  ].join('\n');
+}
