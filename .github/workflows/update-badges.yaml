@@ -15,6 +15,9 @@ jobs:
   update-badges:
     name: Update README Badges
     runs-on: ubuntu-latest
+    env:
+      REPO_ADMIN_TOKEN: ${{ secrets.REPO_ADMIN_TOKEN }}
+      HAS_REPO_ADMIN_TOKEN: ${{ secrets.REPO_ADMIN_TOKEN != '' }}
 
     steps:
       - name: Checkout repository
@@ -130,9 +133,8 @@ jobs:
             "README.md"
 
       - name: Ensure Codex ruleset bypass supports badge automation
-        if: ${{ secrets.REPO_ADMIN_TOKEN != '' }}
+        if: env.HAS_REPO_ADMIN_TOKEN == 'true'
         env:
-          REPO_ADMIN_TOKEN: ${{ secrets.REPO_ADMIN_TOKEN }}
           CODEX_RULESET_NAME: Require Codex Review
           CODEX_REVIEW_CHECK: Codex Review
           CODEX_RULESET_BRANCH: refs/heads/main
@@ -141,8 +143,6 @@ jobs:
         run: node .github/scripts/ensure-codex-ruleset.mjs
 
       - name: Commit updated badges
-        env:
-          REPO_ADMIN_TOKEN: ${{ secrets.REPO_ADMIN_TOKEN }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"

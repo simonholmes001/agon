@@ -45,6 +45,7 @@ const bypassIntegrationId = Number.parseInt(
   10,
 );
 const requiredChecks = resolveRequiredChecks();
+const canUseIntegrationBypass = Number.isInteger(bypassIntegrationId) && bypassIntegrationId > 0;
 
 function resolveRequiredChecks() {
   const csv = process.env.CODEX_REQUIRED_CHECKS || '';
@@ -60,8 +61,11 @@ function resolveRequiredChecks() {
   return [defaultRequiredCheck];
 }
 
-function ensureBypassActors(existingBypassActors = []) {
-  const actors = Array.isArray(existingBypassActors) ? [...existingBypassActors] : [];
+function ensureBypassActors(existingBypassActors = [], options = {}) {
+  const { includeIntegration = true } = options;
+  const actors = Array.isArray(existingBypassActors)
+    ? existingBypassActors.filter((actor) => includeIntegration || actor?.actor_type !== 'Integration')
+    : [];
 
   for (const roleId of bypassRepositoryRoleIds) {
     const hasRepositoryRoleBypass = actors.some(
@@ -80,7 +84,7 @@ function ensureBypassActors(existingBypassActors = []) {
     }
   }
 
-  if (Number.isInteger(bypassIntegrationId) && bypassIntegrationId > 0) {
+  if (includeIntegration && canUseIntegrationBypass) {
     const hasIntegrationBypass = actors.some(
       (actor) =>
         actor?.actor_type === 'Integration' &&
@@ -100,6 +104,16 @@ function ensureBypassActors(existingBypassActors = []) {
   return actors;
 }
 
+class GitHubApiError extends Error {
+  constructor(status, statusText, body) {
+    super(`GitHub API ${status} ${statusText}: ${body}`);
+    this.name = 'GitHubApiError';
+    this.status = status;
+    this.statusText = statusText;
+    this.body = body;
+  }
+}
+
 async function githubRequest(path, options = {}) {
   const response = await fetch(`${githubApi}${path}`, {
     ...options,
@@ -113,10 +127,57 @@ async function githubRequest(path, options = {}) {
 
   if (!response.ok) {
     const text = await response.text();
-    throw new Error(`GitHub API ${response.status} ${response.statusText}: ${text}`);
+    throw new GitHubApiError(response.status, response.statusText, text);
   }
 
   return response;
+}
+
+function shouldRetryWithoutIntegration(error) {
+  if (!(error instanceof GitHubApiError)) {
+    return false;
+  }
+
+  if (error.status !== 400 && error.status !== 422) {
+    return false;
+  }
+
+  const body = (error.body || '').toLowerCase();
+  return body.includes('integration') || body.includes('actor_type');
+}
+
+async function saveRulesetWithIntegrationFallback(method, path, payloadFactory) {
+  const withIntegration = payloadFactory(true);
+
+  try {
+    await githubRequest(path, {
+      method,
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(withIntegration),
+    });
+    return true;
+  } catch (error) {
+    if (!canUseIntegrationBypass || !shouldRetryWithoutIntegration(error)) {
+      throw error;
+    }
+  }
+
+  const withoutIntegration = payloadFactory(false);
+  console.warn(
+    'GitHub rejected Integration bypass actor while updating ruleset. Retrying with RepositoryRole bypass only.',
+  );
+
+  await githubRequest(path, {
+    method,
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(withoutIntegration),
+  });
+
+  return false;
 }
 
 function ensureRequiredCheckRule(ruleset) {
@@ -169,7 +230,7 @@ const existing = Array.isArray(rulesets)
   : null;
 
 if (!existing) {
-  const payload = {
+  const payloadFactory = (includeIntegration) => ({
     name: rulesetName,
     target: 'branch',
     enforcement: 'active',
@@ -188,18 +249,19 @@ if (!existing) {
         },
       },
     ],
-    bypass_actors: ensureBypassActors(),
-  };
-
-  await githubRequest(`/repos/${owner}/${repo}/rulesets`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(payload),
+    bypass_actors: ensureBypassActors([], { includeIntegration }),
   });
 
-  console.log(`Created ruleset "${rulesetName}" with required checks: ${requiredChecks.join(', ')}.`);
+  const usedIntegrationBypass = await saveRulesetWithIntegrationFallback(
+    'POST',
+    `/repos/${owner}/${repo}/rulesets`,
+    payloadFactory,
+  );
+
+  const bypassMode = usedIntegrationBypass ? 'RepositoryRole + Integration' : 'RepositoryRole only';
+  console.log(
+    `Created ruleset "${rulesetName}" with required checks: ${requiredChecks.join(', ')}. Bypass mode: ${bypassMode}.`,
+  );
   process.exit(0);
 }
 
@@ -207,21 +269,22 @@ const rulesetDetailsResponse = await githubRequest(`/repos/${owner}/${repo}/rule
 const rulesetDetails = await rulesetDetailsResponse.json();
 
 const updatedRules = ensureRequiredCheckRule(rulesetDetails);
-const updatePayload = {
+const payloadFactory = (includeIntegration) => ({
   name: rulesetDetails.name,
   target: rulesetDetails.target,
   enforcement: rulesetDetails.enforcement,
   conditions: rulesetDetails.conditions,
   rules: updatedRules,
-  bypass_actors: ensureBypassActors(rulesetDetails.bypass_actors || []),
-};
-
-await githubRequest(`/repos/${owner}/${repo}/rulesets/${existing.id}`, {
-  method: 'PUT',
-  headers: {
-    'Content-Type': 'application/json',
-  },
-  body: JSON.stringify(updatePayload),
+  bypass_actors: ensureBypassActors(rulesetDetails.bypass_actors || [], { includeIntegration }),
 });
 
-console.log(`Updated ruleset "${rulesetName}" to require checks: ${requiredChecks.join(', ')}.`);
+const usedIntegrationBypass = await saveRulesetWithIntegrationFallback(
+  'PUT',
+  `/repos/${owner}/${repo}/rulesets/${existing.id}`,
+  payloadFactory,
+);
+
+const bypassMode = usedIntegrationBypass ? 'RepositoryRole + Integration' : 'RepositoryRole only';
+console.log(
+  `Updated ruleset "${rulesetName}" to require checks: ${requiredChecks.join(', ')}. Bypass mode: ${bypassMode}.`,
+);
