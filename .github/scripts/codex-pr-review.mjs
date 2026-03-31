@@ -2,6 +2,13 @@
 
 import fs from 'fs';
 import process from 'process';
+import {
+  buildSystemPrompt,
+  buildUserPrompt,
+  isChangesetReleasePr,
+  isDependabotPr,
+  loadSkillRubrics,
+} from './codex-pr-review-core.mjs';
 
 const eventPath = process.env.GITHUB_EVENT_PATH;
 if (!eventPath) {
@@ -16,23 +23,12 @@ if (!pr) {
   process.exit(1);
 }
 
-const prAuthor = pr.user?.login || '';
-const headRef = pr.head?.ref || '';
-const isDependabotPr =
-  prAuthor === 'dependabot[bot]' ||
-  process.env.GITHUB_ACTOR === 'dependabot[bot]' ||
-  headRef.startsWith('dependabot/');
-
-const isChangesetReleasePr =
-  headRef.startsWith('changeset-release/') ||
-  (prAuthor === 'github-actions[bot]' && /^Version Packages/i.test(pr.title || ''));
-
-if (isDependabotPr) {
+if (isDependabotPr(pr, process.env.GITHUB_ACTOR || '')) {
   console.log('Dependabot PR detected; skipping Codex review by design.');
   process.exit(0);
 }
 
-if (isChangesetReleasePr) {
+if (isChangesetReleasePr(pr)) {
   console.log('Changeset release PR detected; bypassing Codex review by design.');
   process.exit(0);
 }
@@ -92,44 +88,9 @@ if (diff.length > maxDiffChars) {
   diffTruncated = true;
 }
 
-const prInfo = [
-  `Title: ${pr.title}`,
-  `Author: ${pr.user?.login || 'unknown'}`,
-  `Base: ${pr.base?.ref || ''}`,
-  `Head: ${pr.head?.ref || ''}`,
-  'Body:',
-  pr.body || '(no description)',
-].join('\n');
-
-const truncationNote = diffTruncated
-  ? `\n[Diff truncated at ${maxDiffChars} characters. Focus on highest-risk changes first.]`
-  : '';
-
-const systemPrompt = [
-  'You are Codex performing a rigorous PR review.',
-  'Apply three rubrics in this order:',
-  '1) pull-request-review: risk-based, behavior-first, findings ordered by severity, include evidence and fixes.',
-  '2) clean-code: clarity, naming, error handling, readability, and test quality.',
-  '3) clean-architecture: boundaries, dependency direction, adapter separation, and policy isolation.',
-  'Do not approve speculative issues without evidence in the diff.',
-  'If no issues found, say "No blocking issues found" and list residual risks/testing gaps.',
-].join(' ');
-
-const userPrompt = [
-  'Review the following PR diff.',
-  '',
-  prInfo,
-  '',
-  'Diff:',
-  diff,
-  truncationNote,
-  '',
-  'Respond in Markdown with:',
-  '1. Findings (each with Severity, Title, Evidence, Impact, Fix)',
-  '2. Summary (short)',
-  '3. Tests/Verification (what was run / missing)',
-  '4. Risks/Follow-ups (if any)',
-].join('\n');
+const rubrics = loadSkillRubrics(process.cwd());
+const systemPrompt = buildSystemPrompt(rubrics);
+const userPrompt = buildUserPrompt(pr, diff, maxDiffChars, diffTruncated);
 
 const openAiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
   method: 'POST',
