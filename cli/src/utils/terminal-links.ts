@@ -1,16 +1,27 @@
-const OSC = '\u001B]8;;';
+const ESC = '\u001B';
+const OSC = `${ESC}]8;;`;
 const BEL = '\u0007';
-const OSC_END = '\u001B]8;;\u0007';
+const ST = `${ESC}\\`;
 
-export function formatTerminalLink(url: string, label?: string): string {
+type TerminalLinkOptions = {
+  force?: boolean;
+};
+
+export function formatTerminalLink(url: string, label?: string, options: TerminalLinkOptions = {}): string {
   const text = label ?? url;
-  if (!supportsHyperlinks()) {
+  if (!supportsHyperlinks(options.force ?? false)) {
     return text;
   }
-  return `${OSC}${url}${BEL}${text}${OSC_END}`;
+
+  const terminator = resolveOscTerminator();
+  return `${OSC}${url}${terminator}${text}${OSC}${terminator}`;
 }
 
-function supportsHyperlinks(): boolean {
+function supportsHyperlinks(force: boolean): boolean {
+  if (force) {
+    return process.stdout.isTTY;
+  }
+
   if (!process.stdout.isTTY) {
     return false;
   }
@@ -22,4 +33,13 @@ function supportsHyperlinks(): boolean {
     return false;
   }
   return true;
+}
+
+function resolveOscTerminator(): string {
+  // Apple Terminal consistently recognizes OSC8 links with ST terminators.
+  if ((process.env.TERM_PROGRAM ?? '').toLowerCase() === 'apple_terminal') {
+    return ST;
+  }
+
+  return BEL;
 }

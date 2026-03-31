@@ -441,7 +441,8 @@ export default class Login extends Command {
           const deviceUrl = prompt.verificationUriComplete || prompt.verificationUri;
           this.log('');
           this.log(chalk.bold('Complete sign-in in your browser'));
-          this.log(`${chalk.cyan('1. Open:')} ${formatTerminalLink(deviceUrl)}`);
+          this.log(`${chalk.cyan('1. Open:')} ${formatTerminalLink(deviceUrl, deviceUrl, { force: true })}`);
+          this.log(chalk.dim(`   ${deviceUrl}`));
           this.log(chalk.cyan(`2. Enter code: ${prompt.userCode}`));
           if (prompt.message) {
             this.log(chalk.dim(prompt.message));
