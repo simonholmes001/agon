@@ -70,16 +70,13 @@ describe('shell renderer', () => {
     expect(frame.maxInputChars).toBeGreaterThan(0);
     expect(frame.cursorUpLines).toBe(frame.inputLineCount + 1);
     expect(frame.cursorDownFromFirstLine).toBe(frame.inputLineCount + 1);
-    expect(frame.inputLineCount).toBe(3);
-    expect(frame.promptLineOffset).toBe(1);
+    expect(frame.inputLineCount).toBe(1);
+    expect(frame.promptLineOffset).toBe(0);
   });
 
-  it('centers > prompt vertically in the idle input box (equal blank lines above and below)', () => {
+  it('starts prompt on the first input row (Codex-like compact input zone)', () => {
     const frame = renderPromptBanner(() => {});
-    const blankLinesAbove = frame.promptLineOffset;
-    const blankLinesBelow = frame.inputLineCount - frame.promptLineOffset - 1;
-
-    expect(blankLinesAbove).toBe(blankLinesBelow);
+    expect(frame.promptLineOffset).toBe(0);
   });
 
   it('builds an active prompt line with an input cursor prefix', () => {
@@ -89,8 +86,7 @@ describe('shell renderer', () => {
     const rows = plain.split('\n');
 
     expect(prompt).toContain('\u001b[48;2;63;111;201m');
-    expect(rows[0]).not.toContain('> ');
-    expect(rows[1]).toContain('  > ');
+    expect(rows[0]).toContain('  > ');
   });
 
   it('builds shimmer text variants while preserving visible message', () => {
@@ -123,28 +119,28 @@ describe('shell renderer', () => {
   });
 
   it('wraps prompt input across multiple lines inside the frame', () => {
-    const frame = renderPromptBanner(() => {});
+    const frame = renderPromptBanner(() => {}, { inputLineCount: 3 });
     const longValue = 'a'.repeat(frame.maxInputCharsPerLine + 10);
     const rendered = buildPromptInputLine(frame, longValue);
 
     expect(rendered).toContain('\n');
-    expect(getPromptCursorPosition(frame, longValue, longValue.length).lineIndex).toBe(2);
+    expect(getPromptCursorPosition(frame, longValue, longValue.length).lineIndex).toBe(1);
   });
 
   it('wraps on word boundaries when space is available', () => {
-    const frame = renderPromptBanner(() => {});
+    const frame = renderPromptBanner(() => {}, { inputLineCount: 3 });
     const firstLine = 'a'.repeat(frame.maxInputCharsPerLine - 2);
     const value = `${firstLine} alpha beta`;
     const rendered = buildPromptInputLine(frame, value);
     const plain = rendered.replace(/\u001b\[[0-9;]*m/g, '');
     const rows = plain.split('\n');
 
-    expect(rows[1]).not.toContain('alph');
-    expect(rows[2]).toContain('alpha beta');
+    expect(rows[0]).not.toContain('alph');
+    expect(rows[1]).toContain('alpha beta');
   });
 
   it('keeps cursor visible at bottom of prompt viewport for very long input', () => {
-    const frame = renderPromptBanner(() => {});
+    const frame = renderPromptBanner(() => {}, { inputLineCount: 3 });
     const longValue = 'word '.repeat(frame.maxInputCharsPerLine * 2);
     const cursor = getPromptCursorPosition(frame, longValue, longValue.length);
     const expectedLastLine = frame.promptLineOffset + (frame.inputLineCount - frame.promptLineOffset) - 1;
@@ -164,7 +160,7 @@ describe('shell renderer', () => {
   });
 
   it('renders top overlay text for live attachment preview', () => {
-    const frame = renderPromptBanner(() => {});
+    const frame = renderPromptBanner(() => {}, { inputLineCount: 2 });
     const rendered = buildPromptInputLineWithCursor(
       frame,
       'Describe this image -> /tmp/cat.jpg',
