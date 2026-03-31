@@ -18,6 +18,7 @@ jobs:
     env:
       REPO_ADMIN_TOKEN: ${{ secrets.REPO_ADMIN_TOKEN }}
       HAS_REPO_ADMIN_TOKEN: ${{ secrets.REPO_ADMIN_TOKEN != '' }}
+      WORKFLOW_GITHUB_TOKEN: ${{ github.token }}
 
     steps:
       - name: Checkout repository
@@ -151,6 +152,7 @@ jobs:
             echo "No badge changes to commit."
           else
             git commit -m "chore: update test & coverage badges [skip ci]"
+            git remote set-url origin "https://x-access-token:${WORKFLOW_GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
             if git push origin HEAD:main; then
               echo "Pushed badge update via default workflow token."
               exit 0
@@ -164,8 +166,10 @@ jobs:
                 echo "Pushed badge update via REPO_ADMIN_TOKEN."
                 exit 0
               fi
+
+              echo "::error::REPO_ADMIN_TOKEN push was denied. Verify token scopes/repo access and branch bypass permissions."
             fi
 
-            echo "::error::Failed to push badge update to main. Ensure ruleset bypass includes GitHub Actions (integration id 15368) and/or the repository role of REPO_ADMIN_TOKEN."
+            echo "::error::Failed to push badge update to main. Ensure GitHub Actions bypass is configured and REPO_ADMIN_TOKEN (if used) is valid."
             exit 1
           fi
