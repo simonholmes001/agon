@@ -17,12 +17,27 @@ if (!owner || !repo) {
 
 const githubApi = process.env.GITHUB_API_URL || 'https://api.github.com';
 const rulesetName = process.env.CODEX_RULESET_NAME || 'Require Codex Review';
-const requiredCheck = process.env.CODEX_REVIEW_CHECK || 'Codex Review';
+const defaultRequiredCheck = process.env.CODEX_REVIEW_CHECK || 'Codex Review';
 const targetBranch = process.env.CODEX_RULESET_BRANCH || 'refs/heads/main';
 const bypassRepositoryRoleId = Number.parseInt(
   process.env.CODEX_BYPASS_REPOSITORY_ROLE_ID || '2',
   10,
 );
+const requiredChecks = resolveRequiredChecks();
+
+function resolveRequiredChecks() {
+  const csv = process.env.CODEX_REQUIRED_CHECKS || '';
+  const checks = csv
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+
+  if (checks.length > 0) {
+    return Array.from(new Set(checks));
+  }
+
+  return [defaultRequiredCheck];
+}
 
 function ensureBypassActors(existingBypassActors = []) {
   const actors = Array.isArray(existingBypassActors) ? [...existingBypassActors] : [];
@@ -73,7 +88,7 @@ function ensureRequiredCheckRule(ruleset) {
       {
         type: 'required_status_checks',
         parameters: {
-          required_status_checks: [{ context: requiredCheck }],
+          required_status_checks: requiredChecks.map((context) => ({ context })),
           strict_required_status_checks_policy: false,
         },
       },
@@ -84,8 +99,10 @@ function ensureRequiredCheckRule(ruleset) {
     ? targetRule.parameters.required_status_checks
     : [];
 
-  const alreadyPresent = existingChecks.some((check) => check.context === requiredCheck);
-  if (alreadyPresent) {
+  const existingContexts = new Set(existingChecks.map((check) => check.context).filter(Boolean));
+  const missingChecks = requiredChecks.filter((context) => !existingContexts.has(context));
+
+  if (missingChecks.length === 0) {
     return existingRules;
   }
 
@@ -93,7 +110,10 @@ function ensureRequiredCheckRule(ruleset) {
     ...targetRule,
     parameters: {
       ...targetRule.parameters,
-      required_status_checks: [...existingChecks, { context: requiredCheck }],
+      required_status_checks: [
+        ...existingChecks,
+        ...missingChecks.map((context) => ({ context })),
+      ],
       strict_required_status_checks_policy: targetRule.parameters?.strict_required_status_checks_policy ?? false,
     },
   };
@@ -122,7 +142,7 @@ if (!existing) {
       {
         type: 'required_status_checks',
         parameters: {
-          required_status_checks: [{ context: requiredCheck }],
+          required_status_checks: requiredChecks.map((context) => ({ context })),
           strict_required_status_checks_policy: false,
         },
       },
@@ -138,7 +158,7 @@ if (!existing) {
     body: JSON.stringify(payload),
   });
 
-  console.log(`Created ruleset "${rulesetName}" with required check "${requiredCheck}".`);
+  console.log(`Created ruleset "${rulesetName}" with required checks: ${requiredChecks.join(', ')}.`);
   process.exit(0);
 }
 
@@ -163,4 +183,4 @@ await githubRequest(`/repos/${owner}/${repo}/rulesets/${existing.id}`, {
   body: JSON.stringify(updatePayload),
 });
 
-console.log(`Updated ruleset "${rulesetName}" to require check "${requiredCheck}".`);
+console.log(`Updated ruleset "${rulesetName}" to require checks: ${requiredChecks.join(', ')}.`);

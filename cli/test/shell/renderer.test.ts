@@ -7,6 +7,7 @@ import {
   buildPromptInputLineWithCursor,
   formatElapsedTimer,
   getPromptCursorPosition,
+  getWrappedLineCount,
   getVisiblePromptValue,
   highlightAttachmentRefs,
   renderMessagePanel,
@@ -17,6 +18,31 @@ import {
 } from '../../src/shell/renderer.js';
 
 const stripAnsi = (s: string): string => s.replace(/\u001b\[[0-9;]*m/g, '');
+
+function withTerminalColumns<T>(columns: number, run: () => T): T {
+  const descriptor = Object.getOwnPropertyDescriptor(process.stdout, 'columns');
+  Object.defineProperty(process.stdout, 'columns', {
+    configurable: true,
+    enumerable: true,
+    writable: true,
+    value: columns
+  });
+
+  try {
+    return run();
+  } finally {
+    if (descriptor) {
+      Object.defineProperty(process.stdout, 'columns', descriptor);
+    }
+  }
+}
+
+function normalizePromptSnapshot(text: string): string {
+  return stripAnsi(text)
+    .split('\n')
+    .map((line) => line.replace(/\s+$/g, ''))
+    .join('\n');
+}
 
 describe('shell renderer', () => {
   it('renders header with key context fields', () => {
@@ -141,6 +167,46 @@ describe('shell renderer', () => {
 
     expect(rows[1]).not.toContain('alph');
     expect(rows[2]).toContain('alpha beta');
+  });
+
+  it('preserves explicit newline boundaries in prompt rendering', () => {
+    const frame = renderPromptBanner(() => {});
+    const value = 'first line\nsecond line';
+    const rendered = buildPromptInputLine(frame, value);
+    const plain = rendered.replace(/\u001b\[[0-9;]*m/g, '');
+    const rows = plain.split('\n');
+
+    expect(rows[1]).toContain('  > first line');
+    expect(rows[2]).toContain('    second line');
+  });
+
+  it('counts explicit newlines for prompt-growth calculations', () => {
+    const frame = renderPromptBanner(() => {});
+    const value = 'line one\nline two\nline three';
+    expect(getWrappedLineCount(value, frame.maxInputCharsPerLine)).toBe(3);
+  });
+
+  it('matches prompt render snapshots across widths with multiline/newline input', () => {
+    const snapshots = withTerminalColumns(84, () => {
+      const frame = renderPromptBanner(() => {}, { inputLineCount: 6 });
+      return [
+        normalizePromptSnapshot(buildPromptInputLine(frame, 'short prompt')),
+        normalizePromptSnapshot(
+          buildPromptInputLine(
+            frame,
+            'first paragraph line one\nsecond paragraph line two with additional words'
+          )
+        ),
+        normalizePromptSnapshot(
+          buildPromptInputLine(
+            frame,
+            'This is a long prompt designed to wrap multiple times inside the frame and preserve stable formatting.'
+          )
+        )
+      ];
+    });
+
+    expect(snapshots).toMatchSnapshot();
   });
 
   it('keeps cursor visible at bottom of prompt viewport for very long input', () => {
