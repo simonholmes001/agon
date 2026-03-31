@@ -149,6 +149,10 @@ export function extractImplicitAttach(input: string): InlineAttachExtraction | n
       continue;
     }
 
+    if (isUrlLikeCandidate(parsedPath.path) || isSplitUrlContinuation(input, index, parsedPath.path)) {
+      continue;
+    }
+
     const combinedRemaining = normalizeInlineMessageText(
       `${input.slice(0, index)} ${input.slice(parsedPath.nextIndex)}`
     );
@@ -489,6 +493,31 @@ function isPathLikeCandidate(value: string): boolean {
     || value.startsWith('../')
     || value.startsWith('~/')
     || /^[A-Za-z]:[\\/]/.test(value);
+}
+
+function isUrlLikeCandidate(value: string): boolean {
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(value)) {
+    return true;
+  }
+
+  if (/^\/\/[^\s/?#]+\.[^\s/?#]+(?:[/?#]|$)/i.test(value)) {
+    return true;
+  }
+
+  if (/^www\.[^\s/?#]+\.[^\s/?#]+(?:[/?#]|$)/i.test(value)) {
+    return true;
+  }
+
+  return false;
+}
+
+function isSplitUrlContinuation(input: string, index: number, value: string): boolean {
+  if (!value.startsWith('//')) {
+    return false;
+  }
+
+  const prefix = input.slice(0, index).replace(/\s+$/g, '');
+  return /https?:$/i.test(prefix);
 }
 
 function isPotentialPathStart(input: string, index: number): boolean {
