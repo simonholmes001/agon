@@ -337,4 +337,20 @@ describe('shell parser', () => {
   it('does not treat slash endpoint tokens as implicit file attach', () => {
     expect(extractImplicitAttach('Check /health endpoint status')).toBeNull();
   });
+
+  it('does not treat inline https URLs as implicit file attach', () => {
+    expect(
+      extractImplicitAttach(
+        'How does my CV compare for this role -> https://www.linkedin.com/jobs/view/4383005905/'
+      )
+    ).toBeNull();
+  });
+
+  it('does not treat split https URL continuations as implicit file attach', () => {
+    expect(
+      extractImplicitAttach(
+        'How does my CV compare for this role -> https:\n//www.linkedin.com/jobs/view/4383005905/'
+      )
+    ).toBeNull();
+  });
 });

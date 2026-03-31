@@ -4,12 +4,27 @@ import {
   INTERRUPT_SENTINEL,
   isAbortError,
   isExitInput,
+  normalizePromptInsertText,
   raceAbort,
   selectCtrlCSentinel
 } from '../../src/commands/shell.js';
 import { buildInterruptHint } from '../../src/shell/renderer.js';
 
 describe('Ctrl+C interrupt handling', () => {
+  describe('normalizePromptInsertText', () => {
+    it('preserves plain single-line text', () => {
+      expect(normalizePromptInsertText('hello world')).toBe('hello world');
+    });
+
+    it('normalizes CRLF line breaks to LF for multiline paste', () => {
+      expect(normalizePromptInsertText('alpha\r\nbeta\r\ngamma')).toBe('alpha\nbeta\ngamma');
+    });
+
+    it('normalizes standalone CR line breaks to LF', () => {
+      expect(normalizePromptInsertText('alpha\rbeta\rgamma')).toBe('alpha\nbeta\ngamma');
+    });
+  });
+
   describe('INTERRUPT_SENTINEL', () => {
     it('is not treated as an exit command', () => {
       expect(isExitInput(INTERRUPT_SENTINEL)).toBe(false);

@@ -374,31 +374,17 @@ function wrapPromptValue(value: string, maxWidth: number): WrappedPromptLines {
   const lines: string[] = [];
   const lineStarts: number[] = [];
 
-  let start = 0;
-  while (start < value.length) {
-    const remaining = value.length - start;
-    if (remaining <= maxWidth) {
-      lines.push(value.slice(start));
-      lineStarts.push(start);
-      start = value.length;
-      break;
-    }
+  const normalized = value.replace(/\r\n?/g, '\n');
+  let segmentStart = 0;
 
-    const window = value.slice(start, start + maxWidth + 1);
-    const breakOffset = window.lastIndexOf(' ');
-    const shouldWrapOnWordBoundary = breakOffset > 0 && breakOffset < window.length - 1;
-
-    if (shouldWrapOnWordBoundary) {
-      const line = value.slice(start, start + breakOffset);
-      lines.push(line);
-      lineStarts.push(start);
-      start = start + breakOffset + 1;
+  for (let index = 0; index <= normalized.length; index += 1) {
+    if (index < normalized.length && normalized[index] !== '\n') {
       continue;
     }
 
-    lines.push(value.slice(start, start + maxWidth));
-    lineStarts.push(start);
-    start += maxWidth;
+    const segment = normalized.slice(segmentStart, index);
+    appendWrappedSegment(segment, segmentStart, maxWidth, lines, lineStarts);
+    segmentStart = index + 1;
   }
 
   if (lines.length === 0) {
@@ -407,6 +393,45 @@ function wrapPromptValue(value: string, maxWidth: number): WrappedPromptLines {
   }
 
   return { lines, lineStarts };
+}
+
+function appendWrappedSegment(
+  segment: string,
+  segmentOffset: number,
+  maxWidth: number,
+  lines: string[],
+  lineStarts: number[]
+): void {
+  if (segment.length === 0) {
+    lines.push('');
+    lineStarts.push(segmentOffset);
+    return;
+  }
+
+  let start = 0;
+  while (start < segment.length) {
+    const remaining = segment.length - start;
+    if (remaining <= maxWidth) {
+      lines.push(segment.slice(start));
+      lineStarts.push(segmentOffset + start);
+      break;
+    }
+
+    const window = segment.slice(start, start + maxWidth + 1);
+    const breakOffset = window.lastIndexOf(' ');
+    const shouldWrapOnWordBoundary = breakOffset > 0 && breakOffset < window.length - 1;
+
+    if (shouldWrapOnWordBoundary) {
+      lines.push(segment.slice(start, start + breakOffset));
+      lineStarts.push(segmentOffset + start);
+      start = start + breakOffset + 1;
+      continue;
+    }
+
+    lines.push(segment.slice(start, start + maxWidth));
+    lineStarts.push(segmentOffset + start);
+    start += maxWidth;
+  }
 }
 
 interface VisibleWrappedWindow {
