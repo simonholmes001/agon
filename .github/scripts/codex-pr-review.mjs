@@ -49,6 +49,7 @@ if (!openAiKey) {
 const githubApi = process.env.GITHUB_API_URL || 'https://api.github.com';
 const model = process.env.CODEX_REVIEW_MODEL || 'gpt-5.2';
 const maxDiffChars = Number.parseInt(process.env.CODEX_REVIEW_DIFF_MAX || '120000', 10);
+const codexReviewMarker = '<!-- codex-review -->';
 
 async function githubRequest(path, options = {}) {
   const response = await fetch(`${githubApi}${path}`, {
@@ -66,6 +67,23 @@ async function githubRequest(path, options = {}) {
   }
 
   return response;
+}
+
+const existingReviewsResponse = await githubRequest(
+  `/repos/${owner}/${repo}/pulls/${pr.number}/reviews?per_page=100`,
+  {
+    headers: {
+      Accept: 'application/vnd.github+json',
+    },
+  }
+);
+const existingReviews = await existingReviewsResponse.json();
+const alreadyReviewed = Array.isArray(existingReviews)
+  && existingReviews.some((review) => typeof review?.body === 'string' && review.body.includes(codexReviewMarker));
+
+if (alreadyReviewed) {
+  console.log('Existing Codex review found for this PR; skipping duplicate review comment.');
+  process.exit(0);
 }
 
 const diffResponse = await githubRequest(`/repos/${owner}/${repo}/pulls/${pr.number}`,
@@ -149,7 +167,7 @@ if (!reviewBody) {
   throw new Error('OpenAI response did not include a review body.');
 }
 
-const taggedBody = `<!-- codex-review -->\n${reviewBody}`;
+const taggedBody = `${codexReviewMarker}\n${reviewBody}`;
 
 await githubRequest(`/repos/${owner}/${repo}/pulls/${pr.number}/reviews`, {
   method: 'POST',
