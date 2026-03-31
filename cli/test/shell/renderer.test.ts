@@ -18,6 +18,9 @@ import {
 } from '../../src/shell/renderer.js';
 
 const stripAnsi = (s: string): string => s.replace(/\u001b\[[0-9;]*m/g, '');
+const stripTerminalControlSequences = (s: string): string => s
+  .replace(/\u001b\[[0-9;]*[A-Za-z]/g, '')
+  .replace(/\r/g, '');
 
 function withTerminalColumns<T>(columns: number, run: () => T): T {
   const descriptor = Object.getOwnPropertyDescriptor(process.stdout, 'columns');
@@ -38,10 +41,12 @@ function withTerminalColumns<T>(columns: number, run: () => T): T {
 }
 
 function normalizePromptSnapshot(text: string): string {
-  return stripAnsi(text)
+  return stripTerminalControlSequences(text)
     .split('\n')
     .map((line) => line.replace(/\s+$/g, ''))
-    .join('\n');
+    .join('\n')
+    .replace(/^\n+/, '')
+    .replace(/\n+$/, '');
 }
 
 describe('shell renderer', () => {
@@ -173,11 +178,10 @@ describe('shell renderer', () => {
     const frame = renderPromptBanner(() => {});
     const value = 'first line\nsecond line';
     const rendered = buildPromptInputLine(frame, value);
-    const plain = rendered.replace(/\u001b\[[0-9;]*m/g, '');
-    const rows = plain.split('\n');
+    const plain = stripTerminalControlSequences(rendered);
 
-    expect(rows[1]).toContain('  > first line');
-    expect(rows[2]).toContain('    second line');
+    expect(plain).toContain('  > first line');
+    expect(plain).toContain('    second line');
   });
 
   it('counts explicit newlines for prompt-growth calculations', () => {

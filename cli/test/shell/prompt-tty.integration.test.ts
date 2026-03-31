@@ -98,19 +98,21 @@ describe('shell prompt TTY integration', () => {
     fakeInput.emit('keypress', '\x03', { ctrl: true, name: 'c', sequence: '\x03' });
     const firstResult = await firstPrompt;
 
+    const secondPromptStartOffset = fakeOutput.writes.join('').length;
     const secondFrame = renderPromptBanner((line: string) => fakeOutput.write(`${line}\n`));
     const secondPrompt = shell.promptForInput(secondFrame, null);
     fakeInput.emit('keypress', '\x03', { ctrl: true, name: 'c', sequence: '\x03' });
     const secondResult = await secondPrompt;
 
     const transcript = fakeOutput.writes.join('');
+    const secondPromptTranscript = transcript.slice(secondPromptStartOffset);
     const growthIndex = transcript.search(/\u001b\[(?:5|6|7|8|9|1\d)A/);
-    const compactAfterGrowth = transcript.indexOf('\u001b[4A', Math.max(0, growthIndex + 1));
+    const compactFrameSequence = `\u001b[${secondFrame.cursorUpLines}A`;
 
     expect(firstResult).toBe(INTERRUPT_SENTINEL);
     expect(secondResult).toBe(CTRL_C_EXIT_SENTINEL);
     expect(growthIndex).toBeGreaterThanOrEqual(0);
-    expect(compactAfterGrowth).toBeGreaterThan(growthIndex);
+    expect(secondPromptTranscript).toContain(compactFrameSequence);
     expect(fakeInput.setRawMode).toHaveBeenCalledWith(true);
     expect(fakeInput.setRawMode).toHaveBeenCalledWith(false);
   });

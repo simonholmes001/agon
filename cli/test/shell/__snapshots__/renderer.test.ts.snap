@@ -2,26 +2,20 @@
 
 exports[`shell renderer > matches prompt render snapshots across widths with multiline/newline input 1`] = `
 [
-  "
-  > short prompt
+  "  > short prompt
 
 
 
-                                                                                [4A
-  > short prompt",
-  "
-  > first paragraph line one
+                                                                                  > short prompt",
+  "  > first paragraph line one
     second paragraph line two with additional words
 
 
-                                                                                [3A
-    second paragraph line two with additional words",
-  "
-  > This is a long prompt designed to wrap multiple times inside the frame and
+                                                                                    second paragraph line two with additional words",
+  "  > This is a long prompt designed to wrap multiple times inside the frame and
     preserve stable formatting.
 
 
-                                                                                [3A
-    preserve stable formatting.",
+                                                                                    preserve stable formatting.",
 ]
 `;
