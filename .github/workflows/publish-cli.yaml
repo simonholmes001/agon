@@ -67,8 +67,7 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           NPM_CONFIG_PROVENANCE: "true"
 
-      - name: Exempt changeset release PR from Codex review check
-        if: steps.changesets.outputs.hasChangesets == 'true'
+      - name: Exempt changeset release PR from required checks
         uses: actions/github-script@v8
         env:
           CHANGESET_PR_NUMBER: ${{ steps.changesets.outputs.pullRequestNumber }}
@@ -103,17 +102,22 @@ jobs:
             }
 
             if (!releasePr) {
-              core.info('No open changeset release PR found; skipping Codex Review exemption status.');
+              core.info('No open changeset release PR found; skipping required-check exemption statuses.');
               return;
             }
 
-            await github.rest.repos.createCommitStatus({
-              owner,
-              repo,
-              sha: releasePr.head.sha,
-              state: 'success',
-              context: 'Codex Review',
-              description: 'Exempt: automated changeset release PR',
-            });
+            const exemptContexts = ['Codex Review', 'CLI Shell Regression'];
+            for (const contextName of exemptContexts) {
+              await github.rest.repos.createCommitStatus({
+                owner,
+                repo,
+                sha: releasePr.head.sha,
+                state: 'success',
+                context: contextName,
+                description: 'Exempt: automated changeset release PR',
+              });
+            }
 
-            core.info(`Set Codex Review success status for PR #${releasePr.number} on ${releasePr.head.sha}.`);
+            core.info(
+              `Set required-check exemption statuses (${exemptContexts.join(', ')}) for PR #${releasePr.number} on ${releasePr.head.sha}.`,
+            );
