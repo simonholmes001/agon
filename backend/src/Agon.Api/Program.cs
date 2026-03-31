@@ -227,15 +227,23 @@ if (rateLimitingConfig.Enabled)
 {
     builder.Services.AddRateLimiter(options =>
     {
-        options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(context =>
+        // Controllers use [EnableRateLimiting("<policy-name>")] attributes.
+        // Register matching named policies to avoid runtime 409 errors when
+        // endpoint metadata references a policy that does not exist.
+        options.AddPolicy<string>("session-create", context =>
         {
-            if (!TryResolveEndpointRateLimit(context, rateLimitingConfig, out var endpointName, out var endpointConfig))
-            {
-                return RateLimitPartition.GetNoLimiter("unlimited");
-            }
-
-            var partitionKey = $"{endpointName}:{ResolveRateLimitPartitionKey(context)}";
-            return BuildFixedWindowRateLimiter(partitionKey, endpointConfig);
+            var partitionKey = $"session-create:{ResolveRateLimitPartitionKey(context)}";
+            return BuildFixedWindowRateLimiter(partitionKey, rateLimitingConfig.SessionCreate);
+        });
+        options.AddPolicy<string>("session-message", context =>
+        {
+            var partitionKey = $"session-message:{ResolveRateLimitPartitionKey(context)}";
+            return BuildFixedWindowRateLimiter(partitionKey, rateLimitingConfig.SessionMessage);
+        });
+        options.AddPolicy<string>("attachment-upload", context =>
+        {
+            var partitionKey = $"attachment-upload:{ResolveRateLimitPartitionKey(context)}";
+            return BuildFixedWindowRateLimiter(partitionKey, rateLimitingConfig.AttachmentUpload);
         });
 
         options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
@@ -763,46 +771,6 @@ static RateLimitPartition<string> BuildFixedWindowRateLimiter(
             QueueLimit = queueLimit,
             QueueProcessingOrder = QueueProcessingOrder.OldestFirst
         });
-}
-
-static bool TryResolveEndpointRateLimit(
-    HttpContext context,
-    ApiRateLimitingConfiguration config,
-    out string endpointName,
-    out EndpointRateLimitConfiguration endpointConfig)
-{
-    endpointName = string.Empty;
-    endpointConfig = default!;
-
-    var method = context.Request.Method;
-    var path = context.Request.Path.Value ?? string.Empty;
-    if (!HttpMethods.IsPost(method))
-    {
-        return false;
-    }
-
-    if (string.Equals(path, "/sessions", StringComparison.OrdinalIgnoreCase))
-    {
-        endpointName = "session-create";
-        endpointConfig = config.SessionCreate;
-        return true;
-    }
-
-    if (path.EndsWith("/messages", StringComparison.OrdinalIgnoreCase))
-    {
-        endpointName = "session-message";
-        endpointConfig = config.SessionMessage;
-        return true;
-    }
-
-    if (path.EndsWith("/attachments", StringComparison.OrdinalIgnoreCase))
-    {
-        endpointName = "attachment-upload";
-        endpointConfig = config.AttachmentUpload;
-        return true;
-    }
-
-    return false;
 }
 
 static string ResolveRateLimitPartitionKey(HttpContext context)
