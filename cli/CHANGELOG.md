@@ -1,5 +1,11 @@
 # @agon_agents/cli
 
+## 0.8.7
+
+### Patch Changes
+
+- Fix prompt input frame to resize dynamically in both directions, eliminating empty rows and preventing content above the frame from being overwritten when the frame grows. Add consistent blank-line spacing above each prompt frame for visual breathing room.
+
 ## 0.8.6
 
 ### Patch Changes
