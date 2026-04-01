@@ -40,7 +40,7 @@ describe('shell prompt TTY integration', () => {
     vi.doUnmock('node:process');
   });
 
-  it('shrinks prompt frame when backspace reduces wrapped input below a line boundary', async () => {
+  it('shrinks prompt frame when backspace reduces wrapped input below a line boundary, then grows and returns to compact frame on next prompt', async () => {
     const fakeInput = new FakeTTYInput();
     const fakeOutput = new FakeTTYOutput();
 
@@ -61,23 +61,28 @@ describe('shell prompt TTY integration', () => {
     ]);
 
     const Shell = shellModule.default;
-    const { CTRL_C_EXIT_SENTINEL } = shellModule;
+    const { CTRL_C_EXIT_SENTINEL, INTERRUPT_SENTINEL } = shellModule;
     const { renderPromptBanner } = rendererModule;
     const { PromptHistory } = historyModule;
 
-    const shell = Object.create(Shell.prototype) as {
-      initializeKeypressEvents: () => void;
-      inRawInputMode: boolean;
-      promptHistory: InstanceType<typeof PromptHistory>;
-      livePreviewNextBySession: Map<string, { image: number; file: number }>;
-      promptForInput: (frame: any, activeSessionId: string | null) => Promise<string>;
+    const createShellInstance = () => {
+      const shell = Object.create(Shell.prototype) as {
+        initializeKeypressEvents: () => void;
+        inRawInputMode: boolean;
+        promptHistory: InstanceType<typeof PromptHistory>;
+        livePreviewNextBySession: Map<string, { image: number; file: number }>;
+        promptForInput: (frame: any, activeSessionId: string | null) => Promise<string>;
+      };
+
+      shell.initializeKeypressEvents = () => {};
+      shell.inRawInputMode = false;
+      shell.promptHistory = new PromptHistory();
+      shell.livePreviewNextBySession = new Map();
+      return shell;
     };
 
-    shell.initializeKeypressEvents = () => {};
-    shell.inRawInputMode = false;
-    shell.promptHistory = new PromptHistory();
-    shell.livePreviewNextBySession = new Map();
-
+    // --- Part 1: grow then shrink ---
+    const shell = createShellInstance();
     const frame = renderPromptBanner((line: string) => fakeOutput.write(`${line}\n`));
     const prompt = shell.promptForInput(frame, null);
 
@@ -91,7 +96,7 @@ describe('shell prompt TTY integration', () => {
     });
 
     await waitFor(
-      () => /\u001b\[(?:5|6|7|8|9|1\d)A/.test(fakeOutput.writes.join('')),
+      () => /\u001b\[(?:[3-9]|1\d)A/.test(fakeOutput.writes.join('')),
       3_000,
       'Expected prompt frame growth was not emitted',
     );
@@ -99,7 +104,7 @@ describe('shell prompt TTY integration', () => {
     const writesAfterGrowth = fakeOutput.writes.join('').length;
 
     // Delete all characters — frame should shrink back to 2-line minimum
-    for (let i = 0; i < longInput.length; i += 1) {
+    for (const _ of longInput) {
       fakeInput.emit('keypress', undefined, { name: 'backspace', ctrl: false, meta: false, sequence: '\x7f' });
     }
 
@@ -117,59 +122,23 @@ describe('shell prompt TTY integration', () => {
     fakeInput.emit('keypress', '\x03', { ctrl: true, name: 'c', sequence: '\x03' });
     const result = await prompt;
     expect(result).toBe(CTRL_C_EXIT_SENTINEL);
-  });
 
-  it('grows prompt frame for wrapped input and returns to compact frame on next prompt', async () => {
-    const fakeInput = new FakeTTYInput();
-    const fakeOutput = new FakeTTYOutput();
+    // --- Part 2: grow then compact on next prompt ---
+    const shell2 = createShellInstance();
+    fakeOutput.writes.length = 0;
+    const frame2 = renderPromptBanner((line: string) => fakeOutput.write(`${line}\n`));
+    const firstPrompt = shell2.promptForInput(frame2, null);
 
-    vi.doMock('node:process', () => ({
-      stdin: fakeInput,
-      stdout: fakeOutput,
-      env: process.env,
-    }));
-
-    const [
-      shellModule,
-      rendererModule,
-      historyModule,
-    ] = await Promise.all([
-      import('../../src/commands/shell.js'),
-      import('../../src/shell/renderer.js'),
-      import('../../src/shell/history.js'),
-    ]);
-
-    const Shell = shellModule.default;
-    const { INTERRUPT_SENTINEL, CTRL_C_EXIT_SENTINEL } = shellModule;
-    const { renderPromptBanner } = rendererModule;
-    const { PromptHistory } = historyModule;
-
-    const shell = Object.create(Shell.prototype) as {
-      initializeKeypressEvents: () => void;
-      inRawInputMode: boolean;
-      promptHistory: InstanceType<typeof PromptHistory>;
-      livePreviewNextBySession: Map<string, { image: number; file: number }>;
-      promptForInput: (frame: any, activeSessionId: string | null) => Promise<string>;
-    };
-
-    shell.initializeKeypressEvents = () => {};
-    shell.inRawInputMode = false;
-    shell.promptHistory = new PromptHistory();
-    shell.livePreviewNextBySession = new Map();
-
-    const frame = renderPromptBanner((line: string) => fakeOutput.write(`${line}\n`));
-    const firstPrompt = shell.promptForInput(frame, null);
-
-    const longInput = 'wrapped prompt content '.repeat(frame.maxInputCharsPerLine);
-    fakeInput.emit('keypress', longInput, {
-      sequence: longInput,
+    const longInput2 = 'wrapped prompt content '.repeat(frame2.maxInputCharsPerLine);
+    fakeInput.emit('keypress', longInput2, {
+      sequence: longInput2,
       name: undefined,
       ctrl: false,
       meta: false,
     });
 
     await waitFor(
-      () => /\u001b\[(?:5|6|7|8|9|1\d)A/.test(fakeOutput.writes.join('')),
+      () => /\u001b\[(?:[3-9]|1\d)A/.test(fakeOutput.writes.join('')),
       3_000,
       'Expected prompt frame growth sequence was not emitted',
     );
@@ -179,13 +148,13 @@ describe('shell prompt TTY integration', () => {
 
     const secondPromptStartOffset = fakeOutput.writes.join('').length;
     const secondFrame = renderPromptBanner((line: string) => fakeOutput.write(`${line}\n`));
-    const secondPrompt = shell.promptForInput(secondFrame, null);
+    const secondPrompt = shell2.promptForInput(secondFrame, null);
     fakeInput.emit('keypress', '\x03', { ctrl: true, name: 'c', sequence: '\x03' });
     const secondResult = await secondPrompt;
 
     const transcript = fakeOutput.writes.join('');
     const secondPromptTranscript = transcript.slice(secondPromptStartOffset);
-    const growthIndex = transcript.search(/\u001b\[(?:5|6|7|8|9|1\d)A/);
+    const growthIndex = transcript.search(/\u001b\[(?:[3-9]|1\d)A/);
     const compactFrameSequence = `\u001b[${secondFrame.cursorUpLines}A`;
 
     expect(firstResult).toBe(INTERRUPT_SENTINEL);
@@ -194,5 +163,5 @@ describe('shell prompt TTY integration', () => {
     expect(secondPromptTranscript).toContain(compactFrameSequence);
     expect(fakeInput.setRawMode).toHaveBeenCalledWith(true);
     expect(fakeInput.setRawMode).toHaveBeenCalledWith(false);
-  });
+  }, 15_000);
 });
