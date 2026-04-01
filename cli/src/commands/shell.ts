@@ -268,6 +268,7 @@ export default class Shell extends Command {
 
     try {
       while (true) {
+        this.log('');
         const promptFrame = renderPromptBanner((line) => this.log(line));
         const activeSession = await controller.getActiveSession();
         const rawInput = await this.promptForInput(promptFrame, activeSession?.id ?? null);
@@ -557,7 +558,7 @@ export default class Shell extends Command {
       this.promptHistory.reset();
 
       const resizePromptFrame = (nextInputLineCount: number): void => {
-        if (nextInputLineCount <= currentFrame.inputLineCount) {
+        if (nextInputLineCount === currentFrame.inputLineCount) {
           return;
         }
         const moveUpLines = cursorLineIndex + 1;
@@ -571,8 +572,18 @@ export default class Shell extends Command {
           (line) => output.write(`${line}\n`),
           { inputLineCount: nextInputLineCount }
         );
-        output.write(`\u001b[${currentFrame.cursorUpLines}A\r`);
-        cursorLineIndex = getPromptCursorPosition(currentFrame, value, cursorIndex).lineIndex;
+        // Position cursor at the logical cursor row within the new frame, not at
+        // row 0. redraw() moves up cursorLineIndex lines to reach row 0 before
+        // writing content — if we land at row 0 here, that move goes above the
+        // frame and overwrites the output above it.
+        const newCursorLineIndex = getPromptCursorPosition(currentFrame, value, cursorIndex).lineIndex;
+        const upToNewCursorLine = currentFrame.cursorUpLines - newCursorLineIndex;
+        if (upToNewCursorLine > 0) {
+          output.write(`\u001b[${upToNewCursorLine}A\r`);
+        } else {
+          output.write('\r');
+        }
+        cursorLineIndex = newCursorLineIndex;
       };
 
       const redraw = (): void => {
@@ -582,7 +593,7 @@ export default class Shell extends Command {
           maxInputLineCount,
           Math.max(minInputLineCount, currentFrame.promptLineOffset + requiredLines)
         );
-        if (desiredInputLineCount > currentFrame.inputLineCount) {
+        if (desiredInputLineCount !== currentFrame.inputLineCount) {
           resizePromptFrame(desiredInputLineCount);
         }
         const rendered = buildPromptInputLineWithCursor(

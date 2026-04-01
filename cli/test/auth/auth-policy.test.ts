@@ -53,6 +53,7 @@ describe('allowsAnonymousBypass', () => {
   });
 
   it('returns false for unset or non-truthy values', () => {
+    delete process.env.AGON_ALLOW_ANONYMOUS;
     expect(allowsAnonymousBypass()).toBe(false);
     process.env.AGON_ALLOW_ANONYMOUS = '0';
     expect(allowsAnonymousBypass()).toBe(false);
