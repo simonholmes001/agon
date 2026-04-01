@@ -1,5 +1,11 @@
 # @agon_agents/cli
 
+## 0.8.8
+
+### Patch Changes
+
+- Upgrade `ink` from `^4.4.1` to `^5.1.0` to remediate a transitive lodash arbitrary code injection vulnerability (`SNYK-JS-LODASH-15869625`).
+
 ## 0.8.7
 
 ### Patch Changes
