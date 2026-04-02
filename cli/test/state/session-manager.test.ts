@@ -43,7 +43,7 @@ describe('SessionManager', () => {
       // Assert
       expect(fs.mkdir).toHaveBeenCalledWith(
         expect.stringContaining('.agon-test'),
-        { recursive: true }
+        { recursive: true, mode: 0o700 }
       );
     });
 
@@ -81,7 +81,7 @@ describe('SessionManager', () => {
       expect(fs.writeFile).toHaveBeenCalledWith(
         expect.stringContaining('test-123.json'),
         expect.stringContaining('"id": "test-123"'),
-        'utf-8'
+        { encoding: 'utf-8', mode: 0o600 }
       );
     });
   });
@@ -167,7 +167,7 @@ describe('SessionManager', () => {
       expect(fs.writeFile).toHaveBeenCalledWith(
         expect.stringContaining('current-session'),
         'test-123',
-        'utf-8'
+        { encoding: 'utf-8', mode: 0o600 }
       );
     });
   });
@@ -236,12 +236,12 @@ describe('SessionManager', () => {
       // Assert
       expect(fs.mkdir).toHaveBeenCalledWith(
         expect.stringContaining('test-123'),
-        { recursive: true }
+        { recursive: true, mode: 0o700 }
       );
       expect(fs.writeFile).toHaveBeenCalledWith(
         expect.stringContaining('verdict.md'),
         content,
-        'utf-8'
+        { encoding: 'utf-8', mode: 0o600 }
       );
     });
   });

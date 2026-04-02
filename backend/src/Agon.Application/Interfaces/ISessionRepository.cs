@@ -15,6 +15,14 @@ public interface ISessionRepository
     /// <summary>Returns the session state for the given ID, or null if not found.</summary>
     Task<SessionState?> GetAsync(Guid sessionId, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Returns the session state for the given ID only when it belongs to the specified user.
+    /// Returns null if the session does not exist <em>or</em> is not owned by <paramref name="userId"/>.
+    /// This is the preferred method for all user-facing reads because it provides defense-in-depth
+    /// isolation at the persistence layer — ownership is enforced even if controller logic changes.
+    /// </summary>
+    Task<SessionState?> GetByUserAsync(Guid sessionId, Guid userId, CancellationToken cancellationToken = default);
+
     /// <summary>Persists changes to an existing session (phase transitions, counters, status).</summary>
     Task UpdateAsync(SessionState sessionState, CancellationToken cancellationToken = default);
 

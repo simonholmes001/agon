@@ -22,6 +22,12 @@ import { join } from 'node:path';
 import { homedir } from 'node:os';
 import type { SessionResponse, ArtifactType } from '../api/types.js';
 
+// ── Secure file permission constants ──────────────────────────────────────────
+// 0o700 — owner read/write/execute (traverse) for directories
+// 0o600 — owner read/write only for data files
+const DIR_MODE = 0o700;
+const FILE_MODE = 0o600;
+
 export class SessionManager {
   private readonly configDir: string;
   private readonly sessionsDir: string;
@@ -36,15 +42,16 @@ export class SessionManager {
   }
 
   /**
-   * Ensure config directory structure exists
+   * Ensure config directory structure exists with secure permissions.
+   * Directories are created with mode 0o700 (owner read/write/traverse only).
    */
   async ensureConfigDirectory(): Promise<void> {
     try {
       await access(this.configDir);
     } catch {
-      await mkdir(this.configDir, { recursive: true });
-      await mkdir(this.sessionsDir, { recursive: true });
-      await mkdir(this.artifactsDir, { recursive: true });
+      await mkdir(this.configDir, { recursive: true, mode: DIR_MODE });
+      await mkdir(this.sessionsDir, { recursive: true, mode: DIR_MODE });
+      await mkdir(this.artifactsDir, { recursive: true, mode: DIR_MODE });
     }
   }
 
@@ -54,7 +61,7 @@ export class SessionManager {
   async saveSession(session: SessionResponse): Promise<void> {
     await this.ensureConfigDirectory();
     const filePath = join(this.sessionsDir, `${session.id}.json`);
-    await writeFile(filePath, JSON.stringify(session, null, 2), 'utf-8');
+    await writeFile(filePath, JSON.stringify(session, null, 2), { encoding: 'utf-8', mode: FILE_MODE });
   }
 
   /**
@@ -89,7 +96,7 @@ export class SessionManager {
    */
   async setCurrentSessionId(sessionId: string): Promise<void> {
     await this.ensureConfigDirectory();
-    await writeFile(this.currentSessionFile, sessionId, 'utf-8');
+    await writeFile(this.currentSessionFile, sessionId, { encoding: 'utf-8', mode: FILE_MODE });
   }
 
   /**
@@ -122,7 +129,8 @@ export class SessionManager {
   }
 
   /**
-   * Save artifact to cache
+   * Save artifact to cache with secure file permissions.
+   * Directories are created with mode 0o700 and files with mode 0o600.
    */
   async saveArtifact(
     sessionId: string, 
@@ -131,10 +139,10 @@ export class SessionManager {
   ): Promise<void> {
     await this.ensureConfigDirectory();
     const sessionArtifactsDir = join(this.artifactsDir, sessionId);
-    await mkdir(sessionArtifactsDir, { recursive: true });
+    await mkdir(sessionArtifactsDir, { recursive: true, mode: DIR_MODE });
     
     const filePath = join(sessionArtifactsDir, `${artifactType}.md`);
-    await writeFile(filePath, content, 'utf-8');
+    await writeFile(filePath, content, { encoding: 'utf-8', mode: FILE_MODE });
   }
 
   /**

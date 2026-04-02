@@ -552,12 +552,6 @@ export class AgonAPIClient {
   private clearRuntimeHeaders(headers: Record<string, string>): void {
     delete headers['X-Agon-User-Scope'];
     delete headers['X-Agon-Agent-Models'];
-
-    for (const key of Object.keys(headers)) {
-      if (key.toLowerCase().startsWith('x-agon-provider-key-')) {
-        delete headers[key];
-      }
-    }
   }
 
   private getExecutionRequestHeaders(): Record<string, string> {
@@ -566,10 +560,8 @@ export class AgonAPIClient {
       return headers;
     }
 
-    for (const [provider, key] of Object.entries(this.runtimeProfile.providerKeys)) {
-      if (!key) continue;
-      headers[`X-Agon-Provider-Key-${provider}`] = key;
-    }
+    // Provider keys are managed server-side. They are NOT sent over HTTP headers.
+    // See: backend SensitiveHeaderStrippingMiddleware and issue #381.
 
     return headers;
   }
