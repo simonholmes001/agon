@@ -17,7 +17,7 @@
  *           └── ...
  */
 
-import { access, chmod, mkdir, readFile, writeFile, readdir, unlink } from 'node:fs/promises';
+import { chmod, mkdir, readFile, writeFile, readdir, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import type { SessionResponse, ArtifactType } from '../api/types.js';
