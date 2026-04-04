@@ -626,7 +626,9 @@ describe('AgonAPIClient', () => {
       expect(callArgs.headers['X-Agon-Provider-Key-openai']).toBeUndefined();
     });
 
-    it('sends provider key headers only on execution requests', async () => {
+    it('never sends provider key headers on any requests (server-managed keys only)', async () => {
+      // Regression test for issue #381: provider keys are managed server-side.
+      // The CLI must not transport them via HTTP headers.
       const runtimeProfile = {
         userScope: 'auth_abc',
         agentModels: {
@@ -666,16 +668,13 @@ describe('AgonAPIClient', () => {
         researchEnabled: true,
       });
 
-      expect(mockAxios.post).toHaveBeenCalledWith(
-        '/sessions',
-        expect.any(Object),
-        expect.objectContaining({
-          headers: expect.objectContaining({
-            'X-Agon-Provider-Key-openai': 'sk-openai',
-            'X-Agon-Provider-Key-anthropic': 'sk-anth',
-          }),
-        })
-      );
+      const callArgs = (mockAxios.post as any).mock.calls[0];
+      const headers = callArgs[2]?.headers ?? {};
+
+      // Provider key headers must NEVER be sent
+      Object.keys(headers).forEach((key) => {
+        expect(key.toLowerCase()).not.toMatch(/^x-agon-provider-key-/);
+      });
     });
   });
 });

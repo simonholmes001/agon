@@ -28,6 +28,13 @@ public interface ISessionService
 
     Task<SessionState?> GetAsync(Guid sessionId, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Returns the session only if it belongs to the specified user.
+    /// Returns null when the session does not exist or is not owned by <paramref name="userId"/>.
+    /// Prefer this method for all user-facing reads as it enforces ownership at the service layer.
+    /// </summary>
+    Task<SessionState?> GetByUserAsync(Guid sessionId, Guid userId, CancellationToken cancellationToken = default);
+
     Task<IReadOnlyList<SessionState>> ListByUserAsync(
         Guid userId,
         CancellationToken cancellationToken = default);

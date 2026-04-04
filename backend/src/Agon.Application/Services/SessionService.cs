@@ -91,6 +91,21 @@ public sealed class SessionService : ISessionService
         return state;
     }
 
+    public async Task<SessionState?> GetByUserAsync(
+        Guid sessionId,
+        Guid userId,
+        CancellationToken cancellationToken = default)
+    {
+        var state = await _sessionRepo.GetByUserAsync(sessionId, userId, cancellationToken);
+        if (state is null)
+        {
+            return null;
+        }
+
+        await HydrateAttachmentsAsync(state, cancellationToken);
+        return state;
+    }
+
     public async Task<IReadOnlyList<SessionState>> ListByUserAsync(
         Guid userId,
         CancellationToken cancellationToken = default)

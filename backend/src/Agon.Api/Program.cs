@@ -110,6 +110,41 @@ if (string.IsNullOrWhiteSpace(authAudience))
     authAudience = authClientId;
 }
 
+// ── Non-development startup fail-fast guards ─────────────────────────────
+// These guards prevent accidental insecure deployments outside local dev/test.
+//
+// NOTE: The "Testing" environment is only treated as safe when
+// Security:AllowInsecureTestingMode=true is explicitly set in configuration.
+// This prevents a real deployment accidentally configured with
+// ASPNETCORE_ENVIRONMENT=Testing from bypassing authentication and CORS guards.
+var allowInsecureTestingMode = builder.Configuration.GetValue<bool>("Security:AllowInsecureTestingMode");
+var isNonProductionSafeEnvironment = builder.Environment.IsDevelopment()
+    || (builder.Environment.IsEnvironment("Testing") && allowInsecureTestingMode);
+
+if (!isNonProductionSafeEnvironment)
+{
+    if (!authEnabled)
+    {
+        throw new InvalidOperationException(
+            "SECURITY: Authentication:Enabled must be true in non-development environments. " +
+            "Set Authentication:Enabled=true and configure Authentication:AzureAd:Authority and Authentication:AzureAd:Audience.");
+    }
+
+    if (string.IsNullOrWhiteSpace(authAuthority) || string.IsNullOrWhiteSpace(authAudience))
+    {
+        throw new InvalidOperationException(
+            "SECURITY: Authentication:AzureAd:Authority and Authentication:AzureAd:Audience (or ClientId) " +
+            "must be configured in non-development environments.");
+    }
+
+    if (allowedCorsOrigins.Length == 0)
+    {
+        throw new InvalidOperationException(
+            "SECURITY: Cors:AllowedOrigins must not be empty in non-development environments. " +
+            "Configure at least one trusted origin to prevent cross-origin exposure.");
+    }
+}
+
 // Replace ${ENV_VAR} placeholders with actual environment variables
 llmConfig.OpenAI.ApiKey = ReplaceEnvVars(llmConfig.OpenAI.ApiKey);
 llmConfig.Anthropic.ApiKey = ReplaceEnvVars(llmConfig.Anthropic.ApiKey);
@@ -217,9 +252,14 @@ builder.Services.AddCors(options =>
             return;
         }
 
-        policy.AllowAnyHeader()
-            .AllowAnyMethod()
-            .AllowAnyOrigin();
+        // Only allow the permissive fallback in local development/testing.
+        // Non-dev environments are already blocked at startup (fail-fast guard above).
+        if (isNonProductionSafeEnvironment)
+        {
+            policy.AllowAnyHeader()
+                .AllowAnyMethod()
+                .AllowAnyOrigin();
+        }
     });
 });
 
@@ -539,6 +579,8 @@ var app = builder.Build();
 
 // Global exception handling (must be first in pipeline)
 app.UseMiddleware<GlobalExceptionMiddleware>();
+// Strip sensitive provider key headers early — before any logging, telemetry, or handlers.
+app.UseMiddleware<SensitiveHeaderStrippingMiddleware>();
 app.UseMiddleware<MinimumCliVersionMiddleware>();
 
 // Apply EF Core migrations at startup so fresh environments have required schema.
@@ -580,7 +622,9 @@ app.Logger.LogInformation(
 
 if (allowedCorsOrigins.Length == 0)
 {
-    app.Logger.LogWarning("No CORS origins configured. AllowAnyOrigin policy is active.");
+    app.Logger.LogWarning(
+        "No CORS origins configured. AllowAnyOrigin policy is active (development/testing only). " +
+        "Set Cors:AllowedOrigins in production.");
 }
 
 if (attachmentStorageMode == "disabled")

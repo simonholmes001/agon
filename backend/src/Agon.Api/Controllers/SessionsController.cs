@@ -112,14 +112,10 @@ public class SessionsController : ControllerBase
         [FromRoute] Guid id,
         CancellationToken cancellationToken)
     {
-        var sessionState = await _sessionService.GetAsync(id, cancellationToken);
+        var userId = ResolveCurrentUserId();
+        var sessionState = await _sessionService.GetByUserAsync(id, userId, cancellationToken);
 
         if (sessionState == null)
-        {
-            return NotFound(new { error = $"Session {id} not found" });
-        }
-
-        if (!IsOwnedByCurrentUser(sessionState))
         {
             return NotFound(new { error = $"Session {id} not found" });
         }
@@ -138,8 +134,9 @@ public class SessionsController : ControllerBase
         [FromRoute] Guid id,
         CancellationToken cancellationToken)
     {
-        var session = await _sessionService.GetAsync(id, cancellationToken);
-        if (session is null || !IsOwnedByCurrentUser(session))
+        var userId = ResolveCurrentUserId();
+        var session = await _sessionService.GetByUserAsync(id, userId, cancellationToken);
+        if (session is null)
         {
             return NotFound(new { error = $"Session {id} not found" });
         }
@@ -177,8 +174,9 @@ public class SessionsController : ControllerBase
             return BadRequest(new { error = "Message content is required" });
         }
 
-        var session = await _sessionService.GetAsync(id, cancellationToken);
-        if (session is null || !IsOwnedByCurrentUser(session))
+        var userId = ResolveCurrentUserId();
+        var session = await _sessionService.GetByUserAsync(id, userId, cancellationToken);
+        if (session is null)
         {
             return NotFound(new { error = $"Session {id} not found" });
         }
@@ -211,14 +209,10 @@ public class SessionsController : ControllerBase
         [FromRoute] Guid id,
         CancellationToken cancellationToken)
     {
-        var sessionState = await _sessionService.GetAsync(id, cancellationToken);
+        var userId = ResolveCurrentUserId();
+        var sessionState = await _sessionService.GetByUserAsync(id, userId, cancellationToken);
 
         if (sessionState is null)
-        {
-            return NotFound(new { error = $"Session {id} not found" });
-        }
-
-        if (!IsOwnedByCurrentUser(sessionState))
         {
             return NotFound(new { error = $"Session {id} not found" });
         }
@@ -237,8 +231,9 @@ public class SessionsController : ControllerBase
         [FromRoute] Guid id,
         CancellationToken cancellationToken)
     {
-        var sessionState = await _sessionService.GetAsync(id, cancellationToken);
-        if (sessionState is null || !IsOwnedByCurrentUser(sessionState))
+        var userId = ResolveCurrentUserId();
+        var sessionState = await _sessionService.GetByUserAsync(id, userId, cancellationToken);
+        if (sessionState is null)
         {
             return NotFound(new { error = $"Session {id} not found" });
         }
@@ -330,8 +325,9 @@ public class SessionsController : ControllerBase
         [FromRoute] Guid id,
         CancellationToken cancellationToken)
     {
-        var session = await _sessionService.GetAsync(id, cancellationToken);
-        if (session is null || !IsOwnedByCurrentUser(session))
+        var userId = ResolveCurrentUserId();
+        var session = await _sessionService.GetByUserAsync(id, userId, cancellationToken);
+        if (session is null)
         {
             return NotFound(new { error = $"Session {id} not found" });
         }
@@ -391,8 +387,8 @@ public class SessionsController : ControllerBase
             return BadRequest(new { error = $"Attachment exceeds max size of {MaxAttachmentSizeBytes / (1024 * 1024)} MB." });
         }
 
-        var session = await _sessionService.GetAsync(id, cancellationToken);
-        if (session is null || !IsOwnedByCurrentUser(session))
+        var session = await _sessionService.GetByUserAsync(id, ResolveCurrentUserId(), cancellationToken);
+        if (session is null)
         {
             return NotFound(new { error = $"Session {id} not found" });
         }
@@ -546,8 +542,8 @@ public class SessionsController : ControllerBase
         [FromRoute] Guid id,
         CancellationToken cancellationToken)
     {
-        var session = await _sessionService.GetAsync(id, cancellationToken);
-        if (session is null || !IsOwnedByCurrentUser(session))
+        var session = await _sessionService.GetByUserAsync(id, ResolveCurrentUserId(), cancellationToken);
+        if (session is null)
         {
             return NotFound(new { error = $"Session {id} not found" });
         }
@@ -569,8 +565,8 @@ public class SessionsController : ControllerBase
         [FromRoute] Guid attachmentId,
         CancellationToken cancellationToken)
     {
-        var session = await _sessionService.GetAsync(id, cancellationToken);
-        if (session is null || !IsOwnedByCurrentUser(session))
+        var session = await _sessionService.GetByUserAsync(id, ResolveCurrentUserId(), cancellationToken);
+        if (session is null)
         {
             return NotFound(new { error = $"Session {id} not found" });
         }
@@ -637,10 +633,8 @@ public class SessionsController : ControllerBase
         [FromRoute] string type,
         CancellationToken cancellationToken)
     {
-        var sessionState = await _sessionService.GetAsync(id, cancellationToken);
+        var sessionState = await _sessionService.GetByUserAsync(id, ResolveCurrentUserId(), cancellationToken);
         if (sessionState is null)
-            return NotFound(new { error = $"Session {id} not found" });
-        if (!IsOwnedByCurrentUser(sessionState))
             return NotFound(new { error = $"Session {id} not found" });
 
         var messages = await _conversationHistory.GetMessagesAsync(id, cancellationToken);
@@ -697,10 +691,8 @@ public class SessionsController : ControllerBase
         CancellationToken cancellationToken)
     {
         var messages = await _conversationHistory.GetMessagesAsync(id, cancellationToken);
-        var sessionState = await _sessionService.GetAsync(id, cancellationToken);
+        var sessionState = await _sessionService.GetByUserAsync(id, ResolveCurrentUserId(), cancellationToken);
         if (sessionState is null)
-            return NotFound(new { error = $"Session {id} not found" });
-        if (!IsOwnedByCurrentUser(sessionState))
             return NotFound(new { error = $"Session {id} not found" });
 
         var artifacts = new List<ArtifactResponse>();
