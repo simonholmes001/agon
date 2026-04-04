@@ -76,7 +76,8 @@ public sealed class DebateHubTests
 
         SetAuthenticatedUser(_userId);
         _mockContext.ConnectionId.Returns(connectionId);
-        _mockSessionRepo.GetAsync(sessionId).Returns(MakeSession(sessionId, _userId));
+        // Hub must use GetByUserAsync (repo-level isolation) rather than GetAsync + manual check.
+        _mockSessionRepo.GetByUserAsync(sessionId, _userId).Returns(MakeSession(sessionId, _userId));
 
         // Act
         await _hub.JoinSession(sessionId);
@@ -94,7 +95,7 @@ public sealed class DebateHubTests
 
         SetUnauthenticatedUser();
         _mockContext.ConnectionId.Returns(connectionId);
-        _mockSessionRepo.GetAsync(sessionId).Returns(MakeSession(sessionId, Guid.Empty));
+        _mockSessionRepo.GetByUserAsync(sessionId, Guid.Empty).Returns(MakeSession(sessionId, Guid.Empty));
 
         // Act
         await _hub.JoinSession(sessionId);
@@ -113,8 +114,8 @@ public sealed class DebateHubTests
 
         SetAuthenticatedUser(_userId);
         _mockContext.ConnectionId.Returns(connectionId);
-        _mockSessionRepo.GetAsync(sessionId1).Returns(MakeSession(sessionId1, _userId));
-        _mockSessionRepo.GetAsync(sessionId2).Returns(MakeSession(sessionId2, _userId));
+        _mockSessionRepo.GetByUserAsync(sessionId1, _userId).Returns(MakeSession(sessionId1, _userId));
+        _mockSessionRepo.GetByUserAsync(sessionId2, _userId).Returns(MakeSession(sessionId2, _userId));
 
         // Act
         await _hub.JoinSession(sessionId1);
@@ -134,7 +135,7 @@ public sealed class DebateHubTests
 
         SetAuthenticatedUser(_userId);
         _mockContext.ConnectionId.Returns(connectionId);
-        _mockSessionRepo.GetAsync(sessionId).Returns(MakeSession(sessionId, _userId));
+        _mockSessionRepo.GetByUserAsync(sessionId, _userId).Returns(MakeSession(sessionId, _userId));
 
         // Act
         await _hub.JoinSession(sessionId);
@@ -153,11 +154,12 @@ public sealed class DebateHubTests
     {
         // Arrange
         var sessionId = Guid.NewGuid();
-        var otherUserId = Guid.NewGuid();
 
         SetAuthenticatedUser(_userId);
         _mockContext.ConnectionId.Returns("test-connection-denied");
-        _mockSessionRepo.GetAsync(sessionId).Returns(MakeSession(sessionId, otherUserId));
+        // GetByUserAsync returns null when session exists but belongs to a different user.
+        // The hub must not call GetAsync; repository-level scoping enforces ownership.
+        _mockSessionRepo.GetByUserAsync(sessionId, _userId).Returns((SessionState?)null);
 
         // Act & Assert
         var act = async () => await _hub.JoinSession(sessionId);
@@ -166,6 +168,8 @@ public sealed class DebateHubTests
 
         // No group join should occur
         await _mockGroups.DidNotReceive().AddToGroupAsync(Arg.Any<string>(), Arg.Any<string>(), default);
+        // GetAsync must never be called — JoinSession must exclusively use GetByUserAsync
+        await _mockSessionRepo.DidNotReceive().GetAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -176,7 +180,9 @@ public sealed class DebateHubTests
 
         SetAuthenticatedUser(_userId);
         _mockContext.ConnectionId.Returns("test-connection-notsession");
-        _mockSessionRepo.GetAsync(sessionId).Returns((SessionState?)null);
+        // GetByUserAsync returns null both when the session is not found and when it doesn't belong
+        // to the calling user — same outcome, no information leak about session existence.
+        _mockSessionRepo.GetByUserAsync(sessionId, _userId).Returns((SessionState?)null);
 
         // Act & Assert
         var act = async () => await _hub.JoinSession(sessionId);
@@ -184,6 +190,8 @@ public sealed class DebateHubTests
             .WithMessage("*not found*");
 
         await _mockGroups.DidNotReceive().AddToGroupAsync(Arg.Any<string>(), Arg.Any<string>(), default);
+        // GetAsync must never be called — JoinSession must exclusively use GetByUserAsync
+        await _mockSessionRepo.DidNotReceive().GetAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>());
     }
 
     #endregion

@@ -6,6 +6,7 @@
  * - Test session caching and retrieval
  * - Test current session tracking
  * - Test artifact storage
+ * - Test secure file permissions (0o700 for dirs, 0o600 for files)
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -35,27 +36,34 @@ describe('SessionManager', () => {
     it('should create config directory on first use', async () => {
       // Arrange
       (fs.mkdir as any).mockResolvedValue(undefined);
-      (fs.access as any).mockRejectedValue(new Error('Directory does not exist'));
+      (fs.chmod as any).mockResolvedValue(undefined);
 
       // Act
       await sessionManager.ensureConfigDirectory();
 
-      // Assert
+      // Assert — mkdir called for configDir, sessionsDir, artifactsDir
       expect(fs.mkdir).toHaveBeenCalledWith(
         expect.stringContaining('.agon-test'),
         { recursive: true, mode: 0o700 }
       );
+      expect(fs.mkdir).toHaveBeenCalledTimes(3);
     });
 
-    it('should not recreate directory if it exists', async () => {
-      // Arrange
-      (fs.access as any).mockResolvedValue(undefined);
+    it('should apply chmod to directories even when they already exist', async () => {
+      // Arrange — mkdir is idempotent with recursive:true so no error on existing dirs
+      (fs.mkdir as any).mockResolvedValue(undefined);
+      (fs.chmod as any).mockResolvedValue(undefined);
 
       // Act
       await sessionManager.ensureConfigDirectory();
 
-      // Assert
-      expect(fs.mkdir).not.toHaveBeenCalled();
+      // Assert — chmod must be called for all three directories unconditionally,
+      // correcting permissions on pre-existing directories from older CLI versions.
+      expect(fs.chmod).toHaveBeenCalledWith(
+        expect.stringContaining('.agon-test'),
+        0o700
+      );
+      expect(fs.chmod).toHaveBeenCalledTimes(3);
     });
   });
 
@@ -70,8 +78,8 @@ describe('SessionManager', () => {
         updatedAt: '2026-03-07T10:00:00Z'
       };
 
-      (fs.access as any).mockResolvedValue(undefined);
       (fs.mkdir as any).mockResolvedValue(undefined);
+      (fs.chmod as any).mockResolvedValue(undefined);
       (fs.writeFile as any).mockResolvedValue(undefined);
 
       // Act
@@ -82,6 +90,11 @@ describe('SessionManager', () => {
         expect.stringContaining('test-123.json'),
         expect.stringContaining('"id": "test-123"'),
         { encoding: 'utf-8', mode: 0o600 }
+      );
+      // chmod must be called after writeFile to fix pre-existing file permissions
+      expect(fs.chmod).toHaveBeenCalledWith(
+        expect.stringContaining('test-123.json'),
+        0o600
       );
     });
   });
@@ -97,7 +110,8 @@ describe('SessionManager', () => {
         updatedAt: '2026-03-07T10:00:00Z'
       };
 
-      (fs.access as any).mockResolvedValue(undefined);
+      (fs.mkdir as any).mockResolvedValue(undefined);
+      (fs.chmod as any).mockResolvedValue(undefined);
       (fs.readFile as any).mockResolvedValue(JSON.stringify(session));
 
       // Act
@@ -113,7 +127,8 @@ describe('SessionManager', () => {
 
     it('should return null if session not found', async () => {
       // Arrange
-      (fs.access as any).mockResolvedValue(undefined);
+      (fs.mkdir as any).mockResolvedValue(undefined);
+      (fs.chmod as any).mockResolvedValue(undefined);
       (fs.readFile as any).mockRejectedValue(new Error('File not found'));
 
       // Act
@@ -127,7 +142,8 @@ describe('SessionManager', () => {
   describe('getCurrentSessionId', () => {
     it('should return current session ID from file', async () => {
       // Arrange
-      (fs.access as any).mockResolvedValue(undefined);
+      (fs.mkdir as any).mockResolvedValue(undefined);
+      (fs.chmod as any).mockResolvedValue(undefined);
       (fs.readFile as any).mockResolvedValue('test-123');
 
       // Act
@@ -143,7 +159,8 @@ describe('SessionManager', () => {
 
     it('should return null if no current session', async () => {
       // Arrange
-      (fs.access as any).mockResolvedValue(undefined);
+      (fs.mkdir as any).mockResolvedValue(undefined);
+      (fs.chmod as any).mockResolvedValue(undefined);
       (fs.readFile as any).mockRejectedValue(new Error('File not found'));
 
       // Act
@@ -157,7 +174,8 @@ describe('SessionManager', () => {
   describe('setCurrentSessionId', () => {
     it('should write session ID to current-session file', async () => {
       // Arrange
-      (fs.access as any).mockResolvedValue(undefined);
+      (fs.mkdir as any).mockResolvedValue(undefined);
+      (fs.chmod as any).mockResolvedValue(undefined);
       (fs.writeFile as any).mockResolvedValue(undefined);
 
       // Act
@@ -168,6 +186,11 @@ describe('SessionManager', () => {
         expect.stringContaining('current-session'),
         'test-123',
         { encoding: 'utf-8', mode: 0o600 }
+      );
+      // chmod must be called after writeFile to fix pre-existing file permissions
+      expect(fs.chmod).toHaveBeenCalledWith(
+        expect.stringContaining('current-session'),
+        0o600
       );
     });
   });
@@ -191,7 +214,8 @@ describe('SessionManager', () => {
         updatedAt: '2026-03-07T09:30:00Z'
       };
 
-      (fs.access as any).mockResolvedValue(undefined);
+      (fs.mkdir as any).mockResolvedValue(undefined);
+      (fs.chmod as any).mockResolvedValue(undefined);
       (fs.readdir as any).mockResolvedValue(['test-1.json', 'test-2.json']);
       (fs.readFile as any)
         .mockResolvedValueOnce(JSON.stringify(session1))
@@ -208,7 +232,8 @@ describe('SessionManager', () => {
 
     it('should return empty array if no sessions', async () => {
       // Arrange
-      (fs.access as any).mockResolvedValue(undefined);
+      (fs.mkdir as any).mockResolvedValue(undefined);
+      (fs.chmod as any).mockResolvedValue(undefined);
       (fs.readdir as any).mockResolvedValue([]);
 
       // Act
@@ -226,8 +251,8 @@ describe('SessionManager', () => {
       const artifactType = 'verdict';
       const content = '# Verdict\n\nThis is a test verdict.';
 
-      (fs.access as any).mockResolvedValue(undefined);
       (fs.mkdir as any).mockResolvedValue(undefined);
+      (fs.chmod as any).mockResolvedValue(undefined);
       (fs.writeFile as any).mockResolvedValue(undefined);
 
       // Act
@@ -243,6 +268,15 @@ describe('SessionManager', () => {
         content,
         { encoding: 'utf-8', mode: 0o600 }
       );
+      // chmod must be called for both the artifact dir and the artifact file
+      expect(fs.chmod).toHaveBeenCalledWith(
+        expect.stringContaining('test-123'),
+        0o700
+      );
+      expect(fs.chmod).toHaveBeenCalledWith(
+        expect.stringContaining('verdict.md'),
+        0o600
+      );
     });
   });
 
@@ -250,7 +284,8 @@ describe('SessionManager', () => {
     it('should retrieve cached artifact', async () => {
       // Arrange
       const content = '# Verdict\n\nThis is a test verdict.';
-      (fs.access as any).mockResolvedValue(undefined);
+      (fs.mkdir as any).mockResolvedValue(undefined);
+      (fs.chmod as any).mockResolvedValue(undefined);
       (fs.readFile as any).mockResolvedValue(content);
 
       // Act
@@ -266,7 +301,8 @@ describe('SessionManager', () => {
 
     it('should return null if artifact not found', async () => {
       // Arrange
-      (fs.access as any).mockResolvedValue(undefined);
+      (fs.mkdir as any).mockResolvedValue(undefined);
+      (fs.chmod as any).mockResolvedValue(undefined);
       (fs.readFile as any).mockRejectedValue(new Error('File not found'));
 
       // Act
@@ -280,7 +316,8 @@ describe('SessionManager', () => {
   describe('clearSession', () => {
     it('should remove session cache file', async () => {
       // Arrange
-      (fs.access as any).mockResolvedValue(undefined);
+      (fs.mkdir as any).mockResolvedValue(undefined);
+      (fs.chmod as any).mockResolvedValue(undefined);
       (fs.unlink as any).mockResolvedValue(undefined);
 
       // Act

@@ -112,7 +112,14 @@ if (string.IsNullOrWhiteSpace(authAudience))
 
 // ── Non-development startup fail-fast guards ─────────────────────────────
 // These guards prevent accidental insecure deployments outside local dev/test.
-var isNonProductionSafeEnvironment = builder.Environment.IsDevelopment() || builder.Environment.IsEnvironment("Testing");
+//
+// NOTE: The "Testing" environment is only treated as safe when
+// Security:AllowInsecureTestingMode=true is explicitly set in configuration.
+// This prevents a real deployment accidentally configured with
+// ASPNETCORE_ENVIRONMENT=Testing from bypassing authentication and CORS guards.
+var allowInsecureTestingMode = builder.Configuration.GetValue<bool>("Security:AllowInsecureTestingMode");
+var isNonProductionSafeEnvironment = builder.Environment.IsDevelopment()
+    || (builder.Environment.IsEnvironment("Testing") && allowInsecureTestingMode);
 
 if (!isNonProductionSafeEnvironment)
 {

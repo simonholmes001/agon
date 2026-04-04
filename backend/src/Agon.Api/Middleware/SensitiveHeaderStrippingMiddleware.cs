@@ -35,8 +35,9 @@ public sealed class SensitiveHeaderStrippingMiddleware
         if (stripped > 0)
         {
             // Log count only — never log header names that could reveal which provider is in use,
-            // and never log header values.
-            _logger.LogWarning(
+            // and never log header values. Information (not Warning) since this may fire frequently
+            // for old CLI versions or misconfigured clients and should not cause alert fatigue.
+            _logger.LogInformation(
                 "Stripped {Count} sensitive provider key header(s) from inbound request. " +
                 "Backend uses server-managed keys; client-supplied provider keys are not accepted.",
                 stripped);

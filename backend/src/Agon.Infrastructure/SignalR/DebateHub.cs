@@ -32,9 +32,12 @@ public sealed class DebateHub : Hub
     {
         var callerId = ResolveCallerId();
 
-        // Load the session to verify ownership
-        var session = await _sessionRepository.GetAsync(sessionId);
-        if (session == null || session.UserId != callerId)
+        // Load the session using user-scoped query — ownership is enforced at the repository level,
+        // consistent with the rest of the app's defense-in-depth isolation model (#384).
+        // GetByUserAsync returns null when the session does not exist OR does not belong to callerId,
+        // so there is no separate manual ownership check required here.
+        var session = await _sessionRepository.GetByUserAsync(sessionId, callerId);
+        if (session is null)
         {
             // Always respond with the same message to avoid leaking existence of sessions
             _logger.LogWarning(

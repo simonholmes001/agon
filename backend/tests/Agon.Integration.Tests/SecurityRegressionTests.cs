@@ -199,7 +199,9 @@ public class SecurityRegressionTests : IClassFixture<AgonWebApplicationFactory>
 
         // Act & Assert — creating the client triggers the host build which runs Program.cs
         Action act = () => factory.CreateClient();
-        act.Should().Throw<Exception>("startup must fail fast when auth is disabled in Production");
+        act.Should().Throw<InvalidOperationException>()
+           .WithMessage("*SECURITY: Authentication:Enabled must be true*",
+               "startup must fail fast when auth is disabled in non-development environments");
     }
 
     // ── Issue #378: CORS fail-fast guard ─────────────────────────────────────────
@@ -207,24 +209,23 @@ public class SecurityRegressionTests : IClassFixture<AgonWebApplicationFactory>
     [Fact]
     public void NonDevEnvironment_WithEmptyCors_ShouldThrowOnStartup()
     {
-        // Arrange — Production environment with auth enabled but no CORS origins
+        // Arrange — Production environment with auth enabled but no CORS origins.
+        // Use UseSetting rather than ConfigureAppConfiguration; UseSetting writes into the
+        // host key-value store which is available in builder.Configuration when Program.cs
+        // reads it (unlike ConfigureAppConfiguration which is applied later in the pipeline).
         var factory = _baseFactory.WithWebHostBuilder(builder =>
         {
             builder.UseEnvironment("Production");
-            builder.ConfigureAppConfiguration((_, config) =>
-            {
-                config.AddInMemoryCollection(new Dictionary<string, string?>
-                {
-                    ["Authentication:Enabled"] = "true",
-                    ["Authentication:AzureAd:Authority"] = "https://login.microsoftonline.com/tenant/v2.0",
-                    ["Authentication:AzureAd:Audience"] = "api://client-id",
-                    // No CORS origins — should trigger the CORS fail-fast guard
-                });
-            });
+            builder.UseSetting("Authentication:Enabled", "true");
+            builder.UseSetting("Authentication:AzureAd:Authority", "https://login.microsoftonline.com/tenant/v2.0");
+            builder.UseSetting("Authentication:AzureAd:Audience", "api://client-id");
+            // Deliberately omit Cors:AllowedOrigins — should trigger the CORS fail-fast guard
         });
 
         Action act = () => factory.CreateClient();
-        act.Should().Throw<Exception>("startup must fail fast when CORS is unconfigured in Production");
+        act.Should().Throw<InvalidOperationException>()
+           .WithMessage("*SECURITY: Cors:AllowedOrigins must not be empty*",
+               "startup must fail fast when CORS is unconfigured in non-development environments");
     }
 
     // ── Issue #381: Provider keys not sent in requests ───────────────────────────
