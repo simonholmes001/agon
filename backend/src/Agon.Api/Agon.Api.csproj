@@ -11,7 +11,7 @@
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="9.0.14" />
     <PackageReference Include="Microsoft.Agents.AI" Version="1.0.0-rc4" />
     <PackageReference Include="Microsoft.Agents.AI.OpenAI" Version="1.0.0-rc4" />
-    <PackageReference Include="Anthropic" Version="12.9.0" />
+    <PackageReference Include="Anthropic" Version="12.11.0" />
     <PackageReference Include="Anthropic.Foundry" Version="0.4.2" />
     <PackageReference Include="Google.GenAI" Version="1.0.0-beta02" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="9.0.0">
