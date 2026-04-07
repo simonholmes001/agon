@@ -65,14 +65,14 @@
     "zod": "^3.22.4"
   },
   "devDependencies": {
-    "@oclif/test": "^4.1.17",
+    "@oclif/test": "^4.1.18",
     "@types/eventsource": "^3.0.0",
     "@types/inquirer": "^9.0.7",
-    "@types/node": "^20.10.0",
+    "@types/node": "^25.5.2",
     "@types/react": "^19.2.14",
-    "@typescript-eslint/eslint-plugin": "^8.0.0",
+    "@typescript-eslint/eslint-plugin": "^8.58.0",
     "@typescript-eslint/parser": "^8.0.0",
-    "@vitest/coverage-v8": "^4.1.0",
+    "@vitest/coverage-v8": "^4.1.2",
     "eslint": "^10.1.0",
     "oclif": "^4.22.96",
     "prettier": "^3.1.0",
