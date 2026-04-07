@@ -35,7 +35,7 @@ jobs:
           node-version: 22.14.0
           registry-url: https://registry.npmjs.org
           cache: npm
-          cache-dependency-path: cli/package-lock.json
+          cache-dependency-path: cli/npm-shrinkwrap.json
 
       - name: Ensure npm CLI supports trusted publishing
         run: |

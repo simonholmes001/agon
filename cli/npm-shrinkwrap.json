@@ -1,12 +1,12 @@
 {
   "name": "@agon_agents/cli",
-  "version": "0.8.7",
+  "version": "0.8.8",
   "lockfileVersion": 3,
   "requires": true,
   "packages": {
     "": {
       "name": "@agon_agents/cli",
-      "version": "0.8.7",
+      "version": "0.8.8",
       "license": "MIT",
       "dependencies": {
         "@oclif/core": "^3.0.0",
