@@ -89,7 +89,7 @@ var authAuthority = builder.Configuration["Authentication:AzureAd:Authority"] ??
 var authAudience = builder.Configuration["Authentication:AzureAd:Audience"] ?? string.Empty;
 var authClientId = builder.Configuration["Authentication:AzureAd:ClientId"] ?? string.Empty;
 var authInteractiveClientId = builder.Configuration["Authentication:AzureAd:InteractiveClientId"] ?? string.Empty;
-var allowedCorsOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? [];
+var allowedCorsOrigins = ResolveAllowedCorsOrigins(builder.Configuration);
 var normalizedAuthAudience = NormalizeAudience(authAudience);
 var normalizedAuthClientId = NormalizeAudience(authClientId);
 var derivedClientId = ResolveClientIdFromAudience(normalizedAuthAudience);
@@ -624,7 +624,7 @@ if (allowedCorsOrigins.Length == 0)
 {
     app.Logger.LogWarning(
         "No CORS origins configured. AllowAnyOrigin policy is active (development/testing only). " +
-        "Set Cors:AllowedOrigins in production.");
+        "Set Cors:AllowedOrigins via array keys (Cors__AllowedOrigins__0) or comma-separated value (Cors__AllowedOrigins).");
 }
 
 if (attachmentStorageMode == "disabled")
@@ -953,6 +953,34 @@ static IConnectionMultiplexer CreateRedisManagedIdentityConnection(string host, 
 
     options.ConfigureForAzureWithTokenCredentialAsync(credential).GetAwaiter().GetResult();
     return ConnectionMultiplexer.Connect(options);
+}
+
+static string[] ResolveAllowedCorsOrigins(IConfiguration configuration)
+{
+    var origins = new List<string>();
+
+    var sectionOrigins = configuration.GetSection("Cors:AllowedOrigins").Get<string[]>();
+    if (sectionOrigins is not null)
+    {
+        foreach (var origin in sectionOrigins)
+        {
+            if (!string.IsNullOrWhiteSpace(origin))
+            {
+                origins.Add(origin.Trim());
+            }
+        }
+    }
+
+    var delimitedOrigins = configuration["Cors:AllowedOrigins"];
+    if (!string.IsNullOrWhiteSpace(delimitedOrigins))
+    {
+        var parsed = delimitedOrigins.Split([',', ';', '\n'], StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+        origins.AddRange(parsed);
+    }
+
+    return origins
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .ToArray();
 }
 
 // Make Program class accessible to integration tests
