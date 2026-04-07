@@ -281,7 +281,7 @@ export class AgonAPIClient {
     const fileName = path.basename(resolvedPath);
     const contentType = guessContentType(fileName);
     const form = new FormData();
-    form.append('file', new Blob([buffer], { type: contentType }), fileName);
+    form.append('file', new Blob([new Uint8Array(buffer)], { type: contentType }), fileName);
 
     this.logger.debug('Uploading attachment', {
       sessionId,
@@ -552,12 +552,6 @@ export class AgonAPIClient {
   private clearRuntimeHeaders(headers: Record<string, string>): void {
     delete headers['X-Agon-User-Scope'];
     delete headers['X-Agon-Agent-Models'];
-
-    for (const key of Object.keys(headers)) {
-      if (key.toLowerCase().startsWith('x-agon-provider-key-')) {
-        delete headers[key];
-      }
-    }
   }
 
   private getExecutionRequestHeaders(): Record<string, string> {
@@ -566,10 +560,8 @@ export class AgonAPIClient {
       return headers;
     }
 
-    for (const [provider, key] of Object.entries(this.runtimeProfile.providerKeys)) {
-      if (!key) continue;
-      headers[`X-Agon-Provider-Key-${provider}`] = key;
-    }
+    // Provider keys are managed server-side. They are NOT sent over HTTP headers.
+    // See: backend SensitiveHeaderStrippingMiddleware and issue #381.
 
     return headers;
   }
