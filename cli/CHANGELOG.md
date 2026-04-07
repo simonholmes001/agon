@@ -1,5 +1,16 @@
 # @agon_agents/cli
 
+## 0.8.10
+
+### Patch Changes
+
+- Bump `@oclif/test` from 4.1.17 to 4.1.18.
+- Bump vitest from 4.1.0 to 4.1.2 (dev dependency)
+- Bump @vitest/coverage-v8 from 4.1.0 to 4.1.2 (dev dependency)
+- Regenerate package-lock.json to sync @typescript-eslint devDependencies from 8.57.1 to 8.58.0.
+- Fix TypeScript compatibility issue with @types/node v25: convert Buffer to Uint8Array before passing to Blob constructor.
+- Regenerate package-lock.json to include missing @emnapi peer dependencies required by @napi-rs/wasm-runtime (pulled in by @vitest/coverage-v8 4.1.3)
+
 ## 0.8.9
 
 ### Patch Changes
