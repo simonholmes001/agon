@@ -133,7 +133,7 @@ jobs:
       - name: Create or update badges PR
         id: create_badges_pr
         continue-on-error: true
-        uses: peter-evans/create-pull-request@v7
+        uses: peter-evans/create-pull-request@v8
         with:
           token: ${{ github.token }}
           commit-message: "chore: update test & coverage badges"

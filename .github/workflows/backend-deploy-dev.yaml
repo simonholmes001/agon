@@ -262,20 +262,46 @@ jobs:
         env:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
           DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+          AGON_API_HOSTNAME: ${{ secrets.AGON_API_HOSTNAME }}
         with:
           inlineScript: |
+            set -euo pipefail
+            APP_RG="${{ steps.app.outputs.app_resource_group }}"
+            APP_NAME="${{ steps.app.outputs.app_name }}"
+
             az webapp config container set \
-              --resource-group "${{ steps.app.outputs.app_resource_group }}" \
-              --name "${{ steps.app.outputs.app_name }}" \
+              --resource-group "${APP_RG}" \
+              --name "${APP_NAME}" \
               --container-image-name "${{ steps.image.outputs.image_sha }}" \
               --container-registry-url "https://index.docker.io" \
               --container-registry-user "${DOCKERHUB_USERNAME}" \
               --container-registry-password "${DOCKERHUB_TOKEN}"
 
+            EXISTING_CORS_COUNT=$(az webapp config appsettings list \
+              --resource-group "${APP_RG}" \
+              --name "${APP_NAME}" \
+              --query "[?starts_with(name, 'Cors__AllowedOrigins__') || name=='Cors:AllowedOrigins'] | length(@)" \
+              --output tsv)
+
+            APP_SETTINGS_ARGS=("WEBSITES_PORT=8080")
+            if [ "${EXISTING_CORS_COUNT}" = "0" ]; then
+              if [ -n "${AGON_API_HOSTNAME:-}" ]; then
+                DEFAULT_CORS_ORIGIN="https://${AGON_API_HOSTNAME}"
+                echo "No existing CORS allowlist found. Seeding Cors__AllowedOrigins__0=${DEFAULT_CORS_ORIGIN}"
+                APP_SETTINGS_ARGS+=("Cors__AllowedOrigins__0=${DEFAULT_CORS_ORIGIN}")
+              else
+                echo "::error::No CORS allowlist is configured and AGON_API_HOSTNAME secret is missing."
+                echo "::error::Configure Cors__AllowedOrigins__0 (or Cors:AllowedOrigins) to satisfy non-development startup security checks."
+                exit 1
+              fi
+            else
+              echo "Existing CORS allowlist detected (${EXISTING_CORS_COUNT} entries). Leaving CORS settings unchanged."
+            fi
+
             az webapp config appsettings set \
-              --resource-group "${{ steps.app.outputs.app_resource_group }}" \
-              --name "${{ steps.app.outputs.app_name }}" \
-              --settings WEBSITES_PORT=8080
+              --resource-group "${APP_RG}" \
+              --name "${APP_NAME}" \
+              --settings "${APP_SETTINGS_ARGS[@]}"
 
       - name: Restart App Service
         if: steps.guard.outputs.deploy == 'true'

@@ -74,6 +74,25 @@ public sealed class SessionRepository : ISessionRepository
         return ToSessionState(entity, truthMap);
     }
 
+    public async Task<SessionState?> GetByUserAsync(
+        Guid sessionId,
+        Guid userId,
+        CancellationToken cancellationToken = default)
+    {
+        var entity = await _dbContext.Sessions
+            .FirstOrDefaultAsync(s => s.Id == sessionId && s.UserId == userId, cancellationToken);
+
+        if (entity == null)
+        {
+            return null;
+        }
+
+        var truthMap = await _truthMapRepo.GetAsync(sessionId, cancellationToken)
+            ?? TruthMapModel.Empty(sessionId);
+
+        return ToSessionState(entity, truthMap);
+    }
+
     public async Task UpdateAsync(
         SessionState sessionState,
         CancellationToken cancellationToken = default)
