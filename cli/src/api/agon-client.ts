@@ -281,7 +281,7 @@ export class AgonAPIClient {
     const fileName = path.basename(resolvedPath);
     const contentType = guessContentType(fileName);
     const form = new FormData();
-    form.append('file', new Blob([buffer], { type: contentType }), fileName);
+    form.append('file', new Blob([new Uint8Array(buffer)], { type: contentType }), fileName);
 
     this.logger.debug('Uploading attachment', {
       sessionId,
