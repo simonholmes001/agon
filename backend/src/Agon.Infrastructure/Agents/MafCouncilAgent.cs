@@ -2,6 +2,7 @@ using Agon.Application.Interfaces;
 using Agon.Application.Models;
 using Agon.Domain.Sessions;
 using Microsoft.Agents.AI;
+using Microsoft.Extensions.AI;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -51,7 +52,8 @@ public sealed class MafCouncilAgent : ICouncilAgent
             var result = await UnderlyingAgent.RunAsync(prompt, session: null, options: null, cancellationToken);
 
             var rawResponse = result.ToString() ?? string.Empty;
-            return _parser.Parse(rawResponse, AgentId);
+            var parsed = _parser.Parse(rawResponse, AgentId);
+            return MergeProviderUsage(parsed, result.Usage);
         }
         catch (OperationCanceledException)
         {
@@ -66,7 +68,10 @@ public sealed class MafCouncilAgent : ICouncilAgent
                 Patch: null,
                 TokensUsed: 0,
                 TimedOut: false,
-                RawOutput: null);
+                RawOutput: null,
+                PromptTokens: 0,
+                CompletionTokens: 0,
+                TokenUsageSource: "error");
         }
     }
 
@@ -86,6 +91,52 @@ public sealed class MafCouncilAgent : ICouncilAgent
                 yield return text;
             }
         }
+    }
+
+    internal static AgonAgentResponse MergeProviderUsage(AgonAgentResponse parsed, UsageDetails? usage)
+    {
+        if (usage is null)
+        {
+            return parsed;
+        }
+
+        var promptTokens = NormalizeTokenCount(usage.InputTokenCount);
+        var completionTokens = NormalizeTokenCount(usage.OutputTokenCount);
+        var totalTokens = NormalizeTokenCount(usage.TotalTokenCount);
+        if (totalTokens == 0)
+        {
+            totalTokens = promptTokens + completionTokens;
+        }
+
+        if (totalTokens <= 0)
+        {
+            return parsed;
+        }
+
+        if (completionTokens == 0)
+        {
+            completionTokens = Math.Max(0, totalTokens - promptTokens);
+        }
+
+        return parsed with
+        {
+            TokensUsed = totalTokens,
+            PromptTokens = promptTokens,
+            CompletionTokens = completionTokens,
+            TokenUsageSource = "provider"
+        };
+    }
+
+    private static int NormalizeTokenCount(long? value)
+    {
+        if (!value.HasValue || value.Value <= 0)
+        {
+            return 0;
+        }
+
+        return value.Value > int.MaxValue
+            ? int.MaxValue
+            : (int)value.Value;
     }
 
     private string BuildPrompt(AgonAgentContext context)

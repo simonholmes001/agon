@@ -21,7 +21,8 @@ import type {
   ArtifactType,
   Message,
   SubmitMessageRequest,
-  SessionAttachment
+  SessionAttachment,
+  TrialUsageResponse
 } from './types.js';
 
 export interface AuthStatusResponse {
@@ -161,6 +162,19 @@ export class AgonAPIClient {
    */
   async listSessions(): Promise<SessionResponse[]> {
     const response = await this.client.get<SessionResponse[]>('/sessions');
+    return response.data;
+  }
+
+  /**
+   * Retrieve trial quota and usage status for the current user.
+   */
+  async getUsage(from?: string, to?: string): Promise<TrialUsageResponse> {
+    const response = await this.client.get<TrialUsageResponse>('/usage', {
+      params: {
+        ...(from ? { from } : {}),
+        ...(to ? { to } : {})
+      }
+    });
     return response.data;
   }
 
@@ -418,10 +432,12 @@ export class AgonAPIClient {
             ['Check your input parameters']
           );
         case 429:
-          return new AgonError(
-            ErrorCode.RATE_LIMIT,
-            'Rate limit exceeded. Please try again later.',
-            ['Wait a few minutes before retrying']
+          return this.mapLimitExceededError(
+            message,
+            typeof data?.limitType === 'string' ? data.limitType : undefined,
+            typeof data?.windowResetAt === 'string' ? data.windowResetAt : undefined,
+            typeof data?.remainingTokens === 'number' ? data.remainingTokens : undefined,
+            this.parseRetryAfterSeconds(error.response.headers)
           );
         case 426:
           return new AgonError(
@@ -531,6 +547,83 @@ export class AgonAPIClient {
       default:
         return null;
     }
+  }
+
+  private mapLimitExceededError(
+    message: string,
+    limitType: string | undefined,
+    windowResetAt: string | undefined,
+    remainingTokens: number | undefined,
+    retryAfterSeconds: number | undefined
+  ): AgonError {
+    const normalizedLimitType = (limitType ?? '').trim().toLowerCase();
+
+    if (normalizedLimitType === 'quota') {
+      const suggestions = ['Run `agon usage` to inspect your remaining quota and reset window'];
+      if (typeof remainingTokens === 'number') {
+        suggestions.push(`Remaining tokens in current window: ${remainingTokens}`);
+      }
+      if (windowResetAt) {
+        suggestions.push(`Quota resets at: ${windowResetAt}`);
+      }
+
+      return new AgonError(
+        ErrorCode.RATE_LIMIT,
+        message || 'Token quota exceeded for the active trial window.',
+        suggestions
+      );
+    }
+
+    if (normalizedLimitType === 'rate') {
+      const suggestions = ['Reduce request frequency and retry shortly'];
+      if (typeof retryAfterSeconds === 'number' && retryAfterSeconds > 0) {
+        suggestions.push(`Retry after approximately ${retryAfterSeconds} second(s)`);
+      }
+
+      return new AgonError(
+        ErrorCode.RATE_LIMIT,
+        message || 'Too many requests. Please retry later.',
+        suggestions
+      );
+    }
+
+    return new AgonError(
+      ErrorCode.RATE_LIMIT,
+      message || 'Rate limit exceeded. Please try again later.',
+      ['Wait before retrying or run `agon usage` for quota context']
+    );
+  }
+
+  private parseRetryAfterSeconds(headers: unknown): number | undefined {
+    if (!headers || typeof headers !== 'object') {
+      return undefined;
+    }
+
+    const record = headers as Record<string, unknown>;
+    const value = record['retry-after'] ?? record['Retry-After'];
+
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return value > 0 ? Math.ceil(value) : undefined;
+    }
+
+    if (typeof value === 'string') {
+      const parsed = Number.parseFloat(value);
+      return Number.isFinite(parsed) && parsed > 0
+        ? Math.ceil(parsed)
+        : undefined;
+    }
+
+    if (Array.isArray(value) && value.length > 0) {
+      const first = value[0];
+      if (typeof first === 'string') {
+        const parsed = Number.parseFloat(first);
+        return Number.isFinite(parsed) && parsed > 0
+          ? Math.ceil(parsed)
+          : undefined;
+      }
+    }
+
+    return undefined;
   }
 
   private delay(ms: number): Promise<void> {

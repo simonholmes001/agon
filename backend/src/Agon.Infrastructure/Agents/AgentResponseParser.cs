@@ -48,7 +48,10 @@ public static class AgentResponseParser
             Patch: patch,
             TokensUsed: tokensUsed,
             TimedOut: false,
-            RawOutput: rawOutput);
+            RawOutput: rawOutput,
+            PromptTokens: 0,
+            CompletionTokens: tokensUsed,
+            TokenUsageSource: "estimated");
     }
 
     // ── MESSAGE extraction ────────────────────────────────────────────────────

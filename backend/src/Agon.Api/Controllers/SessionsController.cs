@@ -1,4 +1,5 @@
 using Agon.Api.Observability;
+using Agon.Api.Services;
 using Agon.Application.Interfaces;
 using Agon.Application.Models;
 using Agon.Application.Services;
@@ -32,12 +33,14 @@ public class SessionsController : ControllerBase
     private readonly IAttachmentTextExtractor _attachmentTextExtractor;
     private readonly ConversationHistoryService _conversationHistory;
     private readonly ILogger<SessionsController> _logger;
+    private readonly TrialAccessService _trialAccessService;
 
     public SessionsController(
         ISessionService sessionService,
         IAttachmentTextExtractor attachmentTextExtractor,
         ConversationHistoryService conversationHistory,
         ILogger<SessionsController> logger,
+        TrialAccessService trialAccessService,
         IAttachmentStorageService? attachmentStorage = null)
     {
         _sessionService = sessionService;
@@ -45,6 +48,7 @@ public class SessionsController : ControllerBase
         _attachmentTextExtractor = attachmentTextExtractor;
         _conversationHistory = conversationHistory;
         _logger = logger;
+        _trialAccessService = trialAccessService;
     }
 
     /// <summary>
@@ -69,6 +73,14 @@ public class SessionsController : ControllerBase
         }
 
         var userId = ResolveCurrentUserId();
+        var access = await EvaluateTrialAccessAsync(
+            userId,
+            TrialAccessOperation.SessionCreate,
+            cancellationToken);
+        if (!access.Allowed)
+        {
+            return BuildTrialDeniedResult(access);
+        }
 
         var sessionState = await _sessionService.CreateAsync(
             userId,
@@ -144,6 +156,15 @@ public class SessionsController : ControllerBase
             return NotFound(new { error = $"Session {id} not found" });
         }
 
+        var access = await EvaluateTrialAccessAsync(
+            session.UserId,
+            TrialAccessOperation.SessionMessage,
+            cancellationToken);
+        if (!access.Allowed)
+        {
+            return BuildTrialDeniedResult(access);
+        }
+
         try
         {
             await _sessionService.StartClarificationAsync(id, cancellationToken);
@@ -181,6 +202,15 @@ public class SessionsController : ControllerBase
         if (session is null || !IsOwnedByCurrentUser(session))
         {
             return NotFound(new { error = $"Session {id} not found" });
+        }
+
+        var access = await EvaluateTrialAccessAsync(
+            session.UserId,
+            TrialAccessOperation.SessionMessage,
+            cancellationToken);
+        if (!access.Allowed)
+        {
+            return BuildTrialDeniedResult(access);
         }
 
         try
@@ -800,6 +830,31 @@ public class SessionsController : ControllerBase
 
     private static string BuildAttachmentDownloadPath(Guid sessionId, Guid attachmentId) =>
         $"/sessions/{sessionId}/attachments/{attachmentId}/content";
+
+    private async Task<TrialAccessResult> EvaluateTrialAccessAsync(
+        Guid userId,
+        TrialAccessOperation operation,
+        CancellationToken cancellationToken)
+    {
+        return await _trialAccessService.EvaluateAsync(userId, operation, cancellationToken);
+    }
+
+    private ObjectResult BuildTrialDeniedResult(TrialAccessResult result)
+    {
+        if (result.RetryAfterSeconds is > 0)
+        {
+            Response.Headers.RetryAfter = result.RetryAfterSeconds.Value.ToString();
+        }
+
+        return StatusCode(result.StatusCode, new
+        {
+            errorCode = result.ErrorCode,
+            error = result.Error,
+            limitType = result.LimitType,
+            windowResetAt = result.WindowResetAt,
+            remainingTokens = result.RemainingTokens
+        });
+    }
 
     private static string SanitizeFileName(string fileName)
     {

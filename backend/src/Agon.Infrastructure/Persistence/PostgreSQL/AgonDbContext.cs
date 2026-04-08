@@ -30,6 +30,12 @@ public class AgonDbContext : DbContext
     // Session attachment metadata
     public DbSet<SessionAttachmentEntity> SessionAttachments => Set<SessionAttachmentEntity>();
 
+    // MVP trial access controls
+    public DbSet<TrialTesterGrantEntity> TrialTesterGrants => Set<TrialTesterGrantEntity>();
+    public DbSet<TokenUsageRecordEntity> TokenUsageRecords => Set<TokenUsageRecordEntity>();
+    public DbSet<TrialAuditEventEntity> TrialAuditEvents => Set<TrialAuditEventEntity>();
+    public DbSet<TrialControlEntity> TrialControls => Set<TrialControlEntity>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
@@ -116,6 +122,75 @@ public class AgonDbContext : DbContext
             entity.HasIndex(e => e.SessionId);
             entity.HasIndex(e => new { e.SessionId, e.UploadedAt });
             entity.HasIndex(e => e.UserId);
+        });
+
+        modelBuilder.Entity<TrialTesterGrantEntity>(entity =>
+        {
+            entity.ToTable("trial_tester_grants");
+            entity.HasKey(e => e.UserId);
+
+            entity.Property(e => e.UserId).HasColumnName("user_id");
+            entity.Property(e => e.GrantedAt).HasColumnName("granted_at");
+            entity.Property(e => e.GrantedBy).HasColumnName("granted_by");
+            entity.Property(e => e.ExpiresAt).HasColumnName("expires_at");
+            entity.Property(e => e.RevokedAt).HasColumnName("revoked_at");
+            entity.Property(e => e.RevokedBy).HasColumnName("revoked_by");
+            entity.Property(e => e.RevokeReason).HasColumnName("revoke_reason");
+            entity.Property(e => e.UpdatedAt).HasColumnName("updated_at");
+
+            entity.HasIndex(e => e.ExpiresAt);
+            entity.HasIndex(e => e.RevokedAt);
+        });
+
+        modelBuilder.Entity<TokenUsageRecordEntity>(entity =>
+        {
+            entity.ToTable("token_usage_records");
+            entity.HasKey(e => e.Id);
+
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.UserId).HasColumnName("user_id");
+            entity.Property(e => e.SessionId).HasColumnName("session_id");
+            entity.Property(e => e.AgentId).HasColumnName("agent_id");
+            entity.Property(e => e.Provider).HasColumnName("provider");
+            entity.Property(e => e.Model).HasColumnName("model");
+            entity.Property(e => e.PromptTokens).HasColumnName("prompt_tokens");
+            entity.Property(e => e.CompletionTokens).HasColumnName("completion_tokens");
+            entity.Property(e => e.TotalTokens).HasColumnName("total_tokens");
+            entity.Property(e => e.Source).HasColumnName("source");
+            entity.Property(e => e.OccurredAt).HasColumnName("occurred_at");
+
+            entity.HasIndex(e => new { e.UserId, e.OccurredAt });
+            entity.HasIndex(e => new { e.SessionId, e.OccurredAt });
+            entity.HasIndex(e => new { e.UserId, e.Provider, e.Model, e.OccurredAt });
+        });
+
+        modelBuilder.Entity<TrialAuditEventEntity>(entity =>
+        {
+            entity.ToTable("trial_audit_events");
+            entity.HasKey(e => e.Id);
+
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.Action).HasColumnName("action");
+            entity.Property(e => e.Outcome).HasColumnName("outcome");
+            entity.Property(e => e.UserId).HasColumnName("user_id");
+            entity.Property(e => e.Actor).HasColumnName("actor");
+            entity.Property(e => e.ReasonCode).HasColumnName("reason_code");
+            entity.Property(e => e.DetailsJson).HasColumnName("details_json");
+            entity.Property(e => e.OccurredAt).HasColumnName("occurred_at");
+
+            entity.HasIndex(e => e.OccurredAt);
+            entity.HasIndex(e => new { e.UserId, e.OccurredAt });
+            entity.HasIndex(e => new { e.Action, e.OccurredAt });
+        });
+
+        modelBuilder.Entity<TrialControlEntity>(entity =>
+        {
+            entity.ToTable("trial_controls");
+            entity.HasKey(e => e.Name);
+
+            entity.Property(e => e.Name).HasColumnName("name");
+            entity.Property(e => e.Value).HasColumnName("value");
+            entity.Property(e => e.UpdatedAt).HasColumnName("updated_at");
         });
     }
 }

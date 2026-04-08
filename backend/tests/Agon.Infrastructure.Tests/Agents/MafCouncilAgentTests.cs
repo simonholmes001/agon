@@ -5,6 +5,7 @@ using Agon.Domain.TruthMap;
 using Agon.Infrastructure.Agents;
 using FluentAssertions;
 using Microsoft.Agents.AI;
+using Microsoft.Extensions.AI;
 using NSubstitute;
 using AgonAgentResponse = Agon.Application.Models.AgentResponse;
 using MafAgentResponse = Microsoft.Agents.AI.AgentResponse;
@@ -166,5 +167,74 @@ public class MafCouncilAgentTests
         context.UserMessages.Should().HaveCount(2);
         context.UserMessages[0].Content.Should().Be("Target users are freelancers");
         context.UserMessages[1].Content.Should().Be("Budget is $50k");
+    }
+
+    [Fact]
+    public void MergeProviderUsage_WithUsageDetails_PrefersProviderCounts()
+    {
+        var parsed = new AgonAgentResponse(
+            AgentId: AgentId.GptAgent,
+            Message: "test",
+            Patch: null,
+            TokensUsed: 80,
+            TimedOut: false,
+            RawOutput: "raw");
+        var usage = new UsageDetails
+        {
+            InputTokenCount = 30,
+            OutputTokenCount = 70,
+            TotalTokenCount = 100
+        };
+
+        var merged = MafCouncilAgent.MergeProviderUsage(parsed, usage);
+
+        merged.TokensUsed.Should().Be(100);
+        merged.PromptTokens.Should().Be(30);
+        merged.CompletionTokens.Should().Be(70);
+        merged.TokenUsageSource.Should().Be("provider");
+    }
+
+    [Fact]
+    public void MergeProviderUsage_WithoutTotal_ComputesFromInputAndOutput()
+    {
+        var parsed = new AgonAgentResponse(
+            AgentId: AgentId.GptAgent,
+            Message: "test",
+            Patch: null,
+            TokensUsed: 42,
+            TimedOut: false,
+            RawOutput: "raw");
+        var usage = new UsageDetails
+        {
+            InputTokenCount = 15,
+            OutputTokenCount = 25,
+            TotalTokenCount = 0
+        };
+
+        var merged = MafCouncilAgent.MergeProviderUsage(parsed, usage);
+
+        merged.TokensUsed.Should().Be(40);
+        merged.PromptTokens.Should().Be(15);
+        merged.CompletionTokens.Should().Be(25);
+        merged.TokenUsageSource.Should().Be("provider");
+    }
+
+    [Fact]
+    public void MergeProviderUsage_WithoutUsage_KeepsEstimatedValues()
+    {
+        var parsed = new AgonAgentResponse(
+            AgentId: AgentId.GptAgent,
+            Message: "test",
+            Patch: null,
+            TokensUsed: 42,
+            TimedOut: false,
+            RawOutput: "raw",
+            PromptTokens: 0,
+            CompletionTokens: 42,
+            TokenUsageSource: "estimated");
+
+        var merged = MafCouncilAgent.MergeProviderUsage(parsed, usage: null);
+
+        merged.Should().BeEquivalentTo(parsed);
     }
 }

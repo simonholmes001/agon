@@ -178,5 +178,8 @@ public class AgentResponseParserTests
         // Plus JSON overhead for patch. Should be > 0 and reasonable.
         result.TokensUsed.Should().BeGreaterThan(20);
         result.TokensUsed.Should().BeLessThan(200); // sanity check
+        result.PromptTokens.Should().Be(0);
+        result.CompletionTokens.Should().Be(result.TokensUsed);
+        result.TokenUsageSource.Should().Be("estimated");
     }
 }

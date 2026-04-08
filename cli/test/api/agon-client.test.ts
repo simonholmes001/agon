@@ -173,6 +173,47 @@ describe('AgonAPIClient', () => {
     });
   });
 
+  describe('getUsage', () => {
+    it('should retrieve trial usage snapshot', async () => {
+      const mockUsage = {
+        trialEnabled: true,
+        windowStart: '2026-04-01T00:00:00Z',
+        windowEnd: '2026-04-08T00:00:00Z',
+        quota: {
+          tokenLimit: 50000,
+          usedTokens: 12000,
+          remainingTokens: 38000
+        },
+        trial: {
+          isActive: true,
+          expiresAt: '2026-04-15T00:00:00Z',
+          globalTrafficEnabled: true
+        },
+        usageByProviderModel: [
+          {
+            provider: 'OpenAI',
+            model: 'gpt-5',
+            totalTokens: 12000,
+            promptTokens: 5000,
+            completionTokens: 7000
+          }
+        ]
+      };
+
+      (mockAxios.get as any).mockResolvedValue({ data: mockUsage });
+
+      const result = await client.getUsage('2026-04-01T00:00:00Z', '2026-04-08T00:00:00Z');
+
+      expect(mockAxios.get).toHaveBeenCalledWith('/usage', {
+        params: {
+          from: '2026-04-01T00:00:00Z',
+          to: '2026-04-08T00:00:00Z'
+        }
+      });
+      expect(result).toEqual(mockUsage);
+    });
+  });
+
   describe('error handling', () => {
     it('should handle network errors gracefully', async () => {
       // Arrange
@@ -272,6 +313,49 @@ describe('AgonAPIClient', () => {
       expect(mapped).toBeInstanceOf(AgonError);
       const agonError = mapped as AgonError;
       expect(agonError.code).toBe(ErrorCode.UNAUTHENTICATED);
+    });
+
+    it('should map quota 429 errors to actionable quota guidance', () => {
+      const error: any = new Error('Too many requests');
+      error.response = {
+        status: 429,
+        data: {
+          error: 'Token quota exceeded for the active trial window.',
+          limitType: 'quota',
+          windowResetAt: '2026-04-08T00:00:00Z',
+          remainingTokens: 0
+        },
+        headers: {}
+      };
+
+      const mapped = (client as any).mapError(error);
+      expect(mapped).toBeInstanceOf(AgonError);
+      const agonError = mapped as AgonError;
+      expect(agonError.code).toBe(ErrorCode.RATE_LIMIT);
+      expect(agonError.message).toContain('Token quota exceeded');
+      expect(agonError.suggestions).toContain('Run `agon usage` to inspect your remaining quota and reset window');
+      expect(agonError.suggestions).toContain('Quota resets at: 2026-04-08T00:00:00Z');
+    });
+
+    it('should map rate 429 errors to actionable retry-after guidance', () => {
+      const error: any = new Error('Too many requests');
+      error.response = {
+        status: 429,
+        data: {
+          error: 'Too many requests for this user. Retry later.',
+          limitType: 'rate'
+        },
+        headers: {
+          'retry-after': '7'
+        }
+      };
+
+      const mapped = (client as any).mapError(error);
+      expect(mapped).toBeInstanceOf(AgonError);
+      const agonError = mapped as AgonError;
+      expect(agonError.code).toBe(ErrorCode.RATE_LIMIT);
+      expect(agonError.message).toContain('Too many requests');
+      expect(agonError.suggestions).toContain('Retry after approximately 7 second(s)');
     });
   });
 
