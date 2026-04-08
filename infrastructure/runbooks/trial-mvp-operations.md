@@ -31,6 +31,25 @@ All admin requests require header:
 
 ## Manage Tester Access (Entra Source of Truth)
 
+Recommended one-shot onboarding command (no provider key sharing):
+
+```bash
+./infrastructure/scripts/onboard-tester.sh \
+  --user-upn "user@domain.com" \
+  --group "$AGON_TESTER_GROUP_OBJECT_ID"
+```
+
+Dry-run validation before granting access:
+
+```bash
+./infrastructure/scripts/onboard-tester.sh \
+  --user-upn "user@domain.com" \
+  --group "$AGON_TESTER_GROUP_OBJECT_ID" \
+  --dry-run
+```
+
+The script validates that provider keys are server-managed via Key Vault references before onboarding the tester.
+
 Add user to tester group:
 
 ```bash
