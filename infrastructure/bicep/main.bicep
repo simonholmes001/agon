@@ -130,6 +130,37 @@ param jwtAudience string = ''
 @description('Optional public client ID used by CLI device-code login.')
 param jwtInteractiveClientId string = ''
 
+@description('Enable invite-only trial access controls in the backend.')
+param trialAccessEnabled bool = false
+
+@description('Require Entra group membership claim for trial access decisions.')
+param trialEnforceEntraGroupMembership bool = true
+
+@description('Comma-separated Entra group object IDs used as the trial tester allowlist source of truth.')
+param trialRequiredEntraGroupObjectIdsCsv string = ''
+
+@description('Enable token quota enforcement for trial users.')
+param trialQuotaEnabled bool = true
+
+@description('Per-user token limit for each trial quota window.')
+@minValue(1)
+param trialQuotaTokenLimit int = 40000
+
+@description('Quota window size in days.')
+@minValue(1)
+param trialQuotaWindowDays int = 7
+
+@description('Enable per-user request rate limiting for trial users.')
+param trialRequestRateLimitEnabled bool = true
+
+@description('Per-user allowed requests per minute for trial access checks.')
+@minValue(1)
+param trialRequestsPerMinute int = 20
+
+@description('Per-user burst capacity for request rate limiting.')
+@minValue(1)
+param trialBurstCapacity int = 10
+
 @description('PFX certificate for Application Gateway HTTPS listener (base64-encoded).')
 @secure()
 param appGatewaySslCertificatePfxBase64 string = ''
@@ -240,6 +271,15 @@ module appEdge './modules/app-edge-dev.bicep' = {
     jwtAuthority: jwtAuthority
     jwtAudience: jwtAudience
     jwtInteractiveClientId: jwtInteractiveClientId
+    trialAccessEnabled: trialAccessEnabled
+    trialEnforceEntraGroupMembership: trialEnforceEntraGroupMembership
+    trialRequiredEntraGroupObjectIdsCsv: trialRequiredEntraGroupObjectIdsCsv
+    trialQuotaEnabled: trialQuotaEnabled
+    trialQuotaTokenLimit: trialQuotaTokenLimit
+    trialQuotaWindowDays: trialQuotaWindowDays
+    trialRequestRateLimitEnabled: trialRequestRateLimitEnabled
+    trialRequestsPerMinute: trialRequestsPerMinute
+    trialBurstCapacity: trialBurstCapacity
     appGatewaySslCertificatePfxBase64: appGatewaySslCertificatePfxBase64
     appGatewaySslCertificatePassword: appGatewaySslCertificatePassword
     appGatewayPublicHostName: appGatewayPublicHostName

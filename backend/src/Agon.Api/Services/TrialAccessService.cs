@@ -54,6 +54,7 @@ public sealed class TrialAccessService
     private readonly AgonDbContext _dbContext;
     private readonly ITokenUsageRepository _tokenUsageRepository;
     private readonly TrialAccessConfiguration _config;
+    private readonly HashSet<string> _requiredTesterGroupIds;
     private readonly TrialRequestRateLimiter _rateLimiter;
     private readonly ILogger<TrialAccessService> _logger;
 
@@ -67,6 +68,7 @@ public sealed class TrialAccessService
         _dbContext = dbContext;
         _tokenUsageRepository = tokenUsageRepository;
         _config = config;
+        _requiredTesterGroupIds = ResolveRequiredTesterGroupIds(config);
         _rateLimiter = rateLimiter;
         _logger = logger;
     }
@@ -93,9 +95,25 @@ public sealed class TrialAccessService
 
     public async Task<TrialAccessResult> EvaluateAsync(
         Guid userId,
+        IReadOnlyCollection<string> userGroupIds,
         TrialAccessOperation operation,
         CancellationToken cancellationToken)
     {
+        var membershipAccess = EvaluateGroupMembershipAccess(userGroupIds);
+        if (!membershipAccess.Allowed)
+        {
+            await WriteAuditEventAsync(
+                action: "trial_access",
+                outcome: "denied",
+                userId: userId,
+                reasonCode: membershipAccess.ErrorCode,
+                actor: "system",
+                details: new { operation, requiredGroups = _requiredTesterGroupIds.Count },
+                cancellationToken);
+
+            return membershipAccess;
+        }
+
         if (!_config.Enabled)
         {
             return Allow();
@@ -119,56 +137,6 @@ public sealed class TrialAccessService
                 StatusCodes.Status503ServiceUnavailable,
                 "TRIAL_TRAFFIC_DISABLED",
                 "Trial traffic is temporarily disabled by operators.");
-        }
-
-        var grant = await _dbContext.TrialTesterGrants
-            .AsNoTracking()
-            .FirstOrDefaultAsync(entity => entity.UserId == userId, cancellationToken);
-
-        if (grant is null)
-        {
-            await WriteAuditEventAsync(
-                action: "trial_access",
-                outcome: "denied",
-                userId: userId,
-                reasonCode: "TRIAL_NOT_ALLOWLISTED",
-                actor: "system",
-                details: new { operation },
-                cancellationToken);
-
-            return Deny(StatusCodes.Status403Forbidden, "TRIAL_NOT_ALLOWLISTED", "User is not approved for MVP trial access.");
-        }
-
-        if (grant.RevokedAt.HasValue)
-        {
-            await WriteAuditEventAsync(
-                action: "trial_access",
-                outcome: "denied",
-                userId: userId,
-                reasonCode: "TRIAL_REVOKED",
-                actor: "system",
-                details: new { operation },
-                cancellationToken);
-
-            return Deny(StatusCodes.Status403Forbidden, "TRIAL_REVOKED", "Tester access has been revoked.");
-        }
-
-        if (grant.ExpiresAt <= now)
-        {
-            await WriteAuditEventAsync(
-                action: "trial_access",
-                outcome: "denied",
-                userId: userId,
-                reasonCode: "TRIAL_EXPIRED",
-                actor: "system",
-                details: new { operation, grant.ExpiresAt },
-                cancellationToken);
-
-            return Deny(
-                StatusCodes.Status403Forbidden,
-                "TRIAL_EXPIRED",
-                "Tester access has expired.",
-                windowResetAt: grant.ExpiresAt);
         }
 
         if (_config.Quota.Enabled)
@@ -240,6 +208,27 @@ public sealed class TrialAccessService
         return Allow();
     }
 
+    public async Task<TrialAccessResult> EvaluateUsageAccessAsync(
+        Guid userId,
+        IReadOnlyCollection<string> userGroupIds,
+        CancellationToken cancellationToken)
+    {
+        var access = EvaluateGroupMembershipAccess(userGroupIds);
+        if (!access.Allowed)
+        {
+            await WriteAuditEventAsync(
+                action: "trial_usage_access",
+                outcome: "denied",
+                userId: userId,
+                reasonCode: access.ErrorCode,
+                actor: "system",
+                details: new { requiredGroups = _requiredTesterGroupIds.Count },
+                cancellationToken);
+        }
+
+        return access;
+    }
+
     public async Task<TrialUsageSnapshot> GetUsageSnapshotAsync(
         Guid userId,
         DateTimeOffset? from,
@@ -261,12 +250,6 @@ public sealed class TrialAccessService
 
         var tokenLimit = Math.Max(1, _config.Quota.TokenLimit);
         var remaining = Math.Max(0, tokenLimit - summary.TotalTokens);
-
-        var grant = await _dbContext.TrialTesterGrants
-            .AsNoTracking()
-            .FirstOrDefaultAsync(entity => entity.UserId == userId, cancellationToken);
-
-        var active = grant is not null && !grant.RevokedAt.HasValue && grant.ExpiresAt > now;
         var trafficEnabled = await IsGlobalTrafficEnabledAsync(cancellationToken);
 
         return new TrialUsageSnapshot(
@@ -275,8 +258,8 @@ public sealed class TrialAccessService
             summary.TotalTokens,
             tokenLimit,
             remaining,
-            grant?.ExpiresAt,
-            active,
+            TrialExpiresAt: null,
+            TrialActive: _config.Enabled,
             trafficEnabled,
             records);
     }
@@ -452,6 +435,35 @@ public sealed class TrialAccessService
 
     private static TrialAccessResult Allow() => new(true);
 
+    private TrialAccessResult EvaluateGroupMembershipAccess(IReadOnlyCollection<string> userGroupIds)
+    {
+        if (!_config.Enabled || !_config.EnforceEntraGroupMembership)
+        {
+            return Allow();
+        }
+
+        if (_requiredTesterGroupIds.Count == 0)
+        {
+            _logger.LogError(
+                "TrialAccess is enabled with EnforceEntraGroupMembership=true but no required group IDs are configured.");
+            return Deny(
+                StatusCodes.Status503ServiceUnavailable,
+                "TRIAL_GROUP_CONFIG_INVALID",
+                "Trial access group configuration is invalid.");
+        }
+
+        var normalizedUserGroups = NormalizeGroupIds(userGroupIds);
+        if (normalizedUserGroups.Overlaps(_requiredTesterGroupIds))
+        {
+            return Allow();
+        }
+
+        return Deny(
+            StatusCodes.Status403Forbidden,
+            "TRIAL_NOT_ALLOWLISTED",
+            "User is not approved for MVP trial access.");
+    }
+
     private static TrialAccessResult Deny(
         int statusCode,
         string errorCode,
@@ -507,6 +519,27 @@ public sealed class TrialAccessService
 
         await _dbContext.TrialAuditEvents.AddAsync(entity, cancellationToken);
         await _dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    private static HashSet<string> ResolveRequiredTesterGroupIds(TrialAccessConfiguration config)
+    {
+        var configuredIds = new List<string>();
+        configuredIds.AddRange(config.RequiredEntraGroupObjectIds);
+
+        if (!string.IsNullOrWhiteSpace(config.RequiredEntraGroupObjectIdsCsv))
+        {
+            configuredIds.AddRange(config.RequiredEntraGroupObjectIdsCsv.Split(',', StringSplitOptions.TrimEntries));
+        }
+
+        return NormalizeGroupIds(configuredIds);
+    }
+
+    private static HashSet<string> NormalizeGroupIds(IEnumerable<string> groupIds)
+    {
+        return groupIds
+            .Where(groupId => !string.IsNullOrWhiteSpace(groupId))
+            .Select(groupId => groupId.Trim())
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
     }
 }
 

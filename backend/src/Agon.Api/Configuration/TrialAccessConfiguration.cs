@@ -23,6 +23,22 @@ public sealed class TrialAccessConfiguration
     /// </summary>
     public string AdminApiKey { get; set; } = string.Empty;
 
+    /// <summary>
+    /// When enabled, users must present at least one configured Entra group in their token claims.
+    /// </summary>
+    public bool EnforceEntraGroupMembership { get; set; } = true;
+
+    /// <summary>
+    /// Canonical Entra group object IDs that grant trial tester access.
+    /// </summary>
+    public List<string> RequiredEntraGroupObjectIds { get; set; } = [];
+
+    /// <summary>
+    /// Optional comma-separated Entra group object IDs for environments where array-style app settings
+    /// are harder to manage.
+    /// </summary>
+    public string RequiredEntraGroupObjectIdsCsv { get; set; } = string.Empty;
+
     public TrialQuotaConfiguration Quota { get; set; } = new();
 
     public TrialRequestRateLimitConfiguration RequestRateLimit { get; set; } = new();
@@ -35,7 +51,7 @@ public sealed class TrialQuotaConfiguration
     /// <summary>
     /// Hard per-user token budget for each quota window.
     /// </summary>
-    public int TokenLimit { get; set; } = 150_000;
+    public int TokenLimit { get; set; } = 40_000;
 
     /// <summary>
     /// Quota window size in days. MVP default is one week.

@@ -19,6 +19,8 @@ namespace Agon.Integration.Tests;
 
 public sealed class TrialAccessIntegrationTests : IClassFixture<AgonWebApplicationFactory>
 {
+    private const string RequiredTesterGroupId = "11111111-1111-1111-1111-111111111111";
+
     private readonly AgonWebApplicationFactory _baseFactory;
 
     public TrialAccessIntegrationTests(AgonWebApplicationFactory baseFactory)
@@ -56,8 +58,7 @@ public sealed class TrialAccessIntegrationTests : IClassFixture<AgonWebApplicati
     {
         using var factory = CreateTrialEnabledFactory();
         var userId = Guid.NewGuid();
-        await SeedGrantAsync(factory, userId, DateTimeOffset.UtcNow.AddDays(7));
-        var userClient = CreateUserClient(factory, userId);
+        var userClient = CreateUserClient(factory, userId, [RequiredTesterGroupId]);
 
         var response = await userClient.PostAsJsonAsync("/sessions", new
         {
@@ -77,12 +78,11 @@ public sealed class TrialAccessIntegrationTests : IClassFixture<AgonWebApplicati
     }
 
     [Fact]
-    public async Task CreateSession_Should_Deny_Expired_Tester()
+    public async Task CreateSession_Should_Deny_User_InWrongEntraGroup()
     {
         using var factory = CreateTrialEnabledFactory();
         var userId = Guid.NewGuid();
-        await SeedGrantAsync(factory, userId, DateTimeOffset.UtcNow.AddMinutes(-5));
-        var userClient = CreateUserClient(factory, userId);
+        var userClient = CreateUserClient(factory, userId, ["22222222-2222-2222-2222-222222222222"]);
 
         var response = await userClient.PostAsJsonAsync("/sessions", new
         {
@@ -92,7 +92,26 @@ public sealed class TrialAccessIntegrationTests : IClassFixture<AgonWebApplicati
 
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
         using var payload = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        payload.RootElement.GetProperty("errorCode").GetString().Should().Be("TRIAL_EXPIRED");
+        payload.RootElement.GetProperty("errorCode").GetString().Should().Be("TRIAL_NOT_ALLOWLISTED");
+    }
+
+    [Fact]
+    public async Task CreateSession_Should_Deny_User_WithLegacyTrialGrant_WhenGroupMissing()
+    {
+        using var factory = CreateTrialEnabledFactory();
+        var userId = Guid.NewGuid();
+        await SeedGrantAsync(factory, userId, DateTimeOffset.UtcNow.AddDays(7));
+        var userClient = CreateUserClient(factory, userId);
+
+        var response = await userClient.PostAsJsonAsync("/sessions", new
+        {
+            idea = "Legacy trial grant should not bypass Entra group access",
+            frictionLevel = 50
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        using var payload = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        payload.RootElement.GetProperty("errorCode").GetString().Should().Be("TRIAL_NOT_ALLOWLISTED");
     }
 
     [Fact]
@@ -100,8 +119,7 @@ public sealed class TrialAccessIntegrationTests : IClassFixture<AgonWebApplicati
     {
         using var factory = CreateTrialEnabledFactory(tokenLimit: 100, requestsPerMinute: 100, burstCapacity: 100);
         var userId = Guid.NewGuid();
-        await SeedGrantAsync(factory, userId, DateTimeOffset.UtcNow.AddDays(7));
-        var userClient = CreateUserClient(factory, userId);
+        var userClient = CreateUserClient(factory, userId, [RequiredTesterGroupId]);
 
         var createResponse = await userClient.PostAsJsonAsync("/sessions", new
         {
@@ -128,8 +146,7 @@ public sealed class TrialAccessIntegrationTests : IClassFixture<AgonWebApplicati
     {
         using var factory = CreateTrialEnabledFactory(tokenLimit: 10000, requestsPerMinute: 1, burstCapacity: 1);
         var userId = Guid.NewGuid();
-        await SeedGrantAsync(factory, userId, DateTimeOffset.UtcNow.AddDays(7));
-        var userClient = CreateUserClient(factory, userId);
+        var userClient = CreateUserClient(factory, userId, [RequiredTesterGroupId]);
 
         var first = await userClient.PostAsJsonAsync("/sessions", new
         {
@@ -160,10 +177,9 @@ public sealed class TrialAccessIntegrationTests : IClassFixture<AgonWebApplicati
     {
         using var factory = CreateTrialEnabledFactory(tokenLimit: 10000, requestsPerMinute: 1, burstCapacity: 1);
         var userId = Guid.NewGuid();
-        await SeedGrantAsync(factory, userId, DateTimeOffset.UtcNow.AddDays(7));
 
-        var clientA = CreateUserClient(factory, userId);
-        var clientB = CreateUserClient(factory, userId);
+        var clientA = CreateUserClient(factory, userId, [RequiredTesterGroupId]);
+        var clientB = CreateUserClient(factory, userId, [RequiredTesterGroupId]);
 
         var requestA = clientA.PostAsJsonAsync("/sessions", new { idea = "Concurrent request A", frictionLevel = 50 });
         var requestB = clientB.PostAsJsonAsync("/sessions", new { idea = "Concurrent request B", frictionLevel = 50 });
@@ -177,8 +193,7 @@ public sealed class TrialAccessIntegrationTests : IClassFixture<AgonWebApplicati
     {
         using var factory = CreateTrialEnabledFactory(tokenLimit: 120, requestsPerMinute: 100, burstCapacity: 100);
         var userId = Guid.NewGuid();
-        await SeedGrantAsync(factory, userId, DateTimeOffset.UtcNow.AddDays(7));
-        var userClient = CreateUserClient(factory, userId);
+        var userClient = CreateUserClient(factory, userId, [RequiredTesterGroupId]);
 
         var createResponse = await userClient.PostAsJsonAsync("/sessions", new
         {
@@ -210,9 +225,8 @@ public sealed class TrialAccessIntegrationTests : IClassFixture<AgonWebApplicati
         using var factory = CreateTrialEnabledFactory(tokenLimit: 500, requestsPerMinute: 100, burstCapacity: 100);
         var userId = Guid.NewGuid();
         var sessionId = Guid.NewGuid();
-        await SeedGrantAsync(factory, userId, DateTimeOffset.UtcNow.AddDays(7));
         await SeedTokenUsageAsync(factory, userId, sessionId, totalTokens: 180, promptTokens: 60, completionTokens: 120);
-        var userClient = CreateUserClient(factory, userId);
+        var userClient = CreateUserClient(factory, userId, [RequiredTesterGroupId]);
 
         var response = await userClient.GetAsync("/usage");
 
@@ -292,8 +306,7 @@ public sealed class TrialAccessIntegrationTests : IClassFixture<AgonWebApplicati
         using var factory = CreateTrialEnabledFactory();
         var adminClient = CreateAdminClient(factory);
         var userId = Guid.NewGuid();
-        await SeedGrantAsync(factory, userId, DateTimeOffset.UtcNow.AddDays(7));
-        var userClient = CreateUserClient(factory, userId);
+        var userClient = CreateUserClient(factory, userId, [RequiredTesterGroupId]);
 
         var disableResponse = await adminClient.PostAsJsonAsync("/admin/trial/kill-switch", new { enabled = true });
         disableResponse.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -337,6 +350,8 @@ public sealed class TrialAccessIntegrationTests : IClassFixture<AgonWebApplicati
                     ["TrialAccess:Enabled"] = "true",
                     ["TrialAccess:DefaultTrialDays"] = "7",
                     ["TrialAccess:AdminApiKey"] = "trial-admin-secret",
+                    ["TrialAccess:EnforceEntraGroupMembership"] = "true",
+                    ["TrialAccess:RequiredEntraGroupObjectIds:0"] = RequiredTesterGroupId,
                     ["TrialAccess:Quota:Enabled"] = "true",
                     ["TrialAccess:Quota:TokenLimit"] = tokenLimit.ToString(),
                     ["TrialAccess:Quota:WindowDays"] = "7",
@@ -356,6 +371,8 @@ public sealed class TrialAccessIntegrationTests : IClassFixture<AgonWebApplicati
                     Enabled = true,
                     DefaultTrialDays = 7,
                     AdminApiKey = "trial-admin-secret",
+                    EnforceEntraGroupMembership = true,
+                    RequiredEntraGroupObjectIds = [RequiredTesterGroupId],
                     Quota = new TrialQuotaConfiguration
                     {
                         Enabled = true,
@@ -390,10 +407,18 @@ public sealed class TrialAccessIntegrationTests : IClassFixture<AgonWebApplicati
         });
     }
 
-    private static HttpClient CreateUserClient(WebApplicationFactory<Program> factory, Guid userId)
+    private static HttpClient CreateUserClient(
+        WebApplicationFactory<Program> factory,
+        Guid userId,
+        IReadOnlyList<string>? groups = null)
     {
         var client = factory.CreateClient();
         client.DefaultRequestHeaders.Add(TestAuthHandler.UserIdHeader, userId.ToString());
+        if (groups is { Count: > 0 })
+        {
+            client.DefaultRequestHeaders.Add(TestAuthHandler.UserGroupsHeader, string.Join(',', groups));
+        }
+
         return client;
     }
 

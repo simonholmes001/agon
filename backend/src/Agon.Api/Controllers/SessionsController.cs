@@ -27,6 +27,8 @@ public class SessionsController : ControllerBase
     private const string AttachmentStorageUnavailableCode = "ATTACHMENT_STORAGE_UNAVAILABLE";
     private const string AttachmentMetadataNotConfiguredCode = "ATTACHMENT_METADATA_NOT_CONFIGURED";
     private const string AttachmentMetadataUnavailableCode = "ATTACHMENT_METADATA_UNAVAILABLE";
+    private const string EntraGroupsClaimType = "groups";
+    private const string LegacyGroupsClaimType = "http://schemas.microsoft.com/ws/2008/06/identity/claims/groups";
 
     private readonly ISessionService _sessionService;
     private readonly IAttachmentStorageService? _attachmentStorage;
@@ -836,7 +838,11 @@ public class SessionsController : ControllerBase
         TrialAccessOperation operation,
         CancellationToken cancellationToken)
     {
-        return await _trialAccessService.EvaluateAsync(userId, operation, cancellationToken);
+        return await _trialAccessService.EvaluateAsync(
+            userId,
+            ResolveCurrentUserGroupIds(),
+            operation,
+            cancellationToken);
     }
 
     private ObjectResult BuildTrialDeniedResult(TrialAccessResult result)
@@ -942,6 +948,20 @@ public class SessionsController : ControllerBase
         }
 
         return Guid.Empty;
+    }
+
+    private IReadOnlyCollection<string> ResolveCurrentUserGroupIds()
+    {
+        var groups = User.Claims
+            .Where(claim =>
+                string.Equals(claim.Type, EntraGroupsClaimType, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(claim.Type, LegacyGroupsClaimType, StringComparison.OrdinalIgnoreCase))
+            .Select(claim => claim.Value)
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => value.Trim())
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        return groups;
     }
 
     private static Guid DeterministicGuidFromString(string input)

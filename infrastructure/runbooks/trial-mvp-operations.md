@@ -6,7 +6,7 @@ Use this runbook to operate the invite-only tester cohort during MVP trial week.
 
 - Environment: API deployment where `TrialAccess:Enabled=true`
 - Audience: on-call operator with admin API key
-- Objective: grant/revoke testers, reset quota, and use kill-switch safely
+- Objective: use Entra group membership as tester source-of-truth, plus quota reset and kill-switch controls
 
 ## Prerequisites
 
@@ -18,6 +18,10 @@ export AGON_API_BASE="https://<api-host>"
 ```bash
 export AGON_ADMIN_KEY="<trial-admin-key>"
 ```
+3. Set tester Entra group object ID:
+```bash
+export AGON_TESTER_GROUP_OBJECT_ID="<entra-group-object-id>"
+```
 
 All admin requests require header:
 
@@ -25,34 +29,33 @@ All admin requests require header:
 -H "X-Agon-Admin-Key: $AGON_ADMIN_KEY"
 ```
 
-## Grant Tester Access
+## Manage Tester Access (Entra Source of Truth)
 
-Grant for default trial duration:
-
-```bash
-curl -sS -X PUT "$AGON_API_BASE/admin/trial/testers/<user-guid>" \
-  -H "Content-Type: application/json" \
-  -H "X-Agon-Admin-Key: $AGON_ADMIN_KEY" \
-  -d '{}'
-```
-
-Grant with explicit expiry:
+Add user to tester group:
 
 ```bash
-curl -sS -X PUT "$AGON_API_BASE/admin/trial/testers/<user-guid>" \
-  -H "Content-Type: application/json" \
-  -H "X-Agon-Admin-Key: $AGON_ADMIN_KEY" \
-  -d '{"expiresAtUtc":"2026-04-30T23:59:59Z"}'
+az ad group member add \
+  --group "$AGON_TESTER_GROUP_OBJECT_ID" \
+  --member-id "<user-object-id-guid>"
 ```
 
-## Revoke Tester Access
+Remove user from tester group:
 
 ```bash
-curl -sS -X DELETE "$AGON_API_BASE/admin/trial/testers/<user-guid>" \
-  -H "Content-Type: application/json" \
-  -H "X-Agon-Admin-Key: $AGON_ADMIN_KEY" \
-  -d '{"reason":"abuse or offboarding"}'
+az ad group member remove \
+  --group "$AGON_TESTER_GROUP_OBJECT_ID" \
+  --member-id "<user-object-id-guid>"
 ```
+
+List current tester members:
+
+```bash
+az ad group member list \
+  --group "$AGON_TESTER_GROUP_OBJECT_ID" \
+  --query "[].{displayName:displayName,id:id,userPrincipalName:userPrincipalName}" -o table
+```
+
+Legacy note: `/admin/trial/testers/*` endpoints are no longer authoritative for access gating.
 
 ## Reset Tester Quota
 
@@ -91,13 +94,12 @@ curl -sS "$AGON_API_BASE/usage" -H "Authorization: Bearer <tester-token>"
 ```
 2. Confirm kill-switch effect (expect `503` + `TRIAL_TRAFFIC_DISABLED` when enabled).
 3. Confirm audit trail in DB table `trial_audit_events` for:
-   - `TRIAL_TESTER_GRANTED`
-   - `TRIAL_TESTER_REVOKED`
+   - `TRIAL_NOT_ALLOWLISTED` (user not in required Entra group)
    - `TRIAL_QUOTA_RESET`
    - `TRIAL_TRAFFIC_DISABLED` / `TRIAL_TRAFFIC_ENABLED`
 
 ## Incident Guidance
 
 1. Cost spike: enable kill-switch first, then investigate usage records by user.
-2. Single user abuse: revoke user and reset quota only if reinstating.
+2. Single user abuse: remove user from Entra tester group and reset quota only if reinstating.
 3. Recovery: re-enable kill-switch only after confirming normal request and token rates.

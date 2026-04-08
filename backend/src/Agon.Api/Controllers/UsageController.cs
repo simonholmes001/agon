@@ -9,6 +9,9 @@ namespace Agon.Api.Controllers;
 [Route("usage")]
 public sealed class UsageController : ControllerBase
 {
+    private const string EntraGroupsClaimType = "groups";
+    private const string LegacyGroupsClaimType = "http://schemas.microsoft.com/ws/2008/06/identity/claims/groups";
+
     private readonly TrialAccessService _trialAccessService;
 
     public UsageController(TrialAccessService trialAccessService)
@@ -31,6 +34,18 @@ public sealed class UsageController : ControllerBase
 
         var parsedFrom = ParseUtcDateTimeOffset(from);
         var parsedTo = ParseUtcDateTimeOffset(to);
+        var access = await _trialAccessService.EvaluateUsageAccessAsync(
+            userId,
+            ResolveCurrentUserGroupIds(),
+            cancellationToken);
+        if (!access.Allowed)
+        {
+            return StatusCode(access.StatusCode, new
+            {
+                errorCode = access.ErrorCode,
+                error = access.Error
+            });
+        }
 
         var snapshot = await _trialAccessService.GetUsageSnapshotAsync(
             userId,
@@ -85,6 +100,18 @@ public sealed class UsageController : ControllerBase
         }
 
         return Guid.Empty;
+    }
+
+    private IReadOnlyCollection<string> ResolveCurrentUserGroupIds()
+    {
+        return User.Claims
+            .Where(claim =>
+                string.Equals(claim.Type, EntraGroupsClaimType, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(claim.Type, LegacyGroupsClaimType, StringComparison.OrdinalIgnoreCase))
+            .Select(claim => claim.Value)
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => value.Trim())
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
     }
 
     private static DateTimeOffset? ParseUtcDateTimeOffset(string? value)

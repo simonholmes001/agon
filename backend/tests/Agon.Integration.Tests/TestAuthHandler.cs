@@ -10,6 +10,7 @@ internal sealed class TestAuthHandler : AuthenticationHandler<AuthenticationSche
 {
     internal const string SchemeName = "TestAuth";
     internal const string UserIdHeader = "X-Test-User-Id";
+    internal const string UserGroupsHeader = "X-Test-User-Groups";
 
     public TestAuthHandler(
         IOptionsMonitor<AuthenticationSchemeOptions> options,
@@ -39,7 +40,20 @@ internal sealed class TestAuthHandler : AuthenticationHandler<AuthenticationSche
             new Claim("sub", userId.ToString())
         };
 
-        var identity = new ClaimsIdentity(claims, SchemeName);
+        var claimList = new List<Claim>(claims);
+        if (Request.Headers.TryGetValue(UserGroupsHeader, out var groupsHeader))
+        {
+            var groups = groupsHeader.ToString()
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Where(group => !string.IsNullOrWhiteSpace(group));
+
+            foreach (var group in groups)
+            {
+                claimList.Add(new Claim("groups", group));
+            }
+        }
+
+        var identity = new ClaimsIdentity(claimList, SchemeName);
         var principal = new ClaimsPrincipal(identity);
         var ticket = new AuthenticationTicket(principal, SchemeName);
         return Task.FromResult(AuthenticateResult.Success(ticket));

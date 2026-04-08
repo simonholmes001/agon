@@ -6,16 +6,18 @@ Use this checklist before enabling public tester access.
 
 1. Confirm backend config:
    - `TrialAccess:Enabled=true`
+   - `TrialAccess:EnforceEntraGroupMembership=true`
+   - `TrialAccess:RequiredEntraGroupObjectIdsCsv` (or `TrialAccess:RequiredEntraGroupObjectIds`) is set to the tester Entra group object ID(s)
    - `TrialAccess:Quota:Enabled=true`
    - `TrialAccess:RequestRateLimit:Enabled=true`
    - `TrialAccess:AdminApiKey` is set and rotated for launch week.
-2. Confirm DB tables are present:
-   - `trial_tester_grants`
+2. Confirm Entra app token configuration emits group membership claims for API tokens.
+3. Confirm DB tables are present:
    - `token_usage_records`
    - `trial_audit_events`
    - `trial_controls`
+   - `trial_tester_grants` (legacy table; no longer source of truth)
 3. Confirm admin API endpoints respond with valid admin key:
-   - grant/revoke tester
    - quota reset
    - kill-switch
 
@@ -30,9 +32,9 @@ DOTNET_CLI_HOME=/tmp dotnet test backend/tests/Agon.Integration.Tests/Agon.Integ
 
 Go criteria:
 
-1. Allowlist and expiry deny paths pass.
+1. Required Entra group membership deny/allow paths pass.
 2. Quota and rate-limit deny contracts pass (429 + deterministic payload).
-3. Admin grant/revoke/reset/kill-switch tests pass.
+3. Admin reset/kill-switch tests pass.
 4. Usage endpoint returns quota + provider/model breakdown.
 5. Concurrent same-user request throttling test passes.
 
