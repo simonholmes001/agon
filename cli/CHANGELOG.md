@@ -1,5 +1,11 @@
 # @agon_agents/cli
 
+## 0.8.11
+
+### Patch Changes
+
+- Add trial usage visibility and clearer quota/rate-limit error handling in the CLI, including a new `agon usage` command.
+
 ## 0.8.10
 
 ### Patch Changes
