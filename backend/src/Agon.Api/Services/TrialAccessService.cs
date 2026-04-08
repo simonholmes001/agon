@@ -55,6 +55,8 @@ public sealed class TrialAccessService
     private readonly ITokenUsageRepository _tokenUsageRepository;
     private readonly TrialAccessConfiguration _config;
     private readonly HashSet<string> _requiredTesterGroupIds;
+    private readonly HashSet<string> _adminBypassGroupIds;
+    private readonly bool _allowAllAuthenticatedUsers;
     private readonly TrialRequestRateLimiter _rateLimiter;
     private readonly ILogger<TrialAccessService> _logger;
 
@@ -68,9 +70,17 @@ public sealed class TrialAccessService
         _dbContext = dbContext;
         _tokenUsageRepository = tokenUsageRepository;
         _config = config;
-        _requiredTesterGroupIds = ResolveRequiredTesterGroupIds(config);
-        _rateLimiter = rateLimiter;
         _logger = logger;
+        _requiredTesterGroupIds = ResolveRequiredTesterGroupIds(config, _logger);
+        _adminBypassGroupIds = ResolveAdminBypassGroupIds(config, _logger);
+        _allowAllAuthenticatedUsers = config.AccessMode == TrialAccessMode.AllAuthenticatedUsers;
+        _rateLimiter = rateLimiter;
+
+        _logger.LogInformation(
+            "Trial access resolved. AccessMode={AccessMode}, RequiredTesterGroups={RequiredTesterGroups}, AdminBypassGroups={AdminBypassGroups}",
+            _config.AccessMode,
+            _requiredTesterGroupIds.Count,
+            _adminBypassGroupIds.Count);
     }
 
     public bool IsEnabled => _config.Enabled;
@@ -99,7 +109,22 @@ public sealed class TrialAccessService
         TrialAccessOperation operation,
         CancellationToken cancellationToken)
     {
-        var membershipAccess = EvaluateGroupMembershipAccess(userGroupIds);
+        var normalizedUserGroups = NormalizeGroupIds(userGroupIds);
+        if (IsAdminBypassGroupMember(normalizedUserGroups))
+        {
+            await WriteAuditEventAsync(
+                action: "trial_access",
+                outcome: "allowed",
+                userId: userId,
+                reasonCode: "TRIAL_ADMIN_BYPASS",
+                actor: "system",
+                details: new { operation, bypass = "entra-admin-group" },
+                cancellationToken);
+
+            return Allow();
+        }
+
+        var membershipAccess = EvaluateGroupMembershipAccess(normalizedUserGroups);
         if (!membershipAccess.Allowed)
         {
             await WriteAuditEventAsync(
@@ -108,7 +133,12 @@ public sealed class TrialAccessService
                 userId: userId,
                 reasonCode: membershipAccess.ErrorCode,
                 actor: "system",
-                details: new { operation, requiredGroups = _requiredTesterGroupIds.Count },
+                details: new
+                {
+                    operation,
+                    requiredGroups = _requiredTesterGroupIds.Count,
+                    accessMode = _config.AccessMode.ToString()
+                },
                 cancellationToken);
 
             return membershipAccess;
@@ -213,7 +243,21 @@ public sealed class TrialAccessService
         IReadOnlyCollection<string> userGroupIds,
         CancellationToken cancellationToken)
     {
-        var access = EvaluateGroupMembershipAccess(userGroupIds);
+        var normalizedUserGroups = NormalizeGroupIds(userGroupIds);
+        if (IsAdminBypassGroupMember(normalizedUserGroups))
+        {
+            await WriteAuditEventAsync(
+                action: "trial_usage_access",
+                outcome: "allowed",
+                userId: userId,
+                reasonCode: "TRIAL_ADMIN_BYPASS",
+                actor: "system",
+                details: new { bypass = "entra-admin-group" },
+                cancellationToken);
+            return Allow();
+        }
+
+        var access = EvaluateGroupMembershipAccess(normalizedUserGroups);
         if (!access.Allowed)
         {
             await WriteAuditEventAsync(
@@ -222,7 +266,11 @@ public sealed class TrialAccessService
                 userId: userId,
                 reasonCode: access.ErrorCode,
                 actor: "system",
-                details: new { requiredGroups = _requiredTesterGroupIds.Count },
+                details: new
+                {
+                    requiredGroups = _requiredTesterGroupIds.Count,
+                    accessMode = _config.AccessMode.ToString()
+                },
                 cancellationToken);
         }
 
@@ -435,9 +483,14 @@ public sealed class TrialAccessService
 
     private static TrialAccessResult Allow() => new(true);
 
-    private TrialAccessResult EvaluateGroupMembershipAccess(IReadOnlyCollection<string> userGroupIds)
+    private TrialAccessResult EvaluateGroupMembershipAccess(HashSet<string> normalizedUserGroups)
     {
-        if (!_config.Enabled || !_config.EnforceEntraGroupMembership)
+        if (!_config.Enabled)
+        {
+            return Allow();
+        }
+
+        if (_allowAllAuthenticatedUsers || !_config.EnforceEntraGroupMembership)
         {
             return Allow();
         }
@@ -452,7 +505,6 @@ public sealed class TrialAccessService
                 "Trial access group configuration is invalid.");
         }
 
-        var normalizedUserGroups = NormalizeGroupIds(userGroupIds);
         if (normalizedUserGroups.Overlaps(_requiredTesterGroupIds))
         {
             return Allow();
@@ -462,6 +514,16 @@ public sealed class TrialAccessService
             StatusCodes.Status403Forbidden,
             "TRIAL_NOT_ALLOWLISTED",
             "User is not approved for MVP trial access.");
+    }
+
+    private bool IsAdminBypassGroupMember(HashSet<string> normalizedUserGroups)
+    {
+        if (!_config.Enabled || _adminBypassGroupIds.Count == 0)
+        {
+            return false;
+        }
+
+        return normalizedUserGroups.Overlaps(_adminBypassGroupIds);
     }
 
     private static TrialAccessResult Deny(
@@ -521,17 +583,61 @@ public sealed class TrialAccessService
         await _dbContext.SaveChangesAsync(cancellationToken);
     }
 
-    private static HashSet<string> ResolveRequiredTesterGroupIds(TrialAccessConfiguration config)
+    private static HashSet<string> ResolveRequiredTesterGroupIds(
+        TrialAccessConfiguration config,
+        ILogger<TrialAccessService> logger)
     {
-        var configuredIds = new List<string>();
-        configuredIds.AddRange(config.RequiredEntraGroupObjectIds);
+        return ResolveConfiguredGroupIds(
+            config.RequiredEntraGroupObjectIds,
+            config.RequiredEntraGroupObjectIdsCsv,
+            "TrialAccess.RequiredEntraGroupObjectIds",
+            logger);
+    }
 
-        if (!string.IsNullOrWhiteSpace(config.RequiredEntraGroupObjectIdsCsv))
+    private static HashSet<string> ResolveAdminBypassGroupIds(
+        TrialAccessConfiguration config,
+        ILogger<TrialAccessService> logger)
+    {
+        return ResolveConfiguredGroupIds(
+            config.AdminBypassEntraGroupObjectIds,
+            config.AdminBypassEntraGroupObjectIdsCsv,
+            "TrialAccess.AdminBypassEntraGroupObjectIds",
+            logger);
+    }
+
+    private static HashSet<string> ResolveConfiguredGroupIds(
+        IReadOnlyCollection<string> listConfiguredIds,
+        string csvConfiguredIds,
+        string settingName,
+        ILogger<TrialAccessService> logger)
+    {
+        var hasList = listConfiguredIds.Any(groupId => !string.IsNullOrWhiteSpace(groupId));
+        var hasCsv = !string.IsNullOrWhiteSpace(csvConfiguredIds);
+
+        if (hasCsv && hasList)
         {
-            configuredIds.AddRange(config.RequiredEntraGroupObjectIdsCsv.Split(',', StringSplitOptions.TrimEntries));
+            logger.LogWarning(
+                "{SettingName} configured by both list and CSV. CSV value takes precedence and list values are ignored.",
+                settingName);
         }
 
-        return NormalizeGroupIds(configuredIds);
+        var source = hasCsv ? "csv" : (hasList ? "list" : "none");
+        var resolved = hasCsv
+            ? NormalizeGroupIds(csvConfiguredIds.Split(',', StringSplitOptions.TrimEntries))
+            : NormalizeGroupIds(listConfiguredIds);
+
+        logger.LogInformation(
+            "{SettingName} resolved from {Source} with {GroupCount} unique group IDs.",
+            settingName,
+            source,
+            resolved.Count);
+
+        if (!hasCsv && !hasList)
+        {
+            logger.LogWarning("{SettingName} has no configured group IDs.", settingName);
+        }
+
+        return resolved;
     }
 
     private static HashSet<string> NormalizeGroupIds(IEnumerable<string> groupIds)

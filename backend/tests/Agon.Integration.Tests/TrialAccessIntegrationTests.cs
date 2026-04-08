@@ -20,6 +20,7 @@ namespace Agon.Integration.Tests;
 public sealed class TrialAccessIntegrationTests : IClassFixture<AgonWebApplicationFactory>
 {
     private const string RequiredTesterGroupId = "11111111-1111-1111-1111-111111111111";
+    private const string AdminBypassGroupId = "fc1b0ea7-ac66-483e-b9dc-f2899b1195db";
 
     private readonly AgonWebApplicationFactory _baseFactory;
 
@@ -75,6 +76,70 @@ public sealed class TrialAccessIntegrationTests : IClassFixture<AgonWebApplicati
             .ToList();
 
         allowAudit.Should().NotBeEmpty();
+    }
+
+    [Fact]
+    public async Task CreateSession_Should_Allow_AdminBypass_User_When_NotInTesterGroup()
+    {
+        using var factory = CreateTrialEnabledFactory(adminBypassGroupIds: [AdminBypassGroupId]);
+        var userClient = CreateUserClient(factory, Guid.NewGuid(), [AdminBypassGroupId]);
+
+        var response = await userClient.PostAsJsonAsync("/sessions", new
+        {
+            idea = "Admin bypass should avoid trial tester-group gate.",
+            frictionLevel = 50
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+    }
+
+    [Fact]
+    public async Task CreateSession_Should_Use_AdminBypassCsv_When_ListAndCsvAreBothConfigured()
+    {
+        using var factory = CreateTrialEnabledFactory(
+            adminBypassGroupIds: ["aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"],
+            adminBypassGroupIdsCsv: AdminBypassGroupId);
+        var userClient = CreateUserClient(factory, Guid.NewGuid(), [AdminBypassGroupId]);
+
+        var response = await userClient.PostAsJsonAsync("/sessions", new
+        {
+            idea = "CSV should be canonical for admin bypass groups.",
+            frictionLevel = 50
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+    }
+
+    [Fact]
+    public async Task CreateSession_Should_Allow_AnyAuthenticatedUser_In_AllAuthenticatedUsers_Mode()
+    {
+        using var factory = CreateTrialEnabledFactory(accessMode: TrialAccessMode.AllAuthenticatedUsers);
+        var userClient = CreateUserClient(factory, Guid.NewGuid());
+
+        var response = await userClient.PostAsJsonAsync("/sessions", new
+        {
+            idea = "General access mode should allow authenticated users without tester group.",
+            frictionLevel = 50
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+    }
+
+    [Fact]
+    public async Task CreateSession_Should_Use_RequiredGroupsCsv_When_ListAndCsvAreBothConfigured()
+    {
+        using var factory = CreateTrialEnabledFactory(
+            requiredTesterGroupIds: ["bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"],
+            requiredTesterGroupIdsCsv: RequiredTesterGroupId);
+        var userClient = CreateUserClient(factory, Guid.NewGuid(), [RequiredTesterGroupId]);
+
+        var response = await userClient.PostAsJsonAsync("/sessions", new
+        {
+            idea = "CSV should be canonical for required tester groups.",
+            frictionLevel = 50
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
     }
 
     [Fact]
@@ -246,6 +311,26 @@ public sealed class TrialAccessIntegrationTests : IClassFixture<AgonWebApplicati
     }
 
     [Fact]
+    public async Task UsageEndpoint_Should_Write_AdminBypass_AuditEvent_When_BypassGroupMember()
+    {
+        using var factory = CreateTrialEnabledFactory(adminBypassGroupIds: [AdminBypassGroupId]);
+        var userId = Guid.NewGuid();
+        var userClient = CreateUserClient(factory, userId, [AdminBypassGroupId]);
+
+        var response = await userClient.GetAsync("/usage");
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        await using var scope = factory.Services.CreateAsyncScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<AgonDbContext>();
+        dbContext.TrialAuditEvents.Any(eventRow =>
+                eventRow.UserId == userId
+                && eventRow.Action == "trial_usage_access"
+                && eventRow.ReasonCode == "TRIAL_ADMIN_BYPASS"
+                && eventRow.Outcome == "allowed")
+            .Should().BeTrue();
+    }
+
+    [Fact]
     public async Task AdminEndpoints_Should_GrantAndRevokeTester_WithAuditTrail()
     {
         using var factory = CreateTrialEnabledFactory();
@@ -336,13 +421,21 @@ public sealed class TrialAccessIntegrationTests : IClassFixture<AgonWebApplicati
     private WebApplicationFactory<Program> CreateTrialEnabledFactory(
         int tokenLimit = 5000,
         int requestsPerMinute = 20,
-        int burstCapacity = 10)
+        int burstCapacity = 10,
+        TrialAccessMode accessMode = TrialAccessMode.RestrictedGroups,
+        IReadOnlyList<string>? requiredTesterGroupIds = null,
+        string? requiredTesterGroupIdsCsv = null,
+        IReadOnlyList<string>? adminBypassGroupIds = null,
+        string? adminBypassGroupIdsCsv = null)
     {
+        var effectiveRequiredTesterGroupIds = requiredTesterGroupIds ?? [RequiredTesterGroupId];
+        var effectiveAdminBypassGroupIds = adminBypassGroupIds ?? Array.Empty<string>();
+
         return _baseFactory.WithWebHostBuilder(builder =>
         {
             builder.ConfigureAppConfiguration((_, config) =>
             {
-                config.AddInMemoryCollection(new Dictionary<string, string?>
+                var settings = new Dictionary<string, string?>
                 {
                     ["Authentication:Enabled"] = "true",
                     ["Authentication:AzureAd:Authority"] = "https://example.local/tenant/v2.0",
@@ -350,15 +443,37 @@ public sealed class TrialAccessIntegrationTests : IClassFixture<AgonWebApplicati
                     ["TrialAccess:Enabled"] = "true",
                     ["TrialAccess:DefaultTrialDays"] = "7",
                     ["TrialAccess:AdminApiKey"] = "trial-admin-secret",
+                    ["TrialAccess:AccessMode"] = accessMode.ToString(),
                     ["TrialAccess:EnforceEntraGroupMembership"] = "true",
-                    ["TrialAccess:RequiredEntraGroupObjectIds:0"] = RequiredTesterGroupId,
                     ["TrialAccess:Quota:Enabled"] = "true",
                     ["TrialAccess:Quota:TokenLimit"] = tokenLimit.ToString(),
                     ["TrialAccess:Quota:WindowDays"] = "7",
                     ["TrialAccess:RequestRateLimit:Enabled"] = "true",
                     ["TrialAccess:RequestRateLimit:RequestsPerMinute"] = requestsPerMinute.ToString(),
                     ["TrialAccess:RequestRateLimit:BurstCapacity"] = burstCapacity.ToString()
-                });
+                };
+
+                for (var index = 0; index < effectiveRequiredTesterGroupIds.Count; index++)
+                {
+                    settings[$"TrialAccess:RequiredEntraGroupObjectIds:{index}"] = effectiveRequiredTesterGroupIds[index];
+                }
+
+                if (!string.IsNullOrWhiteSpace(requiredTesterGroupIdsCsv))
+                {
+                    settings["TrialAccess:RequiredEntraGroupObjectIdsCsv"] = requiredTesterGroupIdsCsv;
+                }
+
+                for (var index = 0; index < effectiveAdminBypassGroupIds.Count; index++)
+                {
+                    settings[$"TrialAccess:AdminBypassEntraGroupObjectIds:{index}"] = effectiveAdminBypassGroupIds[index];
+                }
+
+                if (!string.IsNullOrWhiteSpace(adminBypassGroupIdsCsv))
+                {
+                    settings["TrialAccess:AdminBypassEntraGroupObjectIdsCsv"] = adminBypassGroupIdsCsv;
+                }
+
+                config.AddInMemoryCollection(settings);
             });
 
             builder.ConfigureServices(services =>
@@ -371,8 +486,12 @@ public sealed class TrialAccessIntegrationTests : IClassFixture<AgonWebApplicati
                     Enabled = true,
                     DefaultTrialDays = 7,
                     AdminApiKey = "trial-admin-secret",
+                    AccessMode = accessMode,
                     EnforceEntraGroupMembership = true,
-                    RequiredEntraGroupObjectIds = [RequiredTesterGroupId],
+                    RequiredEntraGroupObjectIds = effectiveRequiredTesterGroupIds.ToList(),
+                    RequiredEntraGroupObjectIdsCsv = requiredTesterGroupIdsCsv ?? string.Empty,
+                    AdminBypassEntraGroupObjectIds = effectiveAdminBypassGroupIds.ToList(),
+                    AdminBypassEntraGroupObjectIdsCsv = adminBypassGroupIdsCsv ?? string.Empty,
                     Quota = new TrialQuotaConfiguration
                     {
                         Enabled = true,

@@ -7,6 +7,7 @@ Use this runbook to operate the invite-only tester cohort during MVP trial week.
 - Environment: API deployment where `TrialAccess:Enabled=true`
 - Audience: on-call operator with admin API key
 - Objective: use Entra group membership as tester source-of-truth, plus quota reset and kill-switch controls
+- Access mode: `TrialAccess:AccessMode=RestrictedGroups`
 
 ## Prerequisites
 
@@ -21,6 +22,10 @@ export AGON_ADMIN_KEY="<trial-admin-key>"
 3. Set tester Entra group object ID:
 ```bash
 export AGON_TESTER_GROUP_OBJECT_ID="<entra-group-object-id>"
+```
+4. Set admin bypass Entra group object ID:
+```bash
+export AGON_ADMIN_GROUP_OBJECT_ID="<entra-admin-group-object-id>"
 ```
 
 All admin requests require header:
@@ -56,6 +61,8 @@ az ad group member list \
 ```
 
 Legacy note: `/admin/trial/testers/*` endpoints are no longer authoritative for access gating.
+
+Admin note: users in `AGON_ADMIN_GROUP_OBJECT_ID` should be configured in `TrialAccess:AdminBypassEntraGroupObjectIdsCsv`.
 
 ## Reset Tester Quota
 
@@ -103,3 +110,13 @@ curl -sS "$AGON_API_BASE/usage" -H "Authorization: Bearer <tester-token>"
 1. Cost spike: enable kill-switch first, then investigate usage records by user.
 2. Single user abuse: remove user from Entra tester group and reset quota only if reinstating.
 3. Recovery: re-enable kill-switch only after confirming normal request and token rates.
+
+## Post-Early-Testers Transition
+
+When moving beyond invite-only testing:
+
+1. Set `TrialAccess:AccessMode=AllAuthenticatedUsers`.
+2. Keep `TrialAccess:AdminBypassEntraGroupObjectIdsCsv` set for operator safety.
+3. Keep or disable trial controls:
+   - keep `TrialAccess:Enabled=true` if temporary global quota/rate controls are still needed
+   - set `TrialAccess:Enabled=false` when trial controls are no longer needed
