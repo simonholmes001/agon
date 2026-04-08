@@ -70,11 +70,17 @@ public sealed class TrialAccessService
         _dbContext = dbContext;
         _tokenUsageRepository = tokenUsageRepository;
         _config = config;
-        _requiredTesterGroupIds = ResolveRequiredTesterGroupIds(config);
-        _adminBypassGroupIds = ResolveAdminBypassGroupIds(config);
-        _allowAllAuthenticatedUsers = ResolveAllowAllAuthenticatedUsers(config.AccessMode, logger);
-        _rateLimiter = rateLimiter;
         _logger = logger;
+        _requiredTesterGroupIds = ResolveRequiredTesterGroupIds(config, _logger);
+        _adminBypassGroupIds = ResolveAdminBypassGroupIds(config, _logger);
+        _allowAllAuthenticatedUsers = config.AccessMode == TrialAccessMode.AllAuthenticatedUsers;
+        _rateLimiter = rateLimiter;
+
+        _logger.LogInformation(
+            "Trial access resolved. AccessMode={AccessMode}, RequiredTesterGroups={RequiredTesterGroups}, AdminBypassGroups={AdminBypassGroups}",
+            _config.AccessMode,
+            _requiredTesterGroupIds.Count,
+            _adminBypassGroupIds.Count);
     }
 
     public bool IsEnabled => _config.Enabled;
@@ -131,7 +137,7 @@ public sealed class TrialAccessService
                 {
                     operation,
                     requiredGroups = _requiredTesterGroupIds.Count,
-                    accessMode = _config.AccessMode
+                    accessMode = _config.AccessMode.ToString()
                 },
                 cancellationToken);
 
@@ -240,6 +246,14 @@ public sealed class TrialAccessService
         var normalizedUserGroups = NormalizeGroupIds(userGroupIds);
         if (IsAdminBypassGroupMember(normalizedUserGroups))
         {
+            await WriteAuditEventAsync(
+                action: "trial_usage_access",
+                outcome: "allowed",
+                userId: userId,
+                reasonCode: "TRIAL_ADMIN_BYPASS",
+                actor: "system",
+                details: new { bypass = "entra-admin-group" },
+                cancellationToken);
             return Allow();
         }
 
@@ -255,7 +269,7 @@ public sealed class TrialAccessService
                 details: new
                 {
                     requiredGroups = _requiredTesterGroupIds.Count,
-                    accessMode = _config.AccessMode
+                    accessMode = _config.AccessMode.ToString()
                 },
                 cancellationToken);
         }
@@ -569,50 +583,61 @@ public sealed class TrialAccessService
         await _dbContext.SaveChangesAsync(cancellationToken);
     }
 
-    private static HashSet<string> ResolveRequiredTesterGroupIds(TrialAccessConfiguration config)
+    private static HashSet<string> ResolveRequiredTesterGroupIds(
+        TrialAccessConfiguration config,
+        ILogger<TrialAccessService> logger)
     {
-        var configuredIds = new List<string>();
-        configuredIds.AddRange(config.RequiredEntraGroupObjectIds);
-
-        if (!string.IsNullOrWhiteSpace(config.RequiredEntraGroupObjectIdsCsv))
-        {
-            configuredIds.AddRange(config.RequiredEntraGroupObjectIdsCsv.Split(',', StringSplitOptions.TrimEntries));
-        }
-
-        return NormalizeGroupIds(configuredIds);
+        return ResolveConfiguredGroupIds(
+            config.RequiredEntraGroupObjectIds,
+            config.RequiredEntraGroupObjectIdsCsv,
+            "TrialAccess.RequiredEntraGroupObjectIds",
+            logger);
     }
 
-    private static HashSet<string> ResolveAdminBypassGroupIds(TrialAccessConfiguration config)
+    private static HashSet<string> ResolveAdminBypassGroupIds(
+        TrialAccessConfiguration config,
+        ILogger<TrialAccessService> logger)
     {
-        var configuredIds = new List<string>();
-        configuredIds.AddRange(config.AdminBypassEntraGroupObjectIds);
-
-        if (!string.IsNullOrWhiteSpace(config.AdminBypassEntraGroupObjectIdsCsv))
-        {
-            configuredIds.AddRange(config.AdminBypassEntraGroupObjectIdsCsv.Split(',', StringSplitOptions.TrimEntries));
-        }
-
-        return NormalizeGroupIds(configuredIds);
+        return ResolveConfiguredGroupIds(
+            config.AdminBypassEntraGroupObjectIds,
+            config.AdminBypassEntraGroupObjectIdsCsv,
+            "TrialAccess.AdminBypassEntraGroupObjectIds",
+            logger);
     }
 
-    private static bool ResolveAllowAllAuthenticatedUsers(string? configuredAccessMode, ILogger<TrialAccessService> logger)
+    private static HashSet<string> ResolveConfiguredGroupIds(
+        IReadOnlyCollection<string> listConfiguredIds,
+        string csvConfiguredIds,
+        string settingName,
+        ILogger<TrialAccessService> logger)
     {
-        if (string.IsNullOrWhiteSpace(configuredAccessMode)
-            || string.Equals(configuredAccessMode, TrialAccessModes.RestrictedGroups, StringComparison.OrdinalIgnoreCase))
+        var hasList = listConfiguredIds.Any(groupId => !string.IsNullOrWhiteSpace(groupId));
+        var hasCsv = !string.IsNullOrWhiteSpace(csvConfiguredIds);
+
+        if (hasCsv && hasList)
         {
-            return false;
+            logger.LogWarning(
+                "{SettingName} configured by both list and CSV. CSV value takes precedence and list values are ignored.",
+                settingName);
         }
 
-        if (string.Equals(configuredAccessMode, TrialAccessModes.AllAuthenticatedUsers, StringComparison.OrdinalIgnoreCase))
+        var source = hasCsv ? "csv" : (hasList ? "list" : "none");
+        var resolved = hasCsv
+            ? NormalizeGroupIds(csvConfiguredIds.Split(',', StringSplitOptions.TrimEntries))
+            : NormalizeGroupIds(listConfiguredIds);
+
+        logger.LogInformation(
+            "{SettingName} resolved from {Source} with {GroupCount} unique group IDs.",
+            settingName,
+            source,
+            resolved.Count);
+
+        if (!hasCsv && !hasList)
         {
-            return true;
+            logger.LogWarning("{SettingName} has no configured group IDs.", settingName);
         }
 
-        logger.LogWarning(
-            "Unknown TrialAccess access mode '{AccessMode}'. Falling back to '{DefaultMode}'.",
-            configuredAccessMode,
-            TrialAccessModes.RestrictedGroups);
-        return false;
+        return resolved;
     }
 
     private static HashSet<string> NormalizeGroupIds(IEnumerable<string> groupIds)

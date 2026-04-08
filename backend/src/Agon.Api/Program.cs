@@ -81,6 +81,7 @@ var rateLimitingConfig = builder.Configuration
 var trialAccessConfig = builder.Configuration
     .GetSection(TrialAccessConfiguration.SectionName)
     .Get<TrialAccessConfiguration>() ?? new();
+var trialAccessModeRaw = builder.Configuration["TrialAccess:AccessMode"];
 var forceRateLimitingInTesting = builder.Configuration.GetValue<bool>("ApiRateLimiting:ForceEnableInTesting");
 if (builder.Environment.IsEnvironment("Testing") && !forceRateLimitingInTesting)
 {
@@ -123,6 +124,8 @@ if (string.IsNullOrWhiteSpace(authAudience))
 var allowInsecureTestingMode = builder.Configuration.GetValue<bool>("Security:AllowInsecureTestingMode");
 var isNonProductionSafeEnvironment = builder.Environment.IsDevelopment()
     || (builder.Environment.IsEnvironment("Testing") && allowInsecureTestingMode);
+
+ValidateTrialAccessAccessMode(trialAccessModeRaw, isNonProductionSafeEnvironment);
 
 if (!isNonProductionSafeEnvironment)
 {
@@ -990,6 +993,30 @@ static string[] ResolveAllowedCorsOrigins(IConfiguration configuration)
     return origins
         .Distinct(StringComparer.OrdinalIgnoreCase)
         .ToArray();
+}
+
+static void ValidateTrialAccessAccessMode(string? rawValue, bool isNonProductionSafeEnvironment)
+{
+    if (string.IsNullOrWhiteSpace(rawValue))
+    {
+        return;
+    }
+
+    if (Enum.TryParse<TrialAccessMode>(rawValue.Trim(), ignoreCase: true, out _))
+    {
+        return;
+    }
+
+    var message =
+        $"SECURITY: Invalid TrialAccess:AccessMode '{rawValue}'. " +
+        $"Allowed values: {TrialAccessMode.RestrictedGroups}, {TrialAccessMode.AllAuthenticatedUsers}.";
+
+    if (!isNonProductionSafeEnvironment)
+    {
+        throw new InvalidOperationException(message);
+    }
+
+    Console.WriteLine($"WARNING: {message} Falling back to default mode.");
 }
 
 // Make Program class accessible to integration tests

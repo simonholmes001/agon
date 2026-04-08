@@ -28,7 +28,7 @@ public sealed class TrialAccessConfiguration
     /// RestrictedGroups: require tester-group membership during early access.
     /// AllAuthenticatedUsers: allow any authenticated user (post-early-testers mode).
     /// </summary>
-    public string AccessMode { get; set; } = TrialAccessModes.RestrictedGroups;
+    public TrialAccessMode AccessMode { get; set; } = TrialAccessMode.RestrictedGroups;
 
     /// <summary>
     /// When enabled, users must present at least one configured Entra group in their token claims.
@@ -61,10 +61,10 @@ public sealed class TrialAccessConfiguration
     public TrialRequestRateLimitConfiguration RequestRateLimit { get; set; } = new();
 }
 
-public static class TrialAccessModes
+public enum TrialAccessMode
 {
-    public const string RestrictedGroups = "RestrictedGroups";
-    public const string AllAuthenticatedUsers = "AllAuthenticatedUsers";
+    RestrictedGroups = 0,
+    AllAuthenticatedUsers = 1
 }
 
 public sealed class TrialQuotaConfiguration

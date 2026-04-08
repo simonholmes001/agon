@@ -35,6 +35,11 @@ In this repo, these are wired via Bicep parameters:
 - `trialRequestsPerMinute`
 - `trialBurstCapacity`
 
+Configuration precedence:
+
+- `*Csv` settings are canonical and take precedence over list-style settings.
+- Avoid setting both list and CSV values for the same group config in the same environment.
+
 Implemented for `dev` in:
 
 - `infrastructure/bicep/parameters/dev.parameters.json`
