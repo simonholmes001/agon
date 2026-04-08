@@ -6,8 +6,10 @@ Use this checklist before enabling public tester access.
 
 1. Confirm backend config:
    - `TrialAccess:Enabled=true`
+   - `TrialAccess:AccessMode=RestrictedGroups`
    - `TrialAccess:EnforceEntraGroupMembership=true`
    - `TrialAccess:RequiredEntraGroupObjectIdsCsv` (or `TrialAccess:RequiredEntraGroupObjectIds`) is set to the tester Entra group object ID(s)
+   - `TrialAccess:AdminBypassEntraGroupObjectIdsCsv` is set to admin/operator Entra group object ID(s)
    - `TrialAccess:Quota:Enabled=true`
    - `TrialAccess:RequestRateLimit:Enabled=true`
    - `TrialAccess:AdminApiKey` is set and rotated for launch week.

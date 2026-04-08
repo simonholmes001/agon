@@ -20,6 +20,7 @@ namespace Agon.Integration.Tests;
 public sealed class TrialAccessIntegrationTests : IClassFixture<AgonWebApplicationFactory>
 {
     private const string RequiredTesterGroupId = "11111111-1111-1111-1111-111111111111";
+    private const string AdminBypassGroupId = "fc1b0ea7-ac66-483e-b9dc-f2899b1195db";
 
     private readonly AgonWebApplicationFactory _baseFactory;
 
@@ -75,6 +76,36 @@ public sealed class TrialAccessIntegrationTests : IClassFixture<AgonWebApplicati
             .ToList();
 
         allowAudit.Should().NotBeEmpty();
+    }
+
+    [Fact]
+    public async Task CreateSession_Should_Allow_AdminBypass_User_When_NotInTesterGroup()
+    {
+        using var factory = CreateTrialEnabledFactory(adminBypassGroupIds: [AdminBypassGroupId]);
+        var userClient = CreateUserClient(factory, Guid.NewGuid(), [AdminBypassGroupId]);
+
+        var response = await userClient.PostAsJsonAsync("/sessions", new
+        {
+            idea = "Admin bypass should avoid trial tester-group gate.",
+            frictionLevel = 50
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+    }
+
+    [Fact]
+    public async Task CreateSession_Should_Allow_AnyAuthenticatedUser_In_AllAuthenticatedUsers_Mode()
+    {
+        using var factory = CreateTrialEnabledFactory(accessMode: TrialAccessModes.AllAuthenticatedUsers);
+        var userClient = CreateUserClient(factory, Guid.NewGuid());
+
+        var response = await userClient.PostAsJsonAsync("/sessions", new
+        {
+            idea = "General access mode should allow authenticated users without tester group.",
+            frictionLevel = 50
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
     }
 
     [Fact]
@@ -336,13 +367,17 @@ public sealed class TrialAccessIntegrationTests : IClassFixture<AgonWebApplicati
     private WebApplicationFactory<Program> CreateTrialEnabledFactory(
         int tokenLimit = 5000,
         int requestsPerMinute = 20,
-        int burstCapacity = 10)
+        int burstCapacity = 10,
+        string accessMode = TrialAccessModes.RestrictedGroups,
+        IReadOnlyList<string>? adminBypassGroupIds = null)
     {
+        var effectiveAdminBypassGroupIds = adminBypassGroupIds ?? Array.Empty<string>();
+
         return _baseFactory.WithWebHostBuilder(builder =>
         {
             builder.ConfigureAppConfiguration((_, config) =>
             {
-                config.AddInMemoryCollection(new Dictionary<string, string?>
+                var settings = new Dictionary<string, string?>
                 {
                     ["Authentication:Enabled"] = "true",
                     ["Authentication:AzureAd:Authority"] = "https://example.local/tenant/v2.0",
@@ -350,6 +385,7 @@ public sealed class TrialAccessIntegrationTests : IClassFixture<AgonWebApplicati
                     ["TrialAccess:Enabled"] = "true",
                     ["TrialAccess:DefaultTrialDays"] = "7",
                     ["TrialAccess:AdminApiKey"] = "trial-admin-secret",
+                    ["TrialAccess:AccessMode"] = accessMode,
                     ["TrialAccess:EnforceEntraGroupMembership"] = "true",
                     ["TrialAccess:RequiredEntraGroupObjectIds:0"] = RequiredTesterGroupId,
                     ["TrialAccess:Quota:Enabled"] = "true",
@@ -358,7 +394,14 @@ public sealed class TrialAccessIntegrationTests : IClassFixture<AgonWebApplicati
                     ["TrialAccess:RequestRateLimit:Enabled"] = "true",
                     ["TrialAccess:RequestRateLimit:RequestsPerMinute"] = requestsPerMinute.ToString(),
                     ["TrialAccess:RequestRateLimit:BurstCapacity"] = burstCapacity.ToString()
-                });
+                };
+
+                for (var index = 0; index < effectiveAdminBypassGroupIds.Count; index++)
+                {
+                    settings[$"TrialAccess:AdminBypassEntraGroupObjectIds:{index}"] = effectiveAdminBypassGroupIds[index];
+                }
+
+                config.AddInMemoryCollection(settings);
             });
 
             builder.ConfigureServices(services =>
@@ -371,8 +414,10 @@ public sealed class TrialAccessIntegrationTests : IClassFixture<AgonWebApplicati
                     Enabled = true,
                     DefaultTrialDays = 7,
                     AdminApiKey = "trial-admin-secret",
+                    AccessMode = accessMode,
                     EnforceEntraGroupMembership = true,
                     RequiredEntraGroupObjectIds = [RequiredTesterGroupId],
+                    AdminBypassEntraGroupObjectIds = effectiveAdminBypassGroupIds.ToList(),
                     Quota = new TrialQuotaConfiguration
                     {
                         Enabled = true,

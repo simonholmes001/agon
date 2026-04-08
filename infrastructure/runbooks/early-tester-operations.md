@@ -9,8 +9,10 @@ These settings should be deployed through Bicep (not set manually in the portal)
 ```text
 Authentication__Enabled=true
 TrialAccess__Enabled=true
+TrialAccess__AccessMode=RestrictedGroups
 TrialAccess__EnforceEntraGroupMembership=true
 TrialAccess__RequiredEntraGroupObjectIdsCsv=<AGON_EARLY_USERS_GROUP_OBJECT_ID>
+TrialAccess__AdminBypassEntraGroupObjectIdsCsv=<AGON_ADMIN_GROUP_OBJECT_ID>
 TrialAccess__Quota__Enabled=true
 TrialAccess__Quota__TokenLimit=40000
 TrialAccess__Quota__WindowDays=7
@@ -22,8 +24,10 @@ TrialAccess__RequestRateLimit__BurstCapacity=10
 In this repo, these are wired via Bicep parameters:
 
 - `trialAccessEnabled`
+- `trialAccessMode`
 - `trialEnforceEntraGroupMembership`
 - `trialRequiredEntraGroupObjectIdsCsv`
+- `trialAdminBypassEntraGroupObjectIdsCsv`
 - `trialQuotaEnabled`
 - `trialQuotaTokenLimit`
 - `trialQuotaWindowDays`
@@ -72,6 +76,12 @@ az ad group member add --group "<group-object-id>" --member-id "<user-object-id>
 - You do not set a custom token cap per user today.
 - This user gets the same quota/rate policy as other testers.
 
+## Admin Operator Access
+
+- Put platform operators in the Entra `admin` security group.
+- Configure that group object ID in `TrialAccess__AdminBypassEntraGroupObjectIdsCsv`.
+- Members of the admin bypass group can use Agon without being blocked by tester-group trial gates.
+
 ## 4) Per-User Operational Controls
 
 1. Remove user access immediately:
@@ -113,6 +123,17 @@ curl "$AGON_API_BASE/usage" -H "Authorization: Bearer <tester-token>"
 - User is in `agon-early-users`
 - Token includes correct `groups` claim
 - Backend `TrialAccess__RequiredEntraGroupObjectIdsCsv` matches group object ID exactly
+- Backend `TrialAccess__AccessMode` is `RestrictedGroups` for early-access phase
+
+## Post-Early-Testers Transition (General Users)
+
+When you move from invited testers to broader user access:
+
+1. Set `TrialAccess__AccessMode=AllAuthenticatedUsers` to stop requiring tester-group membership.
+2. Keep `TrialAccess__AdminBypassEntraGroupObjectIdsCsv` configured for operator safety.
+3. Decide policy:
+- Keep `TrialAccess__Enabled=true` if you want temporary global quota/rate controls for all authenticated users.
+- Set `TrialAccess__Enabled=false` when trial controls are no longer needed.
 
 ## Should These Trial Settings Be Removed Later?
 

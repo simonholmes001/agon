@@ -72,11 +72,21 @@ param jwtInteractiveClientId string = ''
 @description('Enable invite-only trial access controls in the backend.')
 param trialAccessEnabled bool = false
 
+@allowed([
+  'RestrictedGroups'
+  'AllAuthenticatedUsers'
+])
+@description('Trial rollout access mode. RestrictedGroups for early testers, AllAuthenticatedUsers for post-early rollout.')
+param trialAccessMode string = 'RestrictedGroups'
+
 @description('Require Entra group membership claim for trial access decisions.')
 param trialEnforceEntraGroupMembership bool = true
 
 @description('Comma-separated Entra group object IDs used as the trial tester allowlist source of truth.')
 param trialRequiredEntraGroupObjectIdsCsv string = ''
+
+@description('Comma-separated Entra group object IDs for admin/operator bypass of trial controls.')
+param trialAdminBypassEntraGroupObjectIdsCsv string = ''
 
 @description('Enable token quota enforcement for trial users.')
 param trialQuotaEnabled bool = true
@@ -536,12 +546,20 @@ resource appService 'Microsoft.Web/sites@2023-12-01' = {
           value: trialAccessEnabled ? 'true' : 'false'
         }
         {
+          name: 'TrialAccess__AccessMode'
+          value: trialAccessMode
+        }
+        {
           name: 'TrialAccess__EnforceEntraGroupMembership'
           value: trialEnforceEntraGroupMembership ? 'true' : 'false'
         }
         {
           name: 'TrialAccess__RequiredEntraGroupObjectIdsCsv'
           value: trialRequiredEntraGroupObjectIdsCsv
+        }
+        {
+          name: 'TrialAccess__AdminBypassEntraGroupObjectIdsCsv'
+          value: trialAdminBypassEntraGroupObjectIdsCsv
         }
         {
           name: 'TrialAccess__Quota__Enabled'

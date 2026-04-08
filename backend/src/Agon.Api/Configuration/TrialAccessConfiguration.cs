@@ -24,6 +24,13 @@ public sealed class TrialAccessConfiguration
     public string AdminApiKey { get; set; } = string.Empty;
 
     /// <summary>
+    /// Rollout mode for runtime access decisions.
+    /// RestrictedGroups: require tester-group membership during early access.
+    /// AllAuthenticatedUsers: allow any authenticated user (post-early-testers mode).
+    /// </summary>
+    public string AccessMode { get; set; } = TrialAccessModes.RestrictedGroups;
+
+    /// <summary>
     /// When enabled, users must present at least one configured Entra group in their token claims.
     /// </summary>
     public bool EnforceEntraGroupMembership { get; set; } = true;
@@ -39,9 +46,25 @@ public sealed class TrialAccessConfiguration
     /// </summary>
     public string RequiredEntraGroupObjectIdsCsv { get; set; } = string.Empty;
 
+    /// <summary>
+    /// Canonical Entra group object IDs that bypass trial controls for operators/admins.
+    /// </summary>
+    public List<string> AdminBypassEntraGroupObjectIds { get; set; } = [];
+
+    /// <summary>
+    /// Optional comma-separated Entra group object IDs for admin bypass users.
+    /// </summary>
+    public string AdminBypassEntraGroupObjectIdsCsv { get; set; } = string.Empty;
+
     public TrialQuotaConfiguration Quota { get; set; } = new();
 
     public TrialRequestRateLimitConfiguration RequestRateLimit { get; set; } = new();
+}
+
+public static class TrialAccessModes
+{
+    public const string RestrictedGroups = "RestrictedGroups";
+    public const string AllAuthenticatedUsers = "AllAuthenticatedUsers";
 }
 
 public sealed class TrialQuotaConfiguration

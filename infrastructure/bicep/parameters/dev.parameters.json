@@ -71,11 +71,17 @@
     "trialAccessEnabled": {
       "value": true
     },
+    "trialAccessMode": {
+      "value": "RestrictedGroups"
+    },
     "trialEnforceEntraGroupMembership": {
       "value": true
     },
     "trialRequiredEntraGroupObjectIdsCsv": {
       "value": "d42ba4d8-97b9-44fb-9ee8-be5340117134"
+    },
+    "trialAdminBypassEntraGroupObjectIdsCsv": {
+      "value": "fc1b0ea7-ac66-483e-b9dc-f2899b1195db"
     },
     "trialQuotaEnabled": {
       "value": true

@@ -55,6 +55,8 @@ public sealed class TrialAccessService
     private readonly ITokenUsageRepository _tokenUsageRepository;
     private readonly TrialAccessConfiguration _config;
     private readonly HashSet<string> _requiredTesterGroupIds;
+    private readonly HashSet<string> _adminBypassGroupIds;
+    private readonly bool _allowAllAuthenticatedUsers;
     private readonly TrialRequestRateLimiter _rateLimiter;
     private readonly ILogger<TrialAccessService> _logger;
 
@@ -69,6 +71,8 @@ public sealed class TrialAccessService
         _tokenUsageRepository = tokenUsageRepository;
         _config = config;
         _requiredTesterGroupIds = ResolveRequiredTesterGroupIds(config);
+        _adminBypassGroupIds = ResolveAdminBypassGroupIds(config);
+        _allowAllAuthenticatedUsers = ResolveAllowAllAuthenticatedUsers(config.AccessMode, logger);
         _rateLimiter = rateLimiter;
         _logger = logger;
     }
@@ -99,7 +103,22 @@ public sealed class TrialAccessService
         TrialAccessOperation operation,
         CancellationToken cancellationToken)
     {
-        var membershipAccess = EvaluateGroupMembershipAccess(userGroupIds);
+        var normalizedUserGroups = NormalizeGroupIds(userGroupIds);
+        if (IsAdminBypassGroupMember(normalizedUserGroups))
+        {
+            await WriteAuditEventAsync(
+                action: "trial_access",
+                outcome: "allowed",
+                userId: userId,
+                reasonCode: "TRIAL_ADMIN_BYPASS",
+                actor: "system",
+                details: new { operation, bypass = "entra-admin-group" },
+                cancellationToken);
+
+            return Allow();
+        }
+
+        var membershipAccess = EvaluateGroupMembershipAccess(normalizedUserGroups);
         if (!membershipAccess.Allowed)
         {
             await WriteAuditEventAsync(
@@ -108,7 +127,12 @@ public sealed class TrialAccessService
                 userId: userId,
                 reasonCode: membershipAccess.ErrorCode,
                 actor: "system",
-                details: new { operation, requiredGroups = _requiredTesterGroupIds.Count },
+                details: new
+                {
+                    operation,
+                    requiredGroups = _requiredTesterGroupIds.Count,
+                    accessMode = _config.AccessMode
+                },
                 cancellationToken);
 
             return membershipAccess;
@@ -213,7 +237,13 @@ public sealed class TrialAccessService
         IReadOnlyCollection<string> userGroupIds,
         CancellationToken cancellationToken)
     {
-        var access = EvaluateGroupMembershipAccess(userGroupIds);
+        var normalizedUserGroups = NormalizeGroupIds(userGroupIds);
+        if (IsAdminBypassGroupMember(normalizedUserGroups))
+        {
+            return Allow();
+        }
+
+        var access = EvaluateGroupMembershipAccess(normalizedUserGroups);
         if (!access.Allowed)
         {
             await WriteAuditEventAsync(
@@ -222,7 +252,11 @@ public sealed class TrialAccessService
                 userId: userId,
                 reasonCode: access.ErrorCode,
                 actor: "system",
-                details: new { requiredGroups = _requiredTesterGroupIds.Count },
+                details: new
+                {
+                    requiredGroups = _requiredTesterGroupIds.Count,
+                    accessMode = _config.AccessMode
+                },
                 cancellationToken);
         }
 
@@ -435,9 +469,14 @@ public sealed class TrialAccessService
 
     private static TrialAccessResult Allow() => new(true);
 
-    private TrialAccessResult EvaluateGroupMembershipAccess(IReadOnlyCollection<string> userGroupIds)
+    private TrialAccessResult EvaluateGroupMembershipAccess(HashSet<string> normalizedUserGroups)
     {
-        if (!_config.Enabled || !_config.EnforceEntraGroupMembership)
+        if (!_config.Enabled)
+        {
+            return Allow();
+        }
+
+        if (_allowAllAuthenticatedUsers || !_config.EnforceEntraGroupMembership)
         {
             return Allow();
         }
@@ -452,7 +491,6 @@ public sealed class TrialAccessService
                 "Trial access group configuration is invalid.");
         }
 
-        var normalizedUserGroups = NormalizeGroupIds(userGroupIds);
         if (normalizedUserGroups.Overlaps(_requiredTesterGroupIds))
         {
             return Allow();
@@ -462,6 +500,16 @@ public sealed class TrialAccessService
             StatusCodes.Status403Forbidden,
             "TRIAL_NOT_ALLOWLISTED",
             "User is not approved for MVP trial access.");
+    }
+
+    private bool IsAdminBypassGroupMember(HashSet<string> normalizedUserGroups)
+    {
+        if (!_config.Enabled || _adminBypassGroupIds.Count == 0)
+        {
+            return false;
+        }
+
+        return normalizedUserGroups.Overlaps(_adminBypassGroupIds);
     }
 
     private static TrialAccessResult Deny(
@@ -532,6 +580,39 @@ public sealed class TrialAccessService
         }
 
         return NormalizeGroupIds(configuredIds);
+    }
+
+    private static HashSet<string> ResolveAdminBypassGroupIds(TrialAccessConfiguration config)
+    {
+        var configuredIds = new List<string>();
+        configuredIds.AddRange(config.AdminBypassEntraGroupObjectIds);
+
+        if (!string.IsNullOrWhiteSpace(config.AdminBypassEntraGroupObjectIdsCsv))
+        {
+            configuredIds.AddRange(config.AdminBypassEntraGroupObjectIdsCsv.Split(',', StringSplitOptions.TrimEntries));
+        }
+
+        return NormalizeGroupIds(configuredIds);
+    }
+
+    private static bool ResolveAllowAllAuthenticatedUsers(string? configuredAccessMode, ILogger<TrialAccessService> logger)
+    {
+        if (string.IsNullOrWhiteSpace(configuredAccessMode)
+            || string.Equals(configuredAccessMode, TrialAccessModes.RestrictedGroups, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (string.Equals(configuredAccessMode, TrialAccessModes.AllAuthenticatedUsers, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        logger.LogWarning(
+            "Unknown TrialAccess access mode '{AccessMode}'. Falling back to '{DefaultMode}'.",
+            configuredAccessMode,
+            TrialAccessModes.RestrictedGroups);
+        return false;
     }
 
     private static HashSet<string> NormalizeGroupIds(IEnumerable<string> groupIds)
