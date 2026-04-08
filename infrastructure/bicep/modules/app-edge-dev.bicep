@@ -69,6 +69,37 @@ param jwtAudience string = ''
 @description('Optional public client ID used by CLI device-code login.')
 param jwtInteractiveClientId string = ''
 
+@description('Enable invite-only trial access controls in the backend.')
+param trialAccessEnabled bool = false
+
+@description('Require Entra group membership claim for trial access decisions.')
+param trialEnforceEntraGroupMembership bool = true
+
+@description('Comma-separated Entra group object IDs used as the trial tester allowlist source of truth.')
+param trialRequiredEntraGroupObjectIdsCsv string = ''
+
+@description('Enable token quota enforcement for trial users.')
+param trialQuotaEnabled bool = true
+
+@description('Per-user token limit for each trial quota window.')
+@minValue(1)
+param trialQuotaTokenLimit int = 40000
+
+@description('Quota window size in days.')
+@minValue(1)
+param trialQuotaWindowDays int = 7
+
+@description('Enable per-user request rate limiting for trial users.')
+param trialRequestRateLimitEnabled bool = true
+
+@description('Per-user allowed requests per minute for trial access checks.')
+@minValue(1)
+param trialRequestsPerMinute int = 20
+
+@description('Per-user burst capacity for request rate limiting.')
+@minValue(1)
+param trialBurstCapacity int = 10
+
 @description('PFX certificate for Application Gateway HTTPS listener (base64-encoded).')
 @secure()
 param appGatewaySslCertificatePfxBase64 string = ''
@@ -499,6 +530,42 @@ resource appService 'Microsoft.Web/sites@2023-12-01' = {
         {
           name: 'Authentication__AzureAd__InteractiveClientId'
           value: jwtInteractiveClientId
+        }
+        {
+          name: 'TrialAccess__Enabled'
+          value: trialAccessEnabled ? 'true' : 'false'
+        }
+        {
+          name: 'TrialAccess__EnforceEntraGroupMembership'
+          value: trialEnforceEntraGroupMembership ? 'true' : 'false'
+        }
+        {
+          name: 'TrialAccess__RequiredEntraGroupObjectIdsCsv'
+          value: trialRequiredEntraGroupObjectIdsCsv
+        }
+        {
+          name: 'TrialAccess__Quota__Enabled'
+          value: trialQuotaEnabled ? 'true' : 'false'
+        }
+        {
+          name: 'TrialAccess__Quota__TokenLimit'
+          value: string(trialQuotaTokenLimit)
+        }
+        {
+          name: 'TrialAccess__Quota__WindowDays'
+          value: string(trialQuotaWindowDays)
+        }
+        {
+          name: 'TrialAccess__RequestRateLimit__Enabled'
+          value: trialRequestRateLimitEnabled ? 'true' : 'false'
+        }
+        {
+          name: 'TrialAccess__RequestRateLimit__RequestsPerMinute'
+          value: string(trialRequestsPerMinute)
+        }
+        {
+          name: 'TrialAccess__RequestRateLimit__BurstCapacity'
+          value: string(trialBurstCapacity)
         }
       ]
     }

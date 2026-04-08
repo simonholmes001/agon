@@ -58,7 +58,9 @@ public sealed class AgentRunner : IAgentRunner
         RegexOptions.Multiline | RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private readonly IReadOnlyList<ICouncilAgent> _agents;
+    private readonly Dictionary<string, string> _modelProviderByAgentId;
     private readonly ITruthMapRepository _truthMapRepository;
+    private readonly ITokenUsageRepository? _tokenUsageRepository;
     private readonly IEventBroadcaster _broadcaster;
     private readonly ConversationHistoryService _conversationHistory;
     private readonly int _agentTimeoutSeconds;
@@ -69,11 +71,16 @@ public sealed class AgentRunner : IAgentRunner
         ITruthMapRepository truthMapRepository,
         IEventBroadcaster broadcaster,
         ConversationHistoryService conversationHistory,
+        ITokenUsageRepository? tokenUsageRepository = null,
         int agentTimeoutSeconds = 90,
         ILogger<AgentRunner>? logger = null)
     {
         _agents = agents;
+        _modelProviderByAgentId = _agents
+            .GroupBy(agent => agent.AgentId)
+            .ToDictionary(group => group.Key, group => group.First().ModelProvider, StringComparer.Ordinal);
         _truthMapRepository = truthMapRepository;
+        _tokenUsageRepository = tokenUsageRepository;
         _broadcaster = broadcaster;
         _conversationHistory = conversationHistory;
         _agentTimeoutSeconds = agentTimeoutSeconds;
@@ -152,7 +159,7 @@ public sealed class AgentRunner : IAgentRunner
             await ApplyPatchesAsync(state, [response], cancellationToken);
         }
 
-        AccumulateTokens(state, [response]);
+        await AccumulateTokensAsync(state, [response], cancellationToken);
 
         _logger?.LogInformation(
             "Moderator completed for session {SessionId}, round {Round}. Tokens: {Tokens}",
@@ -471,7 +478,7 @@ public sealed class AgentRunner : IAgentRunner
             state.Attachments);
 
         var response = await RunWithTimeoutAsync(assistant, context, cancellationToken);
-        AccumulateTokens(state, [response]);
+        await AccumulateTokensAsync(state, [response], cancellationToken);
 
         if (!response.TimedOut && !string.IsNullOrWhiteSpace(response.Message))
         {
@@ -518,7 +525,7 @@ public sealed class AgentRunner : IAgentRunner
 
         var responses = await DispatchParallelAsync(councilAgents, contexts, cancellationToken);
         await ApplyPatchesAsync(state, responses, cancellationToken);
-        AccumulateTokens(state, responses);
+        await AccumulateTokensAsync(state, responses, cancellationToken);
 
         // Store all agent messages so the CLI can fetch them
         foreach (var response in responses.Where(r => !r.TimedOut && !string.IsNullOrWhiteSpace(r.Message)))
@@ -565,7 +572,7 @@ public sealed class AgentRunner : IAgentRunner
 
         var responses = await DispatchParallelAsync(councilAgents, contexts, cancellationToken);
         await ApplyPatchesAsync(state, responses, cancellationToken);
-        AccumulateTokens(state, responses);
+        await AccumulateTokensAsync(state, responses, cancellationToken);
 
         // Store all critique agent messages so the CLI can fetch them
         foreach (var response in responses.Where(r => !r.TimedOut && !string.IsNullOrWhiteSpace(r.Message)))
@@ -608,7 +615,7 @@ public sealed class AgentRunner : IAgentRunner
         if (response.HasPatch)
             await ApplyPatchesAsync(state, [response], cancellationToken);
 
-        AccumulateTokens(state, [response]);
+        await AccumulateTokensAsync(state, [response], cancellationToken);
 
         // Store synthesizer message so the CLI can fetch it
         if (!response.TimedOut && !string.IsNullOrWhiteSpace(response.Message))
@@ -650,7 +657,7 @@ public sealed class AgentRunner : IAgentRunner
 
         var responses = await DispatchParallelAsync(targeted, contexts, cancellationToken);
         await ApplyPatchesAsync(state, responses, cancellationToken);
-        AccumulateTokens(state, responses);
+        await AccumulateTokensAsync(state, responses, cancellationToken);
         return responses;
     }
 
@@ -762,10 +769,103 @@ public sealed class AgentRunner : IAgentRunner
         }
     }
 
-    private static void AccumulateTokens(SessionState state, IReadOnlyList<AgentResponse> responses)
+    private async Task AccumulateTokensAsync(
+        SessionState state,
+        IReadOnlyList<AgentResponse> responses,
+        CancellationToken cancellationToken)
     {
-        foreach (var r in responses)
-            state.TokensUsed += r.TokensUsed;
+        foreach (var response in responses)
+        {
+            state.TokensUsed += Math.Max(0, response.TokensUsed);
+        }
+
+        if (_tokenUsageRepository is null || responses.Count == 0)
+        {
+            return;
+        }
+
+        var occurredAt = DateTimeOffset.UtcNow;
+        var usageRecords = responses
+            .Where(response => !response.TimedOut)
+            .Select(response => BuildUsageRecord(state, response, occurredAt))
+            .ToList();
+
+        if (usageRecords.Count == 0)
+        {
+            return;
+        }
+
+        await _tokenUsageRepository.AddRangeAsync(usageRecords, cancellationToken);
+    }
+
+    private TokenUsageRecord BuildUsageRecord(
+        SessionState state,
+        AgentResponse response,
+        DateTimeOffset occurredAt)
+    {
+        var modelProvider = _modelProviderByAgentId.TryGetValue(response.AgentId, out var value)
+            ? value
+            : "unknown unknown";
+        var (provider, model) = ParseProviderAndModel(modelProvider);
+        var promptTokens = Math.Max(0, response.PromptTokens);
+        var completionTokens = Math.Max(0, response.CompletionTokens);
+        var totalTokens = Math.Max(0, response.TokensUsed);
+
+        if (promptTokens == 0 && completionTokens == 0 && totalTokens > 0)
+        {
+            completionTokens = totalTokens;
+        }
+
+        if (totalTokens == 0)
+        {
+            totalTokens = promptTokens + completionTokens;
+        }
+
+        var source = string.IsNullOrWhiteSpace(response.TokenUsageSource)
+            ? "estimated"
+            : response.TokenUsageSource.Trim();
+
+        return new TokenUsageRecord(
+            Id: Guid.NewGuid(),
+            UserId: state.UserId,
+            SessionId: state.SessionId,
+            AgentId: response.AgentId,
+            Provider: provider,
+            Model: model,
+            PromptTokens: promptTokens,
+            CompletionTokens: completionTokens,
+            TotalTokens: totalTokens,
+            Source: source,
+            OccurredAt: occurredAt);
+    }
+
+    private static (string Provider, string Model) ParseProviderAndModel(string modelProvider)
+    {
+        if (string.IsNullOrWhiteSpace(modelProvider))
+        {
+            return ("unknown", "unknown");
+        }
+
+        var firstSpaceIndex = modelProvider.IndexOf(' ');
+        if (firstSpaceIndex <= 0 || firstSpaceIndex >= modelProvider.Length - 1)
+        {
+            return (modelProvider.Trim(), "unknown");
+        }
+
+        var provider = modelProvider[..firstSpaceIndex].Trim();
+        var model = modelProvider[(firstSpaceIndex + 1)..].Trim();
+
+        if (string.IsNullOrWhiteSpace(provider))
+        {
+            provider = "unknown";
+        }
+
+        if (string.IsNullOrWhiteSpace(model))
+        {
+            model = "unknown";
+        }
+
+        return (provider, model);
     }
 
     private static string? BuildPostDeliveryContext(IReadOnlyList<AgentMessageRecord> history)

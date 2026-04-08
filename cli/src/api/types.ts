@@ -90,3 +90,28 @@ export interface SessionAttachment {
   hasExtractedText: boolean;
   extractedTextPreview?: string;
 }
+
+export interface UsageByProviderModel {
+  provider: string;
+  model: string;
+  totalTokens: number;
+  promptTokens: number;
+  completionTokens: number;
+}
+
+export interface TrialUsageResponse {
+  trialEnabled: boolean;
+  windowStart: string;
+  windowEnd: string;
+  quota: {
+    tokenLimit: number;
+    usedTokens: number;
+    remainingTokens: number;
+  };
+  trial: {
+    isActive: boolean;
+    expiresAt?: string | null;
+    globalTrafficEnabled: boolean;
+  };
+  usageByProviderModel: UsageByProviderModel[];
+}

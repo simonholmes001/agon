@@ -1,4 +1,5 @@
 using Agon.Api.Observability;
+using Agon.Api.Services;
 using Agon.Application.Interfaces;
 using Agon.Application.Models;
 using Agon.Application.Services;
@@ -26,18 +27,22 @@ public class SessionsController : ControllerBase
     private const string AttachmentStorageUnavailableCode = "ATTACHMENT_STORAGE_UNAVAILABLE";
     private const string AttachmentMetadataNotConfiguredCode = "ATTACHMENT_METADATA_NOT_CONFIGURED";
     private const string AttachmentMetadataUnavailableCode = "ATTACHMENT_METADATA_UNAVAILABLE";
+    private const string EntraGroupsClaimType = "groups";
+    private const string LegacyGroupsClaimType = "http://schemas.microsoft.com/ws/2008/06/identity/claims/groups";
 
     private readonly ISessionService _sessionService;
     private readonly IAttachmentStorageService? _attachmentStorage;
     private readonly IAttachmentTextExtractor _attachmentTextExtractor;
     private readonly ConversationHistoryService _conversationHistory;
     private readonly ILogger<SessionsController> _logger;
+    private readonly TrialAccessService _trialAccessService;
 
     public SessionsController(
         ISessionService sessionService,
         IAttachmentTextExtractor attachmentTextExtractor,
         ConversationHistoryService conversationHistory,
         ILogger<SessionsController> logger,
+        TrialAccessService trialAccessService,
         IAttachmentStorageService? attachmentStorage = null)
     {
         _sessionService = sessionService;
@@ -45,6 +50,7 @@ public class SessionsController : ControllerBase
         _attachmentTextExtractor = attachmentTextExtractor;
         _conversationHistory = conversationHistory;
         _logger = logger;
+        _trialAccessService = trialAccessService;
     }
 
     /// <summary>
@@ -69,6 +75,14 @@ public class SessionsController : ControllerBase
         }
 
         var userId = ResolveCurrentUserId();
+        var access = await EvaluateTrialAccessAsync(
+            userId,
+            TrialAccessOperation.SessionCreate,
+            cancellationToken);
+        if (!access.Allowed)
+        {
+            return BuildTrialDeniedResult(access);
+        }
 
         var sessionState = await _sessionService.CreateAsync(
             userId,
@@ -141,6 +155,15 @@ public class SessionsController : ControllerBase
             return NotFound(new { error = $"Session {id} not found" });
         }
 
+        var access = await EvaluateTrialAccessAsync(
+            session.UserId,
+            TrialAccessOperation.SessionMessage,
+            cancellationToken);
+        if (!access.Allowed)
+        {
+            return BuildTrialDeniedResult(access);
+        }
+
         try
         {
             await _sessionService.StartClarificationAsync(id, cancellationToken);
@@ -179,6 +202,15 @@ public class SessionsController : ControllerBase
         if (session is null)
         {
             return NotFound(new { error = $"Session {id} not found" });
+        }
+
+        var access = await EvaluateTrialAccessAsync(
+            session.UserId,
+            TrialAccessOperation.SessionMessage,
+            cancellationToken);
+        if (!access.Allowed)
+        {
+            return BuildTrialDeniedResult(access);
         }
 
         try
@@ -793,6 +825,35 @@ public class SessionsController : ControllerBase
     private static string BuildAttachmentDownloadPath(Guid sessionId, Guid attachmentId) =>
         $"/sessions/{sessionId}/attachments/{attachmentId}/content";
 
+    private async Task<TrialAccessResult> EvaluateTrialAccessAsync(
+        Guid userId,
+        TrialAccessOperation operation,
+        CancellationToken cancellationToken)
+    {
+        return await _trialAccessService.EvaluateAsync(
+            userId,
+            ResolveCurrentUserGroupIds(),
+            operation,
+            cancellationToken);
+    }
+
+    private ObjectResult BuildTrialDeniedResult(TrialAccessResult result)
+    {
+        if (result.RetryAfterSeconds is > 0)
+        {
+            Response.Headers.RetryAfter = result.RetryAfterSeconds.Value.ToString();
+        }
+
+        return StatusCode(result.StatusCode, new
+        {
+            errorCode = result.ErrorCode,
+            error = result.Error,
+            limitType = result.LimitType,
+            windowResetAt = result.WindowResetAt,
+            remainingTokens = result.RemainingTokens
+        });
+    }
+
     private static string SanitizeFileName(string fileName)
     {
         var baseName = Path.GetFileName(fileName);
@@ -879,6 +940,20 @@ public class SessionsController : ControllerBase
         }
 
         return Guid.Empty;
+    }
+
+    private IReadOnlyCollection<string> ResolveCurrentUserGroupIds()
+    {
+        var groups = User.Claims
+            .Where(claim =>
+                string.Equals(claim.Type, EntraGroupsClaimType, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(claim.Type, LegacyGroupsClaimType, StringComparison.OrdinalIgnoreCase))
+            .Select(claim => claim.Value)
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => value.Trim())
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        return groups;
     }
 
     private static Guid DeterministicGuidFromString(string input)

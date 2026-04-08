@@ -12,7 +12,10 @@ public sealed record AgentResponse(
     TruthMapPatch? Patch,
     int TokensUsed,
     bool TimedOut,
-    string? RawOutput)
+    string? RawOutput,
+    int PromptTokens = 0,
+    int CompletionTokens = 0,
+    string TokenUsageSource = "estimated")
 {
     /// <summary>Creates a timed-out response stub for a specific agent.</summary>
     public static AgentResponse CreateTimedOut(string agentId) =>

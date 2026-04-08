@@ -28,11 +28,14 @@ public class AgentRunnerTests
     private static AgentResponse SuccessResponse(string agentId, TruthMapPatch? patch = null) =>
         new(agentId, $"Message from {agentId}", patch ?? EmptyPatch(agentId), 100, false, null);
 
-    private static ICouncilAgent StubAgent(string agentId, AgentResponse response)
+    private static ICouncilAgent StubAgent(
+        string agentId,
+        AgentResponse response,
+        string modelProvider = "fake/model")
     {
         var agent = Substitute.For<ICouncilAgent>();
         agent.AgentId.Returns(agentId);
-        agent.ModelProvider.Returns("fake/model");
+        agent.ModelProvider.Returns(modelProvider);
         agent.RunAsync(Arg.Any<AgentContext>(), Arg.Any<CancellationToken>())
              .Returns(Task.FromResult(response));
         return agent;
@@ -96,6 +99,7 @@ public class AgentRunnerTests
         ITruthMapRepository? repo = null,
         IEventBroadcaster? broadcaster = null,
         ConversationHistoryService? conversationHistory = null,
+        ITokenUsageRepository? tokenUsageRepository = null,
         int agentTimeoutSeconds = 5)
     {
         return new AgentRunner(
@@ -103,7 +107,8 @@ public class AgentRunnerTests
             repo ?? StubRepo(),
             broadcaster ?? NullBroadcaster(),
             conversationHistory ?? StubConversationHistory(),
-            agentTimeoutSeconds);
+            tokenUsageRepository,
+            agentTimeoutSeconds: agentTimeoutSeconds);
     }
 
     // ── Analysis Round — all agents called in parallel ────────────────────────
@@ -396,6 +401,75 @@ public class AgentRunnerTests
         await runner.RunAnalysisRoundAsync(state, CancellationToken.None);
 
         state.TokensUsed.Should().Be(1400); // 1000 + 250 + 150
+    }
+
+    [Fact]
+    public async Task RunAnalysisRoundAsync_RecordsProviderTokenBreakdown_WhenAvailable()
+    {
+        var usageRepo = Substitute.For<ITokenUsageRepository>();
+        var gpt = StubAgent(
+            AgentId.GptAgent,
+            new AgentResponse(
+                AgentId.GptAgent,
+                "Msg",
+                EmptyPatch(AgentId.GptAgent),
+                TokensUsed: 320,
+                TimedOut: false,
+                RawOutput: null,
+                PromptTokens: 120,
+                CompletionTokens: 200,
+                TokenUsageSource: "provider"),
+            modelProvider: "OpenAI gpt-5");
+
+        var runner = BuildRunner([gpt], tokenUsageRepository: usageRepo);
+        var state = BuildSessionState();
+
+        await runner.RunAnalysisRoundAsync(state, CancellationToken.None);
+
+        await usageRepo.Received(1).AddRangeAsync(
+            Arg.Is<IReadOnlyList<TokenUsageRecord>>(records =>
+                records.Count == 1
+                && records[0].UserId == state.UserId
+                && records[0].SessionId == state.SessionId
+                && records[0].Provider == "OpenAI"
+                && records[0].Model == "gpt-5"
+                && records[0].PromptTokens == 120
+                && records[0].CompletionTokens == 200
+                && records[0].TotalTokens == 320
+                && records[0].Source == "provider"),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task RunAnalysisRoundAsync_UsesEstimatedFallback_WhenBreakdownMissing()
+    {
+        var usageRepo = Substitute.For<ITokenUsageRepository>();
+        var claude = StubAgent(
+            AgentId.ClaudeAgent,
+            new AgentResponse(
+                AgentId.ClaudeAgent,
+                "Msg",
+                EmptyPatch(AgentId.ClaudeAgent),
+                TokensUsed: 210,
+                TimedOut: false,
+                RawOutput: null),
+            modelProvider: "Anthropic claude-sonnet");
+
+        var runner = BuildRunner([claude], tokenUsageRepository: usageRepo);
+        var state = BuildSessionState();
+
+        await runner.RunAnalysisRoundAsync(state, CancellationToken.None);
+
+        await usageRepo.Received(1).AddRangeAsync(
+            Arg.Is<IReadOnlyList<TokenUsageRecord>>(records =>
+                records.Count == 1
+                && records[0].Provider == "Anthropic"
+                && records[0].Model == "claude-sonnet"
+                && records[0].PromptTokens == 0
+                && records[0].CompletionTokens == 210
+                && records[0].TotalTokens == 210
+                && records[0].Source == "estimated"),
+            Arg.Any<CancellationToken>());
     }
 
     // ── Moderator Tests ────────────────────────────────────────────────────────

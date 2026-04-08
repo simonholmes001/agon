@@ -78,6 +78,9 @@ var attachmentOperationsConfig = builder.Configuration
 var rateLimitingConfig = builder.Configuration
     .GetSection(ApiRateLimitingConfiguration.SectionName)
     .Get<ApiRateLimitingConfiguration>() ?? new();
+var trialAccessConfig = builder.Configuration
+    .GetSection(TrialAccessConfiguration.SectionName)
+    .Get<TrialAccessConfiguration>() ?? new();
 var forceRateLimitingInTesting = builder.Configuration.GetValue<bool>("ApiRateLimiting:ForceEnableInTesting");
 if (builder.Environment.IsEnvironment("Testing") && !forceRateLimitingInTesting)
 {
@@ -165,6 +168,10 @@ builder.Services.AddSingleton(llmConfig);
 builder.Services.AddSingleton(agonConfig);
 builder.Services.AddSingleton(attachmentOperationsConfig);
 builder.Services.AddSingleton(rateLimitingConfig);
+builder.Services.AddSingleton(trialAccessConfig);
+builder.Services.AddSingleton<ITokenUsageRepository, NoOpTokenUsageRepository>();
+builder.Services.AddSingleton<TrialRequestRateLimiter>();
+builder.Services.AddScoped<TrialAccessService>();
 builder.Services.AddSingleton(new AttachmentExtractionOptions
 {
     MaxExtractedTextChars = attachmentProcessingConfig.MaxExtractedTextChars,
@@ -605,7 +612,7 @@ if (app.Environment.IsDevelopment())
 }
 
 app.Logger.LogInformation(
-    "Startup summary: EnvFileExists={EnvFileExists}, EnvKeysLoaded={EnvKeysLoaded}, AuthEnabled={AuthEnabled}, CorsOriginCount={CorsOriginCount}, OpenAIConfigured={OpenAIConfigured}, AnthropicConfigured={AnthropicConfigured}, GoogleConfigured={GoogleConfigured}, DeepSeekConfigured={DeepSeekConfigured}, DocumentIntelligenceEndpointConfigured={DocumentIntelligenceEndpointConfigured}, AttachmentStorageMode={AttachmentStorageMode}, ApiRateLimitingEnabled={ApiRateLimitingEnabled}, AttachmentRetentionDays={AttachmentRetentionDays}, AttachmentCleanupEnabled={AttachmentCleanupEnabled}",
+    "Startup summary: EnvFileExists={EnvFileExists}, EnvKeysLoaded={EnvKeysLoaded}, AuthEnabled={AuthEnabled}, CorsOriginCount={CorsOriginCount}, OpenAIConfigured={OpenAIConfigured}, AnthropicConfigured={AnthropicConfigured}, GoogleConfigured={GoogleConfigured}, DeepSeekConfigured={DeepSeekConfigured}, DocumentIntelligenceEndpointConfigured={DocumentIntelligenceEndpointConfigured}, AttachmentStorageMode={AttachmentStorageMode}, ApiRateLimitingEnabled={ApiRateLimitingEnabled}, TrialAccessEnabled={TrialAccessEnabled}, AttachmentRetentionDays={AttachmentRetentionDays}, AttachmentCleanupEnabled={AttachmentCleanupEnabled}",
     envFileExists,
     envKeysLoaded,
     authEnabled,
@@ -617,6 +624,7 @@ app.Logger.LogInformation(
     !string.IsNullOrWhiteSpace(attachmentProcessingConfig.DocumentIntelligence.Endpoint),
     attachmentStorageMode,
     rateLimitingConfig.Enabled,
+    trialAccessConfig.Enabled,
     attachmentOperationsConfig.Retention.RetentionDays,
     attachmentOperationsConfig.Retention.CleanupEnabled);
 
@@ -886,6 +894,7 @@ static void RegisterPersistenceServices(IServiceCollection services)
     services.AddScoped<ISessionRepository, SessionRepository>();
     services.AddScoped<ITruthMapRepository, TruthMapRepository>();
     services.AddScoped<IAgentMessageRepository, AgentMessageRepository>();
+    services.AddScoped<ITokenUsageRepository, TokenUsageRepository>();
     services.AddScoped<IAttachmentRepository, AttachmentRepository>();
 }
 
