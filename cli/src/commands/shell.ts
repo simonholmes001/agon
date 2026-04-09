@@ -30,13 +30,11 @@ import {
   renderMessagePanel,
   renderPromptBanner,
   renderShellHeader,
-  renderStatusLine,
   styleAttachmentToken
 } from '../shell/renderer.js';
 import { PromptHistory } from '../shell/history.js';
 import { renderMarkdown } from '../utils/markdown.js';
 import { normalizeStatus } from '../utils/session-flow.js';
-import { checkForCliUpdate } from '../utils/update-check.js';
 import { AgonError, ErrorCode } from '../utils/error-handler.js';
 import {
   describeSelfUpdateFailure,
@@ -251,20 +249,6 @@ export default class Shell extends Command {
       },
       (line) => this.log(line)
     );
-    renderStatusLine((line) => this.log(line));
-    const updateInfo = await checkForCliUpdate({
-      packageName: this.config.pjson.name ?? '@agon_agents/cli',
-      currentVersion: this.config.pjson.version ?? '0.0.0'
-    });
-    if (updateInfo) {
-      this.log(chalk.yellow(`Update available: v${updateInfo.currentVersion} → v${updateInfo.latestVersion}`));
-      this.log(chalk.cyan('Run now in this shell:'));
-      this.log(chalk.cyan('  /update'));
-      this.log(chalk.dim('Tip: Use /update --check to only verify availability.'));
-      this.log(chalk.dim('If that fails, run:'));
-      this.log(chalk.dim(`  ${updateInfo.installCommand}`));
-    }
-    this.log('');
 
     try {
       while (true) {

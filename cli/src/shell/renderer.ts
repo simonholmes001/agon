@@ -50,10 +50,6 @@ export function renderShellHeader(data: ShellHeaderData, print: (line: string) =
   print(cardLine(`friction/research: ${data.config.defaultFriction} / ${data.config.researchEnabled ? 'on' : 'off'}`));
   print(cardLine(`logLevel: ${data.config.logLevel}`));
   print(cardFooter);
-  print('');
-  print(chalk.dim('Tip: Use ') + chalk.cyan('/help') + chalk.dim(' to list shell commands.'));
-  print(border);
-  print('');
 }
 
 export function renderMessagePanel(
