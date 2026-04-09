@@ -11,6 +11,7 @@ USER_UPN=""
 USER_ID=""
 GROUP_INPUT=""
 DRY_RUN="false"
+FORCE="false"
 
 usage() {
   cat <<'EOF'
@@ -28,6 +29,7 @@ Usage:
     [--app-name <app-service-name>] \
     [--app-rg <resource-group>] \
     [--environment <env>] \
+    [--force] \
     [--dry-run]
 
 Options:
@@ -38,6 +40,7 @@ Options:
   --app-name      App Service name. If omitted, auto-discovered by tags.
   --app-rg        App resource group (default: rg-agon-dev-swc-app)
   --environment   Environment tag used for discovery (default: dev)
+  --force         Continue even if trial-access guardrail flags are not enabled
   --dry-run       Validate and resolve everything without modifying group membership
   --help          Show this help
 EOF
@@ -62,12 +65,12 @@ require_cmd() {
 
 is_uuid_like() {
   local value="$1"
-  [[ "$value" =~ ^[0-9a-fA-F-]{36}$ ]]
+  [[ "$value" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]]
 }
 
 is_key_vault_reference() {
   local value="$1"
-  [[ "$value" == @Microsoft.KeyVault\(SecretUri=* ]]
+  [[ "$value" =~ ^@Microsoft\.KeyVault\(SecretUri(WithVersion)?=https://[^[:space:]]+\)$ ]]
 }
 
 resolve_app_name() {
@@ -144,14 +147,22 @@ validate_server_managed_provider_keys() {
 
 resolve_group_id() {
   local app_name="$1"
+  local resolved_group_id
 
   if [[ -n "$GROUP_INPUT" ]]; then
-    if is_uuid_like "$GROUP_INPUT"; then
-      printf '%s\n' "$GROUP_INPUT"
-      return 0
+    if ! resolved_group_id="$(az ad group show --group "$GROUP_INPUT" --query id --output tsv 2>/dev/null)"; then
+      fail "Could not resolve group from input '$GROUP_INPUT'. Check group name/id and directory permissions."
     fi
 
-    az ad group show --group "$GROUP_INPUT" --query id --output tsv
+    if [[ -z "$resolved_group_id" || "$resolved_group_id" == "null" ]]; then
+      fail "Could not resolve group id from input '$GROUP_INPUT'. Check group name/id and directory permissions."
+    fi
+
+    if ! is_uuid_like "$resolved_group_id"; then
+      fail "Resolved group id is not a valid GUID: '$resolved_group_id'."
+    fi
+
+    printf '%s\n' "$resolved_group_id"
     return 0
   fi
 
@@ -167,16 +178,38 @@ resolve_group_id() {
     fail "Multiple group IDs configured in TrialAccess__RequiredEntraGroupObjectIdsCsv. Pass --group explicitly."
   fi
 
+  if ! is_uuid_like "$csv"; then
+    fail "TrialAccess__RequiredEntraGroupObjectIdsCsv is not a single valid GUID."
+  fi
+
   printf '%s\n' "$csv"
 }
 
 resolve_user_id() {
-  if [[ -n "$USER_ID" ]]; then
-    printf '%s\n' "$USER_ID"
-    return 0
+  local lookup_input resolved_user_id
+
+  if [[ -n "$USER_ID" ]] && ! is_uuid_like "$USER_ID"; then
+    fail "--user-id must be a valid GUID."
   fi
 
-  az ad user show --id "$USER_UPN" --query id --output tsv
+  lookup_input="$USER_UPN"
+  if [[ -n "$USER_ID" ]]; then
+    lookup_input="$USER_ID"
+  fi
+
+  if ! resolved_user_id="$(az ad user show --id "$lookup_input" --query id --output tsv 2>/dev/null)"; then
+    fail "Could not resolve user from '$lookup_input'. Check --user-upn/--user-id and directory permissions."
+  fi
+
+  if [[ -z "$resolved_user_id" || "$resolved_user_id" == "null" ]]; then
+    fail "Could not resolve user object ID from '$lookup_input'. Check --user-upn/--user-id and directory permissions."
+  fi
+
+  if ! is_uuid_like "$resolved_user_id"; then
+    fail "Resolved user object ID is not a valid GUID: '$resolved_user_id'."
+  fi
+
+  printf '%s\n' "$resolved_user_id"
 }
 
 check_trial_access_flags() {
@@ -186,11 +219,19 @@ check_trial_access_flags() {
   enforce_groups="$(app_setting_value "$app_name" "TrialAccess__EnforceEntraGroupMembership")"
 
   if [[ "$enabled" != "true" ]]; then
-    warn "TrialAccess__Enabled is '$enabled' (expected 'true')."
+    if [[ "$FORCE" == "true" ]]; then
+      warn "TrialAccess__Enabled is '$enabled' (expected 'true'). Continuing because --force was provided."
+    else
+      fail "TrialAccess__Enabled is '$enabled' (expected 'true'). Use --force to override."
+    fi
   fi
 
   if [[ "$enforce_groups" != "true" ]]; then
-    warn "TrialAccess__EnforceEntraGroupMembership is '$enforce_groups' (expected 'true')."
+    if [[ "$FORCE" == "true" ]]; then
+      warn "TrialAccess__EnforceEntraGroupMembership is '$enforce_groups' (expected 'true'). Continuing because --force was provided."
+    else
+      fail "TrialAccess__EnforceEntraGroupMembership is '$enforce_groups' (expected 'true'). Use --force to override."
+    fi
   fi
 }
 
@@ -228,6 +269,10 @@ parse_args() {
       --environment)
         ENVIRONMENT="${2:-}"
         shift 2
+        ;;
+      --force)
+        FORCE="true"
+        shift
         ;;
       --dry-run)
         DRY_RUN="true"
@@ -273,6 +318,14 @@ main() {
 
   local group_id
   group_id="$(resolve_group_id "$resolved_app_name")"
+  if [[ -z "$group_id" || "$group_id" == "null" ]]; then
+    fail "Could not resolve group id from input '$GROUP_INPUT'. Check group name/id and directory permissions."
+  fi
+
+  if ! is_uuid_like "$group_id"; then
+    fail "Resolved group id is not a valid GUID: '$group_id'."
+  fi
+
   log "Using tester group object ID: ${group_id}"
 
   local configured_groups_csv
@@ -283,6 +336,14 @@ main() {
 
   local resolved_user_id
   resolved_user_id="$(resolve_user_id)"
+  if [[ -z "$resolved_user_id" || "$resolved_user_id" == "null" ]]; then
+    fail "Could not resolve user object ID. Check --user-upn/--user-id and directory permissions."
+  fi
+
+  if ! is_uuid_like "$resolved_user_id"; then
+    fail "Resolved user object ID is not a valid GUID: '$resolved_user_id'."
+  fi
+
   log "Resolved tester user object ID: ${resolved_user_id}"
 
   if [[ "$DRY_RUN" == "true" ]]; then
