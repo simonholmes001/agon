@@ -1,5 +1,11 @@
 # @agon_agents/cli
 
+## 0.8.12
+
+### Patch Changes
+
+- Match shell prompt input zone height to Codex by removing extra frame border rows.
+
 ## 0.8.11
 
 ### Patch Changes
