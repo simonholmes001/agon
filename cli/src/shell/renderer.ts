@@ -309,8 +309,8 @@ function createPromptFrame(inputLineCountOverride?: number): PromptFrame {
   const terminalWidth = process.stdout.columns ?? 100;
   // Codex-like wide prompt zone: keep a small side margin, but avoid runaway ultra-wide lines.
   const width = Math.max(72, Math.min(terminalWidth - 4, 180));
-  // Start as a single prompt row and let the frame grow with input.
-  const inputLineCount = Math.max(1, inputLineCountOverride ?? 1);
+  // Start with a 2-row prompt zone (Codex-like) and let the frame grow with input.
+  const inputLineCount = Math.max(1, inputLineCountOverride ?? 2);
   const promptLineOffset = 0;
   const borderLine = chalk.whiteBright('─'.repeat(width));
   const backgroundStart = '\u001b[48;2;63;111;201m';

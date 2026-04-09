@@ -104,7 +104,7 @@ describe('shell renderer', () => {
     expect(frame.maxInputChars).toBeGreaterThan(0);
     expect(frame.cursorUpLines).toBe(frame.inputLineCount);
     expect(frame.cursorDownFromFirstLine).toBe(frame.inputLineCount);
-    expect(frame.inputLineCount).toBe(1);
+    expect(frame.inputLineCount).toBe(2);
     expect(frame.promptLineOffset).toBe(0);
   });
 
