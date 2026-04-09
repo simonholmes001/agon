@@ -124,18 +124,16 @@ export function renderPromptBanner(
   options?: { inputLineCount?: number }
 ): PromptFrameContext {
   const frame = createPromptFrame(options?.inputLineCount);
-  print(frame.borderLine);
   for (let index = 0; index < frame.inputLineCount; index += 1) {
     print(frame.paddingLine);
   }
-  print(frame.borderLine);
 
   return {
     width: frame.width,
     // Move from line after frame to first frame input row.
-    cursorUpLines: frame.inputLineCount + 1,
+    cursorUpLines: frame.inputLineCount,
     // Return from first frame input row to line below frame.
-    cursorDownFromFirstLine: frame.inputLineCount + 1,
+    cursorDownFromFirstLine: frame.inputLineCount,
     inputLineCount: frame.inputLineCount,
     promptLineOffset: frame.promptLineOffset,
     // Keep a small right gutter so wrapped lines do not visually collide with the frame edge.
