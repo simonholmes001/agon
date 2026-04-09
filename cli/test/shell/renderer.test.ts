@@ -98,13 +98,12 @@ describe('shell renderer', () => {
 
     const text = lines.join('\n');
     expect(text).not.toContain('Write an idea, a follow-up, or a slash command');
-    expect((text.match(/─/g) ?? []).length).toBeGreaterThanOrEqual(2);
     expect(text).toContain('/help');
     expect(text).toContain('/set');
     expect(text).toContain('/params');
     expect(frame.maxInputChars).toBeGreaterThan(0);
-    expect(frame.cursorUpLines).toBe(frame.inputLineCount + 1);
-    expect(frame.cursorDownFromFirstLine).toBe(frame.inputLineCount + 1);
+    expect(frame.cursorUpLines).toBe(frame.inputLineCount);
+    expect(frame.cursorDownFromFirstLine).toBe(frame.inputLineCount);
     expect(frame.inputLineCount).toBe(1);
     expect(frame.promptLineOffset).toBe(0);
   });

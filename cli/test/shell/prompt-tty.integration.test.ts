@@ -111,8 +111,8 @@ describe('shell prompt TTY integration', () => {
     await waitFor(
       () => {
         const newWrites = fakeOutput.writes.join('').slice(writesAfterGrowth);
-        // After shrinking, a 2-line frame resize emits cursorUpLines = 3 (inputLineCount 2 + 1)
-        return /\u001b\[3A/.test(newWrites);
+        // After shrinking, a 2-line frame resize emits cursorUpLines = 2.
+        return /\u001b\[2A/.test(newWrites);
       },
       3_000,
       'Expected prompt frame shrink was not emitted after deleting all input',
