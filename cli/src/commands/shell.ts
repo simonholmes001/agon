@@ -29,12 +29,12 @@ import {
   type PromptFrameContext,
   renderMessagePanel,
   renderPromptBanner,
-  renderShellHeader,
   styleAttachmentToken
 } from '../shell/renderer.js';
 import { PromptHistory } from '../shell/history.js';
 import { renderMarkdown } from '../utils/markdown.js';
 import { normalizeStatus } from '../utils/session-flow.js';
+import { checkForCliUpdate } from '../utils/update-check.js';
 import { AgonError, ErrorCode } from '../utils/error-handler.js';
 import {
   describeSelfUpdateFailure,
@@ -42,7 +42,6 @@ import {
   runNpmGlobalInstall
 } from '../utils/self-update.js';
 import { buildRuntimeExecutionProfile } from '../runtime/user-runtime-profile.js';
-import { AGENT_MODEL_IDS } from '../state/agent-model-config.js';
 
 /**
  * Sentinel value returned from promptForInput when the user presses Ctrl+C
@@ -155,21 +154,6 @@ export default class Shell extends Command {
     this.sessionManager = sessionManager;
     this.initializeKeypressEvents = createKeypressInitializer(input);
 
-    if (runtimeProfile.missingProviders.length > 0) {
-      this.log(
-        chalk.yellow(
-          `Missing API keys for providers: ${runtimeProfile.missingProviders.join(', ')}.`,
-        ),
-      );
-      this.log(
-        chalk.dim(
-          'Run in your terminal (outside the Agon shell): `agon command onboard` (recommended) ' +
-          'or `agon keys set <provider>` before starting a debate.'
-        )
-      );
-      this.log('');
-    }
-
     // Pre-flight: auth check
     // Only block when the backend explicitly requires authentication AND the
     // user has no token configured. We do not block on network errors so
@@ -208,18 +192,6 @@ export default class Shell extends Command {
       }
     }
 
-    if (!hasToken && allowAnonymous) {
-      this.log('');
-      this.log(chalk.yellow('ℹ Running without bearer token (anonymous bypass enabled).'));
-      this.log(chalk.dim(`  Backend: ${config.apiUrl}`));
-      this.log(chalk.dim('  Set AGON_ALLOW_ANONYMOUS=false (or unset it) to enforce login.'));
-      this.log('');
-      this.log('Recommended first-time setup:');
-      this.log(`  ${chalk.cyan('agon login')}              Save your bearer token`);
-      this.log(`  ${chalk.cyan('agon login --status')}     Check current auth status`);
-      this.log('');
-    }
-
     const controller = new ShellController({
       apiClient,
       sessionManager,
@@ -232,23 +204,6 @@ export default class Shell extends Command {
       selfUpdate: (options) => this.runSelfUpdate(options.check),
       print: (line: string) => this.printLine(line)
     });
-
-    const snapshot = await controller.getParamsSnapshot();
-    const agentSetupLines = AGENT_MODEL_IDS.map((agentId) => {
-      const selection = runtimeProfile.profile.agentModels[agentId];
-      return `${agentId}: ${selection.provider}/${selection.model}`;
-    });
-    renderShellHeader(
-      {
-        version: this.config.pjson.version ?? 'dev',
-        modelLabel: 'OpenAI GPT (backend configured)',
-        directory: process.cwd(),
-        config: snapshot.config,
-        session: snapshot.session,
-        agentSetup: agentSetupLines
-      },
-      (line) => this.log(line)
-    );
 
     try {
       while (true) {
