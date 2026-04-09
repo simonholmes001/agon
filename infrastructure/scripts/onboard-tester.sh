@@ -12,6 +12,10 @@ USER_ID=""
 GROUP_INPUT=""
 DRY_RUN="false"
 FORCE="false"
+INVITE_IF_MISSING="false"
+INVITE_REDIRECT_URL="https://myapplications.microsoft.com"
+DEFAULT_INVITE_REDIRECT_HOST="myapplications.microsoft.com"
+DRY_RUN_WOULD_INVITE_SENTINEL="__DRY_RUN_WOULD_INVITE__"
 
 usage() {
   cat <<'EOF'
@@ -29,6 +33,8 @@ Usage:
     [--app-name <app-service-name>] \
     [--app-rg <resource-group>] \
     [--environment <env>] \
+    [--invite-if-missing] \
+    [--invite-redirect-url <url>] \
     [--force] \
     [--dry-run]
 
@@ -40,6 +46,11 @@ Options:
   --app-name      App Service name. If omitted, auto-discovered by tags.
   --app-rg        App resource group (default: rg-agon-dev-swc-app)
   --environment   Environment tag used for discovery (default: dev)
+  --invite-if-missing
+                  If --user-upn does not resolve, invite as Entra guest automatically
+                  and continue onboarding with the created guest object.
+  --invite-redirect-url
+                  Redirect URL used for guest invitation (default: https://myapplications.microsoft.com)
   --force         Continue even if trial-access guardrail flags are not enabled
   --dry-run       Validate and resolve everything without modifying group membership
   --help          Show this help
@@ -47,11 +58,11 @@ EOF
 }
 
 log() {
-  printf '[INFO] %s\n' "$1"
+  printf '[INFO] %s\n' "$1" >&2
 }
 
 warn() {
-  printf '[WARN] %s\n' "$1"
+  printf '[WARN] %s\n' "$1" >&2
 }
 
 fail() {
@@ -71,6 +82,75 @@ is_uuid_like() {
 is_key_vault_reference() {
   local value="$1"
   [[ "$value" =~ ^@Microsoft\.KeyVault\(SecretUri(WithVersion)?=https://[^[:space:]]+\)$ ]]
+}
+
+escape_odata_literal() {
+  local value="$1"
+  printf '%s\n' "${value//\'/\'\'}"
+}
+
+escape_json_string() {
+  local value="$1"
+  value="${value//\\/\\\\}"
+  value="${value//\"/\\\"}"
+  value="${value//$'\b'/\\b}"
+  value="${value//$'\f'/\\f}"
+  value="${value//$'\n'/\\n}"
+  value="${value//$'\r'/\\r}"
+  value="${value//$'\t'/\\t}"
+  printf '%s\n' "$value"
+}
+
+is_https_url() {
+  local value="$1"
+  [[ "$value" =~ ^https://[^[:space:]]+$ ]]
+}
+
+url_host() {
+  local value="$1"
+  local without_scheme host
+
+  without_scheme="${value#https://}"
+  host="${without_scheme%%/*}"
+  host="${host%%\?*}"
+  host="${host%%\#*}"
+  printf '%s\n' "$host"
+}
+
+invite_guest_user() {
+  local user_email="$1"
+  local email_json redirect_json request_body invited_user_id
+  local error_file error_text
+
+  email_json="$(escape_json_string "$user_email")"
+  redirect_json="$(escape_json_string "$INVITE_REDIRECT_URL")"
+  request_body="{\"invitedUserEmailAddress\":\"${email_json}\",\"inviteRedirectUrl\":\"${redirect_json}\",\"sendInvitationMessage\":true}"
+
+  log "Inviting guest with redirect URL: ${INVITE_REDIRECT_URL}"
+
+  error_file="$(mktemp)"
+  if ! invited_user_id="$(az rest \
+    --method POST \
+    --url "https://graph.microsoft.com/v1.0/invitations" \
+    --headers "Content-Type=application/json" \
+    --body "$request_body" \
+    --query "invitedUser.id" \
+    --output tsv 2>"$error_file")"; then
+    error_text="$(tr '\n' ' ' < "$error_file" | sed -e 's/[[:space:]]\+/ /g' -e 's/^ //; s/ $//')"
+    rm -f "$error_file"
+    fail "Failed to invite '$user_email' as guest. Azure error: ${error_text:-unknown error}"
+  fi
+  rm -f "$error_file"
+
+  if [[ -z "$invited_user_id" || "$invited_user_id" == "null" ]]; then
+    fail "Failed to invite '$user_email' as guest. Check Entra guest invitation policy and Graph permissions."
+  fi
+
+  if ! is_uuid_like "$invited_user_id"; then
+    fail "Invitation returned invalid invitedUser.id: '$invited_user_id'."
+  fi
+
+  printf '%s\n' "$invited_user_id"
 }
 
 resolve_app_name() {
@@ -187,6 +267,9 @@ resolve_group_id() {
 
 resolve_user_id() {
   local lookup_input resolved_user_id
+  local escaped_input filter_results filter_value
+  local line candidate_ids_csv deduped_ids deduped_count
+  local candidate_id candidate_details_csv candidate_detail
 
   if [[ -n "$USER_ID" ]] && ! is_uuid_like "$USER_ID"; then
     fail "--user-id must be a valid GUID."
@@ -197,14 +280,87 @@ resolve_user_id() {
     lookup_input="$USER_ID"
   fi
 
-  if ! resolved_user_id="$(az ad user show --id "$lookup_input" --query id --output tsv 2>/dev/null)"; then
-    fail "Could not resolve user from '$lookup_input'. Check --user-upn/--user-id and directory permissions."
+  if resolved_user_id="$(az ad user show --id "$lookup_input" --query id --output tsv 2>/dev/null)"; then
+    if [[ -n "$resolved_user_id" && "$resolved_user_id" != "null" ]]; then
+      if ! is_uuid_like "$resolved_user_id"; then
+        fail "Resolved user object ID is not a valid GUID: '$resolved_user_id'."
+      fi
+
+      printf '%s\n' "$resolved_user_id"
+      return 0
+    fi
   fi
 
-  if [[ -z "$resolved_user_id" || "$resolved_user_id" == "null" ]]; then
-    fail "Could not resolve user object ID from '$lookup_input'. Check --user-upn/--user-id and directory permissions."
+  if [[ -n "$USER_ID" ]]; then
+    fail "Could not resolve user object ID from '$lookup_input'. Check --user-id and directory permissions."
   fi
 
+  candidate_ids_csv=""
+  escaped_input="$(escape_odata_literal "$lookup_input")"
+  for filter_value in \
+    "userPrincipalName eq '${escaped_input}'" \
+    "mail eq '${escaped_input}'" \
+    "otherMails/any(m:m eq '${escaped_input}')"; do
+    filter_results="$(az ad user list --filter "$filter_value" --query "[].id" --output tsv 2>/dev/null || true)"
+    if [[ -z "$filter_results" ]]; then
+      continue
+    fi
+
+    while IFS= read -r line; do
+      if [[ -z "$line" || "$line" == "null" ]]; then
+        continue
+      fi
+
+      candidate_ids_csv+="${line}"$'\n'
+    done <<< "$filter_results"
+  done
+
+  deduped_ids="$(printf '%s' "$candidate_ids_csv" | awk 'NF' | sort -u)"
+  deduped_count="$(printf '%s\n' "$deduped_ids" | awk 'NF' | wc -l | tr -d ' ')"
+
+  if [[ "$deduped_count" -eq 0 ]]; then
+    if [[ "$INVITE_IF_MISSING" == "true" ]]; then
+      if [[ -n "$USER_ID" ]]; then
+        fail "--invite-if-missing requires --user-upn (email), not --user-id."
+      fi
+
+      if [[ "$DRY_RUN" == "true" ]]; then
+        warn "User '$lookup_input' was not found. Dry-run will not invite users."
+        printf '%s\n' "$DRY_RUN_WOULD_INVITE_SENTINEL"
+        return 0
+      fi
+
+      log "User '$lookup_input' not found in tenant. Inviting as guest because --invite-if-missing was provided."
+      resolved_user_id="$(invite_guest_user "$lookup_input")"
+      log "Guest invitation created user object ID: ${resolved_user_id}"
+      printf '%s\n' "$resolved_user_id"
+      return 0
+    fi
+
+    fail "Could not resolve user from '$lookup_input'. For external users, invite first or pass --invite-if-missing."
+  fi
+
+  if [[ "$deduped_count" -gt 1 ]]; then
+    candidate_details_csv=""
+    while IFS= read -r candidate_id; do
+      if [[ -z "$candidate_id" ]]; then
+        continue
+      fi
+
+      candidate_detail="$(az ad user show \
+        --id "$candidate_id" \
+        --query "[id,displayName,userPrincipalName,mail] | join(' | ', @)" \
+        --output tsv 2>/dev/null || true)"
+      if [[ -z "$candidate_detail" ]]; then
+        candidate_detail="$candidate_id"
+      fi
+      candidate_details_csv+="  - ${candidate_detail}"$'\n'
+    done <<< "$deduped_ids"
+
+    fail "Multiple users matched '$lookup_input':"$'\n'"${candidate_details_csv}Pass --user-id explicitly to disambiguate."
+  fi
+
+  resolved_user_id="$(printf '%s\n' "$deduped_ids" | awk 'NF { print; exit }')"
   if ! is_uuid_like "$resolved_user_id"; then
     fail "Resolved user object ID is not a valid GUID: '$resolved_user_id'."
   fi
@@ -270,6 +426,14 @@ parse_args() {
         ENVIRONMENT="${2:-}"
         shift 2
         ;;
+      --invite-if-missing)
+        INVITE_IF_MISSING="true"
+        shift
+        ;;
+      --invite-redirect-url)
+        INVITE_REDIRECT_URL="${2:-}"
+        shift 2
+        ;;
       --force)
         FORCE="true"
         shift
@@ -294,6 +458,36 @@ parse_args() {
 
   if [[ -z "$USER_UPN" && -z "$USER_ID" ]]; then
     fail "Pass one of --user-upn or --user-id."
+  fi
+
+  if [[ "$INVITE_IF_MISSING" == "true" && -n "$USER_ID" ]]; then
+    fail "--invite-if-missing can only be used with --user-upn."
+  fi
+
+  if [[ "$INVITE_IF_MISSING" == "true" && -z "$USER_UPN" ]]; then
+    fail "--invite-if-missing requires --user-upn."
+  fi
+
+  if [[ -z "$INVITE_REDIRECT_URL" ]]; then
+    fail "--invite-redirect-url must not be empty."
+  fi
+
+  if ! is_https_url "$INVITE_REDIRECT_URL"; then
+    fail "--invite-redirect-url must be an https URL."
+  fi
+
+  local redirect_host
+  redirect_host="$(url_host "$INVITE_REDIRECT_URL")"
+  if [[ -z "$redirect_host" ]]; then
+    fail "--invite-redirect-url host could not be parsed."
+  fi
+
+  if [[ "$redirect_host" != "$DEFAULT_INVITE_REDIRECT_HOST" && "$FORCE" != "true" ]]; then
+    fail "--invite-redirect-url host '$redirect_host' is not in the default allowlist. Use --force to allow it."
+  fi
+
+  if [[ "$redirect_host" != "$DEFAULT_INVITE_REDIRECT_HOST" && "$FORCE" == "true" ]]; then
+    warn "Using non-default invite redirect host '$redirect_host' because --force was provided."
   fi
 }
 
@@ -336,6 +530,17 @@ main() {
 
   local resolved_user_id
   resolved_user_id="$(resolve_user_id)"
+  if [[ "$resolved_user_id" == "$DRY_RUN_WOULD_INVITE_SENTINEL" ]]; then
+    if [[ "$DRY_RUN" != "true" ]]; then
+      fail "Internal error: unexpected dry-run invite sentinel in non-dry-run mode."
+    fi
+
+    log "Dry-run: user '$USER_UPN' would be invited as guest and then added to group '${group_id}'."
+    log "Dry run complete. No invitation or membership changes were made."
+    printf 'NEXT: run without --dry-run to send invitation and add group membership.\n'
+    exit 0
+  fi
+
   if [[ -z "$resolved_user_id" || "$resolved_user_id" == "null" ]]; then
     fail "Could not resolve user object ID. Check --user-upn/--user-id and directory permissions."
   fi

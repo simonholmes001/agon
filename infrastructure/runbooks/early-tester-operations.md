@@ -61,6 +61,13 @@ az deployment sub create \
 
 ## 2) Onboard One New Tester
 
+Important identity rule:
+
+- Entra group membership requires a directory object ID.
+- For external users (not already in your tenant), invite them first so Entra creates a `Guest` user object.
+
+### 2.1 Existing internal user or existing guest
+
 Preferred path (one-shot script):
 
 ```bash
@@ -84,7 +91,44 @@ What the script validates before onboarding:
 - Trial access settings exist for group-based gating.
 - Target user/group resolves in Entra ID.
 
-Manual path (if needed):
+### 2.2 External user not yet in tenant (fully automated path)
+
+One command (invite guest if missing, then add to group):
+
+```bash
+./infrastructure/scripts/onboard-tester.sh \
+  --user-upn "user@external-domain.com" \
+  --group "agon-early-users" \
+  --invite-if-missing
+```
+
+Dry-run note: if the user does not yet exist in the tenant, `--dry-run` will not create an invitation.
+
+### 2.3 External user not yet in tenant (manual guest-first flow)
+
+1. Invite user as guest and capture object ID:
+
+```bash
+USER_EMAIL="user@external-domain.com"
+
+USER_ID="$(az rest --method POST \
+  --url "https://graph.microsoft.com/v1.0/invitations" \
+  --headers "Content-Type=application/json" \
+  --body "{\"invitedUserEmailAddress\":\"$USER_EMAIL\",\"inviteRedirectUrl\":\"https://myapplications.microsoft.com\",\"sendInvitationMessage\":true}" \
+  --query "invitedUser.id" -o tsv)"
+
+echo "$USER_ID"
+```
+
+2. Add the invited guest to tester group (script path):
+
+```bash
+./infrastructure/scripts/onboard-tester.sh \
+  --user-id "$USER_ID" \
+  --group "agon-early-users"
+```
+
+### 2.4 Manual path (if needed)
 
 1. Get group object ID:
 
@@ -92,7 +136,7 @@ Manual path (if needed):
 az ad group show --group "agon-early-users" --query id -o tsv
 ```
 
-2. Get user object ID:
+2. Get user object ID (existing user):
 
 ```bash
 az ad user show --id "user@domain.com" --query id -o tsv

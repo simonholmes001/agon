@@ -41,7 +41,8 @@ Recommended one-shot onboarding command (no provider key sharing):
 ```bash
 ./infrastructure/scripts/onboard-tester.sh \
   --user-upn "user@domain.com" \
-  --group "$AGON_TESTER_GROUP_OBJECT_ID"
+  --group "$AGON_TESTER_GROUP_OBJECT_ID" \
+  --invite-if-missing
 ```
 
 Dry-run validation before granting access:
@@ -54,6 +55,7 @@ Dry-run validation before granting access:
 ```
 
 The script validates that provider keys are server-managed via Key Vault references before onboarding the tester.
+If `--invite-if-missing` is used and the user is external/not yet in tenant, the script invites them as a guest and then adds them to the tester group.
 
 Add user to tester group:
 
