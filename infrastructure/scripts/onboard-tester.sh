@@ -12,6 +12,8 @@ USER_ID=""
 GROUP_INPUT=""
 DRY_RUN="false"
 FORCE="false"
+INVITE_IF_MISSING="false"
+INVITE_REDIRECT_URL="https://myapplications.microsoft.com"
 
 usage() {
   cat <<'EOF'
@@ -29,6 +31,8 @@ Usage:
     [--app-name <app-service-name>] \
     [--app-rg <resource-group>] \
     [--environment <env>] \
+    [--invite-if-missing] \
+    [--invite-redirect-url <url>] \
     [--force] \
     [--dry-run]
 
@@ -40,6 +44,11 @@ Options:
   --app-name      App Service name. If omitted, auto-discovered by tags.
   --app-rg        App resource group (default: rg-agon-dev-swc-app)
   --environment   Environment tag used for discovery (default: dev)
+  --invite-if-missing
+                  If --user-upn does not resolve, invite as Entra guest automatically
+                  and continue onboarding with the created guest object.
+  --invite-redirect-url
+                  Redirect URL used for guest invitation (default: https://myapplications.microsoft.com)
   --force         Continue even if trial-access guardrail flags are not enabled
   --dry-run       Validate and resolve everything without modifying group membership
   --help          Show this help
@@ -71,6 +80,48 @@ is_uuid_like() {
 is_key_vault_reference() {
   local value="$1"
   [[ "$value" =~ ^@Microsoft\.KeyVault\(SecretUri(WithVersion)?=https://[^[:space:]]+\)$ ]]
+}
+
+escape_odata_literal() {
+  local value="$1"
+  printf '%s\n' "${value//\'/\'\'}"
+}
+
+escape_json_string() {
+  local value="$1"
+  value="${value//\\/\\\\}"
+  value="${value//\"/\\\"}"
+  value="${value//$'\n'/\\n}"
+  value="${value//$'\r'/\\r}"
+  value="${value//$'\t'/\\t}"
+  printf '%s\n' "$value"
+}
+
+invite_guest_user() {
+  local user_email="$1"
+  local email_json redirect_json request_body invited_user_id
+
+  email_json="$(escape_json_string "$user_email")"
+  redirect_json="$(escape_json_string "$INVITE_REDIRECT_URL")"
+  request_body="{\"invitedUserEmailAddress\":\"${email_json}\",\"inviteRedirectUrl\":\"${redirect_json}\",\"sendInvitationMessage\":true}"
+
+  invited_user_id="$(az rest \
+    --method POST \
+    --url "https://graph.microsoft.com/v1.0/invitations" \
+    --headers "Content-Type=application/json" \
+    --body "$request_body" \
+    --query "invitedUser.id" \
+    --output tsv 2>/dev/null || true)"
+
+  if [[ -z "$invited_user_id" || "$invited_user_id" == "null" ]]; then
+    fail "Failed to invite '$user_email' as guest. Check Entra guest invitation policy and Graph permissions."
+  fi
+
+  if ! is_uuid_like "$invited_user_id"; then
+    fail "Invitation returned invalid invitedUser.id: '$invited_user_id'."
+  fi
+
+  printf '%s\n' "$invited_user_id"
 }
 
 resolve_app_name() {
@@ -187,6 +238,8 @@ resolve_group_id() {
 
 resolve_user_id() {
   local lookup_input resolved_user_id
+  local escaped_input filter_results filter_value
+  local line candidate_ids_csv deduped_ids deduped_count
 
   if [[ -n "$USER_ID" ]] && ! is_uuid_like "$USER_ID"; then
     fail "--user-id must be a valid GUID."
@@ -197,14 +250,69 @@ resolve_user_id() {
     lookup_input="$USER_ID"
   fi
 
-  if ! resolved_user_id="$(az ad user show --id "$lookup_input" --query id --output tsv 2>/dev/null)"; then
-    fail "Could not resolve user from '$lookup_input'. Check --user-upn/--user-id and directory permissions."
+  if resolved_user_id="$(az ad user show --id "$lookup_input" --query id --output tsv 2>/dev/null)"; then
+    if [[ -n "$resolved_user_id" && "$resolved_user_id" != "null" ]]; then
+      if ! is_uuid_like "$resolved_user_id"; then
+        fail "Resolved user object ID is not a valid GUID: '$resolved_user_id'."
+      fi
+
+      printf '%s\n' "$resolved_user_id"
+      return 0
+    fi
   fi
 
-  if [[ -z "$resolved_user_id" || "$resolved_user_id" == "null" ]]; then
-    fail "Could not resolve user object ID from '$lookup_input'. Check --user-upn/--user-id and directory permissions."
+  if [[ -n "$USER_ID" ]]; then
+    fail "Could not resolve user object ID from '$lookup_input'. Check --user-id and directory permissions."
   fi
 
+  candidate_ids_csv=""
+  escaped_input="$(escape_odata_literal "$lookup_input")"
+  for filter_value in \
+    "userPrincipalName eq '${escaped_input}'" \
+    "mail eq '${escaped_input}'" \
+    "otherMails/any(m:m eq '${escaped_input}')"; do
+    filter_results="$(az ad user list --filter "$filter_value" --query "[].id" --output tsv 2>/dev/null || true)"
+    if [[ -z "$filter_results" ]]; then
+      continue
+    fi
+
+    while IFS= read -r line; do
+      if [[ -z "$line" || "$line" == "null" ]]; then
+        continue
+      fi
+
+      candidate_ids_csv+="${line}"$'\n'
+    done <<< "$filter_results"
+  done
+
+  deduped_ids="$(printf '%s' "$candidate_ids_csv" | awk 'NF' | sort -u)"
+  deduped_count="$(printf '%s\n' "$deduped_ids" | awk 'NF' | wc -l | tr -d ' ')"
+
+  if [[ "$deduped_count" -eq 0 ]]; then
+    if [[ "$INVITE_IF_MISSING" == "true" ]]; then
+      if [[ -n "$USER_ID" ]]; then
+        fail "--invite-if-missing requires --user-upn (email), not --user-id."
+      fi
+
+      if [[ "$DRY_RUN" == "true" ]]; then
+        fail "User '$lookup_input' was not found. Dry-run will not invite users. Re-run without --dry-run to auto-invite."
+      fi
+
+      log "User '$lookup_input' not found in tenant. Inviting as guest because --invite-if-missing was provided."
+      resolved_user_id="$(invite_guest_user "$lookup_input")"
+      log "Guest invitation created user object ID: ${resolved_user_id}"
+      printf '%s\n' "$resolved_user_id"
+      return 0
+    fi
+
+    fail "Could not resolve user from '$lookup_input'. For external users, invite first or pass --invite-if-missing."
+  fi
+
+  if [[ "$deduped_count" -gt 1 ]]; then
+    fail "Multiple users matched '$lookup_input'. Pass --user-id explicitly to disambiguate."
+  fi
+
+  resolved_user_id="$(printf '%s\n' "$deduped_ids" | awk 'NF { print; exit }')"
   if ! is_uuid_like "$resolved_user_id"; then
     fail "Resolved user object ID is not a valid GUID: '$resolved_user_id'."
   fi
@@ -270,6 +378,14 @@ parse_args() {
         ENVIRONMENT="${2:-}"
         shift 2
         ;;
+      --invite-if-missing)
+        INVITE_IF_MISSING="true"
+        shift
+        ;;
+      --invite-redirect-url)
+        INVITE_REDIRECT_URL="${2:-}"
+        shift 2
+        ;;
       --force)
         FORCE="true"
         shift
@@ -294,6 +410,18 @@ parse_args() {
 
   if [[ -z "$USER_UPN" && -z "$USER_ID" ]]; then
     fail "Pass one of --user-upn or --user-id."
+  fi
+
+  if [[ "$INVITE_IF_MISSING" == "true" && -n "$USER_ID" ]]; then
+    fail "--invite-if-missing can only be used with --user-upn."
+  fi
+
+  if [[ "$INVITE_IF_MISSING" == "true" && -z "$USER_UPN" ]]; then
+    fail "--invite-if-missing requires --user-upn."
+  fi
+
+  if [[ -z "$INVITE_REDIRECT_URL" ]]; then
+    fail "--invite-redirect-url must not be empty."
   fi
 }
 
