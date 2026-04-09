@@ -2,6 +2,12 @@
 
 Use this runbook to onboard and operate early testers when Entra group membership is the access source of truth.
 
+## Security Model (No Key Sharing)
+
+- Testers never receive provider keys (`OPENAI_KEY`, `CLAUDE_KEY`, `GEMINI_KEY`, `DEEPSEEK_KEY`).
+- Provider keys stay server-side in Key Vault and are injected into App Service via Key Vault references.
+- Tester onboarding is done only by Entra group membership + `agon login`.
+
 ## 1) One-Time Setup (Automated via IaC)
 
 These settings should be deployed through Bicep (not set manually in the portal):
@@ -54,6 +60,31 @@ az deployment sub create \
 ```
 
 ## 2) Onboard One New Tester
+
+Preferred path (one-shot script):
+
+```bash
+./infrastructure/scripts/onboard-tester.sh \
+  --user-upn "user@domain.com" \
+  --group "agon-early-users"
+```
+
+Dry-run validation (no membership change):
+
+```bash
+./infrastructure/scripts/onboard-tester.sh \
+  --user-upn "user@domain.com" \
+  --group "agon-early-users" \
+  --dry-run
+```
+
+What the script validates before onboarding:
+
+- Provider keys are configured as Key Vault references in App Service (not plain values).
+- Trial access settings exist for group-based gating.
+- Target user/group resolves in Entra ID.
+
+Manual path (if needed):
 
 1. Get group object ID:
 
