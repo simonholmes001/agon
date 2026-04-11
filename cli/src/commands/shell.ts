@@ -268,7 +268,6 @@ export default class Shell extends Command {
 
     try {
       while (true) {
-        this.log('');
         const promptFrame = renderPromptBanner((line) => this.log(line));
         const activeSession = await controller.getActiveSession();
         const rawInput = await this.promptForInput(promptFrame, activeSession?.id ?? null);
