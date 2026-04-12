@@ -467,10 +467,9 @@ public sealed class AttachmentTextExtractor : IAttachmentTextExtractor
             return null;
         }
 
-        var maxLength = Math.Max(1000, _options.MaxExtractedTextChars);
-        if (normalized.Length > maxLength)
+        if (_options.MaxExtractedTextChars > 0 && normalized.Length > _options.MaxExtractedTextChars)
         {
-            normalized = normalized[..maxLength];
+            normalized = normalized[.._options.MaxExtractedTextChars];
         }
 
         return normalized;

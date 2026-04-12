@@ -7,7 +7,7 @@ public sealed class AttachmentProcessingConfiguration
 {
     public const string SectionName = "AttachmentProcessing";
 
-    public int MaxExtractedTextChars { get; set; } = 12000;
+    public int MaxExtractedTextChars { get; set; } = 200000;
     public DocumentIntelligenceProcessingConfiguration DocumentIntelligence { get; set; } = new();
     public OpenAiVisionProcessingConfiguration OpenAiVision { get; set; } = new();
 }

@@ -196,12 +196,9 @@ public sealed class MafCouncilAgent : ICouncilAgent
                 sb.AppendLine($"   Secure URL: {attachment.AccessUrl}");
                 if (!string.IsNullOrWhiteSpace(attachment.ExtractedText))
                 {
-                    var snippet = attachment.ExtractedText.Length > 2000
-                        ? attachment.ExtractedText[..2000] + "..."
-                        : attachment.ExtractedText;
-                    sb.AppendLine("   Extracted text excerpt:");
+                    sb.AppendLine("   Extracted text:");
                     sb.AppendLine("   ```text");
-                    sb.AppendLine(snippet);
+                    sb.AppendLine(attachment.ExtractedText);
                     sb.AppendLine("   ```");
                 }
                 sb.AppendLine();

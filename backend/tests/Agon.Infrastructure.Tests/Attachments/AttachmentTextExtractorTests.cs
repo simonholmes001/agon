@@ -25,6 +25,24 @@ public class AttachmentTextExtractorTests
     }
 
     [Fact]
+    public async Task ExtractAsync_TextFile_TruncatesToConfiguredMaxExtractedTextChars()
+    {
+        var extractor = CreateExtractor(new AttachmentExtractionOptions
+        {
+            MaxExtractedTextChars = 50
+        });
+
+        var input = new string('x', 120);
+        var bytes = Encoding.UTF8.GetBytes(input);
+
+        var result = await extractor.ExtractAsync(bytes, "notes.txt", "text/plain");
+
+        result.Should().NotBeNull();
+        result!.Length.Should().Be(50);
+        result.Should().Be(new string('x', 50));
+    }
+
+    [Fact]
     public async Task ExtractAsync_DocumentWithoutEndpoint_ReturnsNull()
     {
         var extractor = CreateExtractor(new AttachmentExtractionOptions
