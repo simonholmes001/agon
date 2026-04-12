@@ -264,7 +264,6 @@ export default class Shell extends Command {
       this.log(chalk.dim('If that fails, run:'));
       this.log(chalk.dim(`  ${updateInfo.installCommand}`));
     }
-    this.log('');
 
     try {
       while (true) {
