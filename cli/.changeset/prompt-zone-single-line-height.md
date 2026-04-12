@@ -2,4 +2,4 @@
 "@agon_agents/cli": patch
 ---
 
-Remove blank lines above prompt banner so the initial input zone is one row tall, matching Codex.
+Set initial prompt zone height to 2 rows to match Codex, preserving spacing above the zone and auto-expand behaviour.
