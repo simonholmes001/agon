@@ -118,6 +118,10 @@ param appGatewayRequestTimeoutSeconds int = 120
 @description('Document Intelligence model used for attachment extraction.')
 param documentIntelligenceModelId string = 'prebuilt-layout'
 
+@description('Maximum extracted attachment text chars passed to backend processing.')
+@minValue(1)
+param attachmentProcessingMaxExtractedTextChars int = 200000
+
 @description('Enable JWT bearer authentication in the backend API.')
 param authEnabled bool = false
 
@@ -311,6 +315,7 @@ module appEdge './modules/app-edge-dev.bicep' = {
     blobStorageConnectionStringSecretUri: data.outputs.blobStorageConnectionStringSecretUri
     attachmentContainerName: attachmentContainerName
     attachmentRetentionDays: attachmentRetentionDays
+    attachmentProcessingMaxExtractedTextChars: attachmentProcessingMaxExtractedTextChars
     documentIntelligenceEndpoint: data.outputs.documentIntelligenceEndpoint
     documentIntelligenceModelId: documentIntelligenceModelId
     attachmentStorageBlobEndpoint: data.outputs.attachmentStorageBlobEndpoint

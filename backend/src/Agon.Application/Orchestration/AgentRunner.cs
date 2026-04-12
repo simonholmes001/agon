@@ -4,6 +4,7 @@ using Agon.Application.Services;
 using Agon.Domain.Sessions;
 using Agon.Domain.TruthMap;
 using Microsoft.Extensions.Logging;
+using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
@@ -64,6 +65,7 @@ public sealed class AgentRunner : IAgentRunner
     private readonly IEventBroadcaster _broadcaster;
     private readonly ConversationHistoryService _conversationHistory;
     private readonly int _agentTimeoutSeconds;
+    private readonly AttachmentChunkLoopOptions _chunkLoopOptions;
     private readonly ILogger<AgentRunner>? _logger;
 
     public AgentRunner(
@@ -73,6 +75,7 @@ public sealed class AgentRunner : IAgentRunner
         ConversationHistoryService conversationHistory,
         ITokenUsageRepository? tokenUsageRepository = null,
         int agentTimeoutSeconds = 90,
+        AttachmentChunkLoopOptions? chunkLoopOptions = null,
         ILogger<AgentRunner>? logger = null)
     {
         _agents = agents;
@@ -84,6 +87,7 @@ public sealed class AgentRunner : IAgentRunner
         _broadcaster = broadcaster;
         _conversationHistory = conversationHistory;
         _agentTimeoutSeconds = agentTimeoutSeconds;
+        _chunkLoopOptions = NormalizeChunkLoopOptions(chunkLoopOptions);
         _logger = logger;
     }
 
@@ -513,7 +517,7 @@ public sealed class AgentRunner : IAgentRunner
             .OrderBy(a => a.AgentId)
             .ToList();
 
-        var contexts = councilAgents.Select(_ =>
+        var baseContexts = councilAgents.Select(_ =>
             AgentContext.ForAnalysis(
                 state.SessionId,
                 state.TruthMap,
@@ -523,7 +527,36 @@ public sealed class AgentRunner : IAgentRunner
                 state.Attachments))
             .ToList();
 
-        var responses = await DispatchParallelAsync(councilAgents, contexts, cancellationToken);
+        List<AgentContext> finalContexts = baseContexts;
+        var chunkedAttachments = BuildChunkedAttachmentPlans(state.Attachments);
+        if (chunkedAttachments.Count > 0)
+        {
+            var chunkPreludeNotes = await RunAttachmentChunkPreludeAsync(
+                state,
+                councilAgents,
+                chunkedAttachments,
+                cancellationToken);
+            var chunkAttachmentIds = chunkedAttachments.Select(plan => plan.Attachment.AttachmentId).ToHashSet();
+            var finalAttachments = state.Attachments
+                .Select(attachment => chunkAttachmentIds.Contains(attachment.AttachmentId)
+                    ? attachment with { ExtractedText = null }
+                    : attachment)
+                .ToList();
+
+            finalContexts = councilAgents.Select((_, index) =>
+            {
+                var notes = chunkPreludeNotes.TryGetValue(councilAgents[index].AgentId, out var values)
+                    ? values
+                    : [];
+                return baseContexts[index] with
+                {
+                    Attachments = finalAttachments,
+                    MicroDirective = BuildFinalChunkSynthesisDirective(chunkedAttachments, notes)
+                };
+            }).ToList();
+        }
+
+        var responses = await DispatchParallelAsync(councilAgents, finalContexts, cancellationToken);
         await ApplyPatchesAsync(state, responses, cancellationToken);
         await AccumulateTokensAsync(state, responses, cancellationToken);
 
@@ -660,6 +693,241 @@ public sealed class AgentRunner : IAgentRunner
         await AccumulateTokensAsync(state, responses, cancellationToken);
         return responses;
     }
+
+    private async Task<Dictionary<string, List<string>>> RunAttachmentChunkPreludeAsync(
+        SessionState state,
+        IReadOnlyList<ICouncilAgent> councilAgents,
+        IReadOnlyList<ChunkedAttachmentPlan> chunkedAttachments,
+        CancellationToken cancellationToken)
+    {
+        var notesByAgent = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+        var totalPasses = chunkedAttachments.Max(plan => plan.Chunks.Count);
+        if (totalPasses <= 0)
+        {
+            return notesByAgent;
+        }
+
+        for (var passIndex = 0; passIndex < totalPasses; passIndex++)
+        {
+            var passAttachments = BuildChunkPassAttachments(state.Attachments, chunkedAttachments, passIndex);
+            if (passAttachments.Count == 0)
+            {
+                continue;
+            }
+
+            var directive = BuildChunkPassDirective(passIndex + 1, totalPasses, chunkedAttachments);
+            var contexts = councilAgents.Select(_ =>
+                AgentContext.ForAnalysis(
+                    state.SessionId,
+                    state.TruthMap,
+                    state.FrictionLevel,
+                    state.CurrentRound,
+                    state.ResearchToolsEnabled,
+                    passAttachments) with
+                {
+                    MicroDirective = directive
+                }).ToList();
+
+            var responses = await DispatchParallelAsync(councilAgents, contexts, cancellationToken);
+            await AccumulateTokensAsync(state, responses, cancellationToken);
+
+            foreach (var response in responses.Where(response => !response.TimedOut && !string.IsNullOrWhiteSpace(response.Message)))
+            {
+                if (!notesByAgent.TryGetValue(response.AgentId, out var notes))
+                {
+                    notes = [];
+                    notesByAgent[response.AgentId] = notes;
+                }
+
+                notes.Add(TruncateAndNormalizeForPrompt(response.Message, _chunkLoopOptions.MaxChunkNoteChars));
+            }
+        }
+
+        return notesByAgent;
+    }
+
+    private List<SessionAttachment> BuildChunkPassAttachments(
+        IReadOnlyList<SessionAttachment> attachments,
+        IReadOnlyList<ChunkedAttachmentPlan> chunkedAttachments,
+        int passIndex)
+    {
+        var chunksByAttachmentId = chunkedAttachments.ToDictionary(
+            plan => plan.Attachment.AttachmentId,
+            plan => plan,
+            comparer: EqualityComparer<Guid>.Default);
+        var passAttachments = new List<SessionAttachment>(attachments.Count);
+
+        foreach (var attachment in attachments)
+        {
+            if (!chunksByAttachmentId.TryGetValue(attachment.AttachmentId, out var chunkPlan))
+            {
+                passAttachments.Add(attachment);
+                continue;
+            }
+
+            if (passIndex >= chunkPlan.Chunks.Count)
+            {
+                continue;
+            }
+
+            passAttachments.Add(attachment with { ExtractedText = chunkPlan.Chunks[passIndex] });
+        }
+
+        return passAttachments;
+    }
+
+    private static string BuildChunkPassDirective(
+        int passNumber,
+        int totalPasses,
+        IReadOnlyList<ChunkedAttachmentPlan> chunkedAttachments)
+    {
+        var files = string.Join(", ", chunkedAttachments.Select(plan => plan.Attachment.FileName));
+        return $"""
+            Document chunk pass {passNumber}/{totalPasses}.
+            Files in this pass: {files}
+            Process only the extracted text shown in this pass and capture precise findings with section-level fidelity.
+            Do not claim inability to access secure URLs; this pass already contains the extracted text you should analyze.
+            Keep PATCH ops empty in this pass. This is pre-processing for later synthesis.
+            """;
+    }
+
+    private string BuildFinalChunkSynthesisDirective(
+        IReadOnlyList<ChunkedAttachmentPlan> chunkedAttachments,
+        IReadOnlyList<string> notes)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("Chunk-loop pre-processing completed for long attachments.");
+        sb.AppendLine("Do not claim inability to access secure URLs; rely on chunk-pass notes below.");
+        sb.AppendLine($"Processed files: {string.Join(", ", chunkedAttachments.Select(plan => plan.Attachment.FileName))}");
+        sb.AppendLine();
+        sb.AppendLine("Chunk-pass notes:");
+
+        var finalNotes = notes
+            .Where(note => !string.IsNullOrWhiteSpace(note))
+            .Take(_chunkLoopOptions.MaxFinalNotesPerAgent)
+            .ToList();
+
+        if (finalNotes.Count == 0)
+        {
+            sb.AppendLine("- No chunk-pass notes available. Use available context carefully.");
+        }
+        else
+        {
+            for (var index = 0; index < finalNotes.Count; index++)
+            {
+                sb.AppendLine($"{index + 1}. {finalNotes[index]}");
+            }
+        }
+
+        sb.AppendLine();
+        sb.AppendLine("Now produce your normal analysis response and PATCH for this round.");
+        return sb.ToString();
+    }
+
+    private List<ChunkedAttachmentPlan> BuildChunkedAttachmentPlans(IReadOnlyList<SessionAttachment> attachments)
+    {
+        if (!_chunkLoopOptions.Enabled)
+        {
+            return [];
+        }
+
+        var plans = new List<ChunkedAttachmentPlan>();
+        foreach (var attachment in attachments)
+        {
+            if (string.IsNullOrWhiteSpace(attachment.ExtractedText))
+            {
+                continue;
+            }
+
+            var extractedText = attachment.ExtractedText.Trim();
+            if (extractedText.Length < _chunkLoopOptions.ActivationThresholdChars)
+            {
+                continue;
+            }
+
+            var chunks = SplitIntoChunks(extractedText);
+            if (chunks.Count <= 1)
+            {
+                continue;
+            }
+
+            plans.Add(new ChunkedAttachmentPlan(attachment, chunks));
+        }
+
+        return plans;
+    }
+
+    private List<string> SplitIntoChunks(string text)
+    {
+        var chunks = new List<string>();
+        var start = 0;
+        var chunkSize = _chunkLoopOptions.ChunkSizeChars;
+        var overlap = _chunkLoopOptions.ChunkOverlapChars;
+        var maxChunks = _chunkLoopOptions.MaxChunksPerAttachment;
+
+        while (start < text.Length && chunks.Count < maxChunks)
+        {
+            var endExclusive = Math.Min(text.Length, start + chunkSize);
+            if (endExclusive < text.Length)
+            {
+                var boundary = text.LastIndexOf('\n', endExclusive - 1, endExclusive - start);
+                var minimumBoundary = start + Math.Max(1, chunkSize / 2);
+                if (boundary >= minimumBoundary)
+                {
+                    endExclusive = boundary + 1;
+                }
+            }
+
+            var chunk = text[start..endExclusive].Trim();
+            if (!string.IsNullOrWhiteSpace(chunk))
+            {
+                chunks.Add(chunk);
+            }
+
+            if (endExclusive >= text.Length)
+            {
+                break;
+            }
+
+            var nextStart = Math.Max(endExclusive - overlap, start + 1);
+            start = nextStart;
+        }
+
+        return chunks;
+    }
+
+    private static string TruncateAndNormalizeForPrompt(string value, int maxChars)
+    {
+        var normalized = Regex.Replace(value, @"\s+", " ").Trim();
+        if (normalized.Length <= maxChars)
+        {
+            return normalized;
+        }
+
+        return normalized[..maxChars].TrimEnd() + "...";
+    }
+
+    private static AttachmentChunkLoopOptions NormalizeChunkLoopOptions(AttachmentChunkLoopOptions? options)
+    {
+        var source = options ?? new AttachmentChunkLoopOptions();
+        var chunkSize = Math.Max(1, source.ChunkSizeChars);
+        var overlap = Math.Clamp(source.ChunkOverlapChars, 0, Math.Max(0, chunkSize - 1));
+
+        return new AttachmentChunkLoopOptions
+        {
+            Enabled = source.Enabled,
+            ActivationThresholdChars = Math.Max(1, source.ActivationThresholdChars),
+            ChunkSizeChars = chunkSize,
+            ChunkOverlapChars = overlap,
+            MaxChunksPerAttachment = Math.Max(1, source.MaxChunksPerAttachment),
+            MaxChunkNoteChars = Math.Max(1, source.MaxChunkNoteChars),
+            MaxFinalNotesPerAgent = Math.Max(1, source.MaxFinalNotesPerAgent)
+        };
+    }
+
+    private sealed record ChunkedAttachmentPlan(
+        SessionAttachment Attachment,
+        IReadOnlyList<string> Chunks);
 
     // ── Internals ─────────────────────────────────────────────────────────────
 

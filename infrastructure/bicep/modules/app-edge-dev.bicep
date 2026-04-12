@@ -173,6 +173,10 @@ param attachmentStorageBlobEndpoint string = ''
 @minValue(1)
 param attachmentRetentionDays int = 90
 
+@description('Maximum extracted attachment text chars passed to backend processing.')
+@minValue(1)
+param attachmentProcessingMaxExtractedTextChars int = 200000
+
 var tags = {
   environment: environment
   workload: workloadName
@@ -488,6 +492,10 @@ resource appService 'Microsoft.Web/sites@2023-12-01' = {
         {
           name: 'AttachmentOperations__Retention__RetentionDays'
           value: string(attachmentRetentionDays)
+        }
+        {
+          name: 'AttachmentProcessing__MaxExtractedTextChars'
+          value: string(attachmentProcessingMaxExtractedTextChars)
         }
         {
           name: 'OPENAI_KEY'

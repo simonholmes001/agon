@@ -244,6 +244,7 @@ Azure App Service deployments use managed identity mode by default via app setti
 - `Storage__UseManagedIdentity=true`
 - `Storage__AttachmentBlobServiceUri=<attachmentStorageBlobEndpoint>`
 - `Storage__AttachmentContainer=<attachmentContainerName>`
+- `AttachmentProcessing__MaxExtractedTextChars=<attachmentProcessingMaxExtractedTextChars>` (default `200000`)
 
 Local development can still use connection-string mode:
 - `ConnectionStrings__BlobStorage` (or `BLOB_STORAGE_CONNECTION_STRING` placeholder source)

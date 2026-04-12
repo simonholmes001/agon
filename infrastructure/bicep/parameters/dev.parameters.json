@@ -56,6 +56,9 @@
     "documentIntelligenceModelId": {
       "value": "prebuilt-layout"
     },
+    "attachmentProcessingMaxExtractedTextChars": {
+      "value": 200000
+    },
     "authEnabled": {
       "value": true
     },
