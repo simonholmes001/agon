@@ -313,9 +313,11 @@ function createPromptFrame(inputLineCountOverride?: number): PromptFrame {
   const terminalWidth = process.stdout.columns ?? 100;
   // Codex-like wide prompt zone: keep a small side margin, but avoid runaway ultra-wide lines.
   const width = Math.max(72, Math.min(terminalWidth - 4, 180));
-  // Start as a two-row zone (matching Codex) and let the frame grow with input.
-  const inputLineCount = Math.max(1, inputLineCountOverride ?? 2);
-  const promptLineOffset = 0;
+  // Start as a three-row zone: one empty row above the cursor, the cursor row,
+  // and one empty row below — giving a centered, Codex-height initial state.
+  // promptLineOffset=1 keeps the cursor on the second row as the zone grows.
+  const inputLineCount = Math.max(2, inputLineCountOverride ?? 3);
+  const promptLineOffset = 1;
   const borderLine = chalk.whiteBright('─'.repeat(width));
   const backgroundStart = '\u001b[48;2;63;111;201m';
   const promptStart = `${backgroundStart}\u001b[97m`;

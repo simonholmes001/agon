@@ -2,4 +2,4 @@
 "@agon_agents/cli": patch
 ---
 
-Set initial prompt zone height to 2 rows to match Codex, preserving spacing above the zone and auto-expand behaviour.
+Set initial prompt zone to 3 rows with cursor centered (promptLineOffset=1), matching Codex height and preserving spacing and auto-expand behaviour.
