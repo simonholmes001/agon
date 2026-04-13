@@ -35,10 +35,6 @@ jobs:
         run: npm ci
         working-directory: .
 
-      - name: Install CLI dependencies
-        run: npm ci
-        working-directory: cli
-
       - name: Create Release PR or Publish to npm
         uses: changesets/action@v1
         with:
