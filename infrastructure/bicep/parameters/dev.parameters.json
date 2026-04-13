@@ -74,6 +74,15 @@
     "attachmentProcessingValidationMaxImageUploadBytes": {
       "value": 20971520
     },
+    "attachmentProcessingTransientRetryMaxAttempts": {
+      "value": 3
+    },
+    "attachmentProcessingTransientRetryBaseDelayMs": {
+      "value": 250
+    },
+    "attachmentProcessingTransientRetryMaxDelayMs": {
+      "value": 2000
+    },
     "attachmentProcessingChunkLoopEnabled": {
       "value": true
     },

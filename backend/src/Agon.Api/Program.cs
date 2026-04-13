@@ -219,6 +219,12 @@ builder.Services.AddSingleton(new AttachmentExtractionOptions
         MaxTokens = attachmentProcessingConfig.OpenAiVision.MaxTokens,
         Detail = attachmentProcessingConfig.OpenAiVision.Detail,
         MaxImageBytes = attachmentProcessingConfig.OpenAiVision.MaxImageBytes
+    },
+    TransientRetry = new AttachmentTransientRetryOptions
+    {
+        MaxAttempts = attachmentProcessingConfig.TransientRetry.MaxAttempts,
+        BaseDelayMs = attachmentProcessingConfig.TransientRetry.BaseDelayMs,
+        MaxDelayMs = attachmentProcessingConfig.TransientRetry.MaxDelayMs
     }
 });
 builder.Services.AddHttpClient("attachment-extraction", client =>

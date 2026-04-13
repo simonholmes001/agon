@@ -11,6 +11,7 @@ public sealed class AttachmentProcessingConfiguration
     public AttachmentValidationConfiguration Validation { get; set; } = new();
     public DocumentIntelligenceProcessingConfiguration DocumentIntelligence { get; set; } = new();
     public OpenAiVisionProcessingConfiguration OpenAiVision { get; set; } = new();
+    public AttachmentTransientRetryConfiguration TransientRetry { get; set; } = new();
     public AttachmentChunkLoopConfiguration ChunkLoop { get; set; } = new();
 }
 
@@ -54,6 +55,13 @@ public sealed class AttachmentChunkLoopConfiguration
     public int MaxChunksPerAttachment { get; set; } = 20;
     public int MaxChunkNoteChars { get; set; } = 1200;
     public int MaxFinalNotesPerAgent { get; set; } = 8;
+}
+
+public sealed class AttachmentTransientRetryConfiguration
+{
+    public int MaxAttempts { get; set; } = 3;
+    public int BaseDelayMs { get; set; } = 250;
+    public int MaxDelayMs { get; set; } = 2000;
 }
 
 public sealed class AttachmentUploadValidationOptions

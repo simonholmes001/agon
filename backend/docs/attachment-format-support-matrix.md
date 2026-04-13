@@ -30,6 +30,17 @@ This matrix defines deterministic attachment routing for extraction in Agon back
 - `ready`: extraction completed with usable extracted text.
 - `failed`: extraction completed without usable text or raised an extraction error.
 
+## Retry/backoff policy
+
+- Transient HTTP failures (`429`, `408`, `5xx`) use bounded exponential backoff.
+- Retry knobs:
+  - `AttachmentProcessing:TransientRetry:MaxAttempts` (default `3`)
+  - `AttachmentProcessing:TransientRetry:BaseDelayMs` (default `250`)
+  - `AttachmentProcessing:TransientRetry:MaxDelayMs` (default `2000`)
+- Fallback behavior remains deterministic:
+  - Image route tries OpenAI Vision first, then falls back to Document Intelligence OCR.
+  - If no usable text is produced, attachment status resolves to `failed`.
+
 ## Notes
 
 - Mismatched metadata is resolved deterministically by precedence. Example: `text/plain` with `.pdf` routes as `Text`.

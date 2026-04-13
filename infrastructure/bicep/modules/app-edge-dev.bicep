@@ -196,6 +196,18 @@ param attachmentProcessingValidationMaxDocumentUploadBytes int = 26214400
 @minValue(1024)
 param attachmentProcessingValidationMaxImageUploadBytes int = 20971520
 
+@description('Maximum transient retry attempts for attachment extraction HTTP operations.')
+@minValue(1)
+param attachmentProcessingTransientRetryMaxAttempts int = 3
+
+@description('Base retry delay in milliseconds for transient attachment extraction failures.')
+@minValue(1)
+param attachmentProcessingTransientRetryBaseDelayMs int = 250
+
+@description('Maximum retry delay in milliseconds for transient attachment extraction failures.')
+@minValue(1)
+param attachmentProcessingTransientRetryMaxDelayMs int = 2000
+
 @description('Enable long-document context-window chunk-loop processing.')
 param attachmentProcessingChunkLoopEnabled bool = true
 
@@ -562,6 +574,18 @@ resource appService 'Microsoft.Web/sites@2023-12-01' = {
         {
           name: 'AttachmentProcessing__Validation__MaxImageUploadBytes'
           value: string(attachmentProcessingValidationMaxImageUploadBytes)
+        }
+        {
+          name: 'AttachmentProcessing__TransientRetry__MaxAttempts'
+          value: string(attachmentProcessingTransientRetryMaxAttempts)
+        }
+        {
+          name: 'AttachmentProcessing__TransientRetry__BaseDelayMs'
+          value: string(attachmentProcessingTransientRetryBaseDelayMs)
+        }
+        {
+          name: 'AttachmentProcessing__TransientRetry__MaxDelayMs'
+          value: string(attachmentProcessingTransientRetryMaxDelayMs)
         }
         {
           name: 'AttachmentProcessing__ChunkLoop__Enabled'

@@ -99,15 +99,24 @@ public sealed class AttachmentTextExtractor : IAttachmentTextExtractor
         var analyzeUrl = $"{endpoint}/documentintelligence/documentModels/{Uri.EscapeDataString(modelId)}:analyze?api-version={Uri.EscapeDataString(apiVersion)}";
         var requestBody = new { base64Source = Convert.ToBase64String(content) };
 
-        using var startRequest = new HttpRequestMessage(HttpMethod.Post, analyzeUrl)
-        {
-            Content = JsonContent.Create(requestBody)
-        };
-
-        await ApplyDocumentIntelligenceAuthAsync(startRequest, cancellationToken);
-
         var client = _httpClientFactory.CreateClient("attachment-extraction");
-        using var startResponse = await client.SendAsync(startRequest, cancellationToken);
+        using var startResponse = await SendWithTransientRetryAsync(
+            client,
+            async ct =>
+            {
+                var request = new HttpRequestMessage(HttpMethod.Post, analyzeUrl)
+                {
+                    Content = JsonContent.Create(requestBody)
+                };
+                await ApplyDocumentIntelligenceAuthAsync(request, ct);
+                return request;
+            },
+            "document-intelligence-analyze-start",
+            cancellationToken);
+        if (startResponse is null)
+        {
+            return null;
+        }
 
         if (startResponse.StatusCode is HttpStatusCode.OK or HttpStatusCode.Created)
         {
@@ -142,10 +151,21 @@ public sealed class AttachmentTextExtractor : IAttachmentTextExtractor
         {
             await Task.Delay(Math.Max(250, _options.DocumentIntelligence.PollIntervalMs), cancellationToken);
 
-            using var pollRequest = new HttpRequestMessage(HttpMethod.Get, operationLocation);
-            await ApplyDocumentIntelligenceAuthAsync(pollRequest, cancellationToken);
+            using var pollResponse = await SendWithTransientRetryAsync(
+                client,
+                async ct =>
+                {
+                    var request = new HttpRequestMessage(HttpMethod.Get, operationLocation);
+                    await ApplyDocumentIntelligenceAuthAsync(request, ct);
+                    return request;
+                },
+                "document-intelligence-analyze-poll",
+                cancellationToken);
+            if (pollResponse is null)
+            {
+                return null;
+            }
 
-            using var pollResponse = await client.SendAsync(pollRequest, cancellationToken);
             var pollPayload = await pollResponse.Content.ReadAsStringAsync(cancellationToken);
 
             if (!pollResponse.IsSuccessStatusCode)
@@ -295,14 +315,25 @@ public sealed class AttachmentTextExtractor : IAttachmentTextExtractor
             }
         };
 
-        using var request = new HttpRequestMessage(HttpMethod.Post, "https://api.openai.com/v1/chat/completions")
-        {
-            Content = JsonContent.Create(requestPayload)
-        };
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _options.OpenAiVision.ApiKey);
-
         var client = _httpClientFactory.CreateClient("attachment-extraction");
-        using var response = await client.SendAsync(request, cancellationToken);
+        using var response = await SendWithTransientRetryAsync(
+            client,
+            _ =>
+            {
+                var request = new HttpRequestMessage(HttpMethod.Post, "https://api.openai.com/v1/chat/completions")
+                {
+                    Content = JsonContent.Create(requestPayload)
+                };
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _options.OpenAiVision.ApiKey);
+                return Task.FromResult(request);
+            },
+            $"openai-vision-{model}",
+            cancellationToken);
+        if (response is null)
+        {
+            return new OpenAiVisionAttemptResult(null, null);
+        }
+
         var payload = await response.Content.ReadAsStringAsync(cancellationToken);
 
         if (!response.IsSuccessStatusCode)
@@ -544,6 +575,99 @@ public sealed class AttachmentTextExtractor : IAttachmentTextExtractor
         return value.Length <= maxLength
             ? value
             : value[..maxLength] + "...";
+    }
+
+    private async Task<HttpResponseMessage?> SendWithTransientRetryAsync(
+        HttpClient client,
+        Func<CancellationToken, Task<HttpRequestMessage>> requestFactory,
+        string operationName,
+        CancellationToken cancellationToken)
+    {
+        var maxAttempts = Math.Max(1, _options.TransientRetry.MaxAttempts);
+        var baseDelayMs = Math.Max(1, _options.TransientRetry.BaseDelayMs);
+        var maxDelayMs = Math.Max(baseDelayMs, _options.TransientRetry.MaxDelayMs);
+
+        for (var attempt = 1; attempt <= maxAttempts; attempt++)
+        {
+            using var request = await requestFactory(cancellationToken);
+            try
+            {
+                var response = await client.SendAsync(request, cancellationToken);
+                if (IsTransientStatusCode(response.StatusCode) && attempt < maxAttempts)
+                {
+                    _logger.LogInformation(
+                        "Transient status during {Operation}. Status={StatusCode}, Attempt={Attempt}/{MaxAttempts}. Retrying.",
+                        operationName,
+                        (int)response.StatusCode,
+                        attempt,
+                        maxAttempts);
+                    response.Dispose();
+                    await Task.Delay(ComputeBackoffDelay(attempt, baseDelayMs, maxDelayMs), cancellationToken);
+                    continue;
+                }
+
+                return response;
+            }
+            catch (HttpRequestException ex)
+            {
+                if (attempt < maxAttempts)
+                {
+                    _logger.LogInformation(
+                        ex,
+                        "Transient HTTP exception during {Operation}. Attempt={Attempt}/{MaxAttempts}. Retrying.",
+                        operationName,
+                        attempt,
+                        maxAttempts);
+                    await Task.Delay(ComputeBackoffDelay(attempt, baseDelayMs, maxDelayMs), cancellationToken);
+                    continue;
+                }
+
+                _logger.LogWarning(
+                    ex,
+                    "HTTP exception during {Operation} after {Attempts} attempts.",
+                    operationName,
+                    maxAttempts);
+                return null;
+            }
+            catch (TaskCanceledException ex) when (!cancellationToken.IsCancellationRequested)
+            {
+                if (attempt < maxAttempts)
+                {
+                    _logger.LogInformation(
+                        ex,
+                        "Transient timeout during {Operation}. Attempt={Attempt}/{MaxAttempts}. Retrying.",
+                        operationName,
+                        attempt,
+                        maxAttempts);
+                    await Task.Delay(ComputeBackoffDelay(attempt, baseDelayMs, maxDelayMs), cancellationToken);
+                    continue;
+                }
+
+                _logger.LogWarning(
+                    ex,
+                    "Timeout during {Operation} after {Attempts} attempts.",
+                    operationName,
+                    maxAttempts);
+                return null;
+            }
+        }
+
+        return null;
+    }
+
+    private static bool IsTransientStatusCode(HttpStatusCode statusCode)
+    {
+        var statusCodeInt = (int)statusCode;
+        return statusCode == HttpStatusCode.RequestTimeout
+            || statusCodeInt == 429
+            || statusCodeInt >= 500;
+    }
+
+    private static TimeSpan ComputeBackoffDelay(int attempt, int baseDelayMs, int maxDelayMs)
+    {
+        var exponent = Math.Max(0, attempt - 1);
+        var delayMs = (int)Math.Min(maxDelayMs, baseDelayMs * Math.Pow(2, exponent));
+        return TimeSpan.FromMilliseconds(Math.Max(1, delayMs));
     }
 
     private readonly record struct OpenAiVisionAttemptResult(

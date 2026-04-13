@@ -1,6 +1,7 @@
 using Agon.Domain.Sessions;
 using Agon.Application.Orchestration;
 using Agon.Api.Configuration;
+using Agon.Infrastructure.Attachments;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -149,5 +150,23 @@ public class ProgramIntegrationTests : IClassFixture<AgonWebApplicationFactory>
         options.MaxTextUploadBytes.Should().Be(128);
         options.MaxDocumentUploadBytes.Should().Be(256);
         options.MaxImageUploadBytes.Should().Be(512);
+    }
+
+    [Fact]
+    public void AttachmentExtractionOptions_Should_Respect_TransientRetry_Configuration_Overrides()
+    {
+        using var factory = _factory.WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting("AttachmentProcessing:TransientRetry:MaxAttempts", "5");
+            builder.UseSetting("AttachmentProcessing:TransientRetry:BaseDelayMs", "75");
+            builder.UseSetting("AttachmentProcessing:TransientRetry:MaxDelayMs", "900");
+        });
+
+        using var scope = factory.Services.CreateScope();
+        var options = scope.ServiceProvider.GetRequiredService<AttachmentExtractionOptions>();
+
+        options.TransientRetry.MaxAttempts.Should().Be(5);
+        options.TransientRetry.BaseDelayMs.Should().Be(75);
+        options.TransientRetry.MaxDelayMs.Should().Be(900);
     }
 }
