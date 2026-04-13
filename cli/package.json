@@ -78,7 +78,7 @@
     "oclif": "^4.22.96",
     "prettier": "^3.1.0",
     "typescript": "^5.3.0",
-    "vitest": "^4.1.2"
+    "vitest": "^4.1.4"
   },
   "engines": {
     "node": ">=18.0.0"
