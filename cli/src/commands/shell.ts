@@ -591,7 +591,7 @@ export default class Shell extends Command {
         const requiredLines = getWrappedLineCount(preview.displayValue, currentFrame.maxInputCharsPerLine);
         const desiredInputLineCount = Math.min(
           maxInputLineCount,
-          Math.max(minInputLineCount, currentFrame.promptLineOffset + requiredLines)
+          Math.max(minInputLineCount, currentFrame.promptLineOffset + requiredLines + 1)
         );
         if (desiredInputLineCount !== currentFrame.inputLineCount) {
           resizePromptFrame(desiredInputLineCount);
