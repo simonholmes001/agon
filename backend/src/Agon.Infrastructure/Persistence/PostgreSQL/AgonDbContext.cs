@@ -117,6 +117,8 @@ public class AgonDbContext : DbContext
             entity.Property(e => e.BlobUri).HasColumnName("blob_uri").IsRequired();
             entity.Property(e => e.AccessUrl).HasColumnName("access_url").IsRequired();
             entity.Property(e => e.ExtractedText).HasColumnName("extracted_text");
+            entity.Property(e => e.ExtractionStatus).HasColumnName("extraction_status").IsRequired();
+            entity.Property(e => e.ExtractionFailureReason).HasColumnName("extraction_failure_reason");
             entity.Property(e => e.UploadedAt).HasColumnName("uploaded_at");
 
             entity.HasIndex(e => e.SessionId);
@@ -256,5 +258,7 @@ public class SessionAttachmentEntity
     public string BlobUri { get; set; } = string.Empty;
     public string AccessUrl { get; set; } = string.Empty;
     public string? ExtractedText { get; set; }
+    public string ExtractionStatus { get; set; } = "uploaded";
+    public string? ExtractionFailureReason { get; set; }
     public DateTime UploadedAt { get; set; }
 }

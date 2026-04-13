@@ -137,6 +137,26 @@ public sealed class SessionService : ISessionService
         return await _attachmentRepo.CreateAsync(attachment, cancellationToken);
     }
 
+    public async Task<SessionAttachment> UpdateAttachmentExtractionStateAsync(
+        Guid attachmentId,
+        AttachmentExtractionStatus extractionStatus,
+        string? extractedText,
+        string? extractionFailureReason,
+        CancellationToken cancellationToken = default)
+    {
+        if (_attachmentRepo is null)
+        {
+            throw new InvalidOperationException("Attachment repository is not configured.");
+        }
+
+        return await _attachmentRepo.UpdateExtractionStateAsync(
+            attachmentId,
+            extractionStatus,
+            extractedText,
+            extractionFailureReason,
+            cancellationToken);
+    }
+
     public async Task StartClarificationAsync(
         Guid sessionId,
         CancellationToken cancellationToken = default)

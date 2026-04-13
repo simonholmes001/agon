@@ -23,6 +23,13 @@ This matrix defines deterministic attachment routing for extraction in Agon back
 - Image-route max: `20971520` bytes (`20 MiB`)
 - Document-route max: `26214400` bytes (`25 MiB`)
 
+## Extraction lifecycle states
+
+- `uploaded`: metadata persisted and blob upload completed.
+- `extracting`: extraction has started.
+- `ready`: extraction completed with usable extracted text.
+- `failed`: extraction completed without usable text or raised an extraction error.
+
 ## Notes
 
 - Mismatched metadata is resolved deterministically by precedence. Example: `text/plain` with `.pdf` routes as `Text`.

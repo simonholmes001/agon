@@ -32,6 +32,8 @@ public sealed class AttachmentRepository : IAttachmentRepository
             BlobUri = attachment.BlobUri,
             AccessUrl = attachment.AccessUrl,
             ExtractedText = attachment.ExtractedText,
+            ExtractionStatus = ToStorageStatus(attachment.ExtractionStatus),
+            ExtractionFailureReason = attachment.ExtractionFailureReason,
             UploadedAt = attachment.UploadedAt.UtcDateTime
         };
 
@@ -39,6 +41,28 @@ public sealed class AttachmentRepository : IAttachmentRepository
         await _dbContext.SaveChangesAsync(cancellationToken);
 
         return attachment;
+    }
+
+    public async Task<SessionAttachment> UpdateExtractionStateAsync(
+        Guid attachmentId,
+        AttachmentExtractionStatus extractionStatus,
+        string? extractedText,
+        string? extractionFailureReason,
+        CancellationToken cancellationToken = default)
+    {
+        var entity = await _dbContext.SessionAttachments
+            .SingleOrDefaultAsync(a => a.Id == attachmentId, cancellationToken);
+        if (entity is null)
+        {
+            throw new InvalidOperationException($"Attachment {attachmentId} not found.");
+        }
+
+        entity.ExtractionStatus = ToStorageStatus(extractionStatus);
+        entity.ExtractedText = extractedText;
+        entity.ExtractionFailureReason = extractionFailureReason;
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
+        return ToModel(entity);
     }
 
     public async Task<IReadOnlyList<SessionAttachment>> ListBySessionAsync(
@@ -93,5 +117,22 @@ public sealed class AttachmentRepository : IAttachmentRepository
             entity.BlobUri,
             entity.AccessUrl,
             entity.ExtractedText,
-            DateTime.SpecifyKind(entity.UploadedAt, DateTimeKind.Utc));
+            DateTime.SpecifyKind(entity.UploadedAt, DateTimeKind.Utc),
+            ParseStorageStatus(entity.ExtractionStatus),
+            entity.ExtractionFailureReason);
+
+    private static string ToStorageStatus(AttachmentExtractionStatus status) =>
+        status.ToString().ToLowerInvariant();
+
+    private static AttachmentExtractionStatus ParseStorageStatus(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return AttachmentExtractionStatus.Uploaded;
+        }
+
+        return Enum.TryParse<AttachmentExtractionStatus>(value, ignoreCase: true, out var parsed)
+            ? parsed
+            : AttachmentExtractionStatus.Uploaded;
+    }
 }

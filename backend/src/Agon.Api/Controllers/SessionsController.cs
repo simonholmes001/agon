@@ -499,31 +499,6 @@ public class SessionsController : ControllerBase
                 "Verify blob storage connectivity and retry.");
         }
 
-        string? extractedText = null;
-        try
-        {
-            extractedText = await _attachmentTextExtractor.ExtractAsync(
-                fileBytes,
-                safeFileName,
-                contentType,
-                cancellationToken);
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            AttachmentMetrics.ExtractionFailure.Add(1);
-            _logger.LogWarning(
-                ex,
-                "Attachment text extraction failed for session {SessionId}. Category=AttachmentExtractionFailed, FileName={FileName}, ContentType={ContentType}, SizeBytes={SizeBytes}",
-                id,
-                safeFileName,
-                contentType,
-                request.File.Length);
-        }
-
         var attachmentId = Guid.NewGuid();
         var attachment = new SessionAttachment(
             AttachmentId: attachmentId,
@@ -535,8 +510,9 @@ public class SessionsController : ControllerBase
             BlobName: uploaded.BlobName,
             BlobUri: uploaded.BlobUri,
             AccessUrl: BuildAttachmentDownloadPath(id, attachmentId),
-            ExtractedText: extractedText,
-            UploadedAt: DateTimeOffset.UtcNow);
+            ExtractedText: null,
+            UploadedAt: DateTimeOffset.UtcNow,
+            ExtractionStatus: AttachmentExtractionStatus.Uploaded);
 
         SessionAttachment saved;
         try
@@ -575,20 +551,89 @@ public class SessionsController : ControllerBase
                 "Check database connectivity and retry.");
         }
 
+        SessionAttachment finalized = saved;
+        try
+        {
+            await _sessionService.UpdateAttachmentExtractionStateAsync(
+                saved.AttachmentId,
+                AttachmentExtractionStatus.Extracting,
+                null,
+                null,
+                cancellationToken);
+
+            var extractedText = await _attachmentTextExtractor.ExtractAsync(
+                fileBytes,
+                safeFileName,
+                contentType,
+                cancellationToken);
+            if (!string.IsNullOrWhiteSpace(extractedText))
+            {
+                finalized = await _sessionService.UpdateAttachmentExtractionStateAsync(
+                    saved.AttachmentId,
+                    AttachmentExtractionStatus.Ready,
+                    extractedText,
+                    null,
+                    cancellationToken);
+            }
+            else
+            {
+                finalized = await _sessionService.UpdateAttachmentExtractionStateAsync(
+                    saved.AttachmentId,
+                    AttachmentExtractionStatus.Failed,
+                    null,
+                    "No extractable text was produced for this attachment.",
+                    cancellationToken);
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            AttachmentMetrics.ExtractionFailure.Add(1);
+            _logger.LogWarning(
+                ex,
+                "Attachment text extraction failed for session {SessionId}. Category=AttachmentExtractionFailed, FileName={FileName}, ContentType={ContentType}, SizeBytes={SizeBytes}",
+                id,
+                safeFileName,
+                contentType,
+                request.File.Length);
+
+            try
+            {
+                finalized = await _sessionService.UpdateAttachmentExtractionStateAsync(
+                    saved.AttachmentId,
+                    AttachmentExtractionStatus.Failed,
+                    null,
+                    "Attachment extraction failed.",
+                    cancellationToken);
+            }
+            catch (Exception statusEx)
+            {
+                _logger.LogWarning(
+                    statusEx,
+                    "Failed to persist attachment extraction failure status for AttachmentId={AttachmentId}.",
+                    saved.AttachmentId);
+                finalized = saved;
+            }
+        }
+
         _logger.LogInformation(
-            "Uploaded attachment {AttachmentId} for session {SessionId} (FileName={FileName}, ContentType={ContentType}, SizeBytes={SizeBytes}, ExtractedText={HasExtractedText})",
-            saved.AttachmentId,
+            "Uploaded attachment {AttachmentId} for session {SessionId} (FileName={FileName}, ContentType={ContentType}, SizeBytes={SizeBytes}, ExtractedText={HasExtractedText}, ExtractionStatus={ExtractionStatus})",
+            finalized.AttachmentId,
             id,
-            saved.FileName,
-            saved.ContentType,
-            saved.SizeBytes,
-            !string.IsNullOrWhiteSpace(saved.ExtractedText));
+            finalized.FileName,
+            finalized.ContentType,
+            finalized.SizeBytes,
+            !string.IsNullOrWhiteSpace(finalized.ExtractedText),
+            finalized.ExtractionStatus);
         AttachmentMetrics.UploadSuccess.Add(1);
 
         return CreatedAtAction(
             nameof(ListAttachments),
             new { id },
-            MapAttachmentResponse(saved));
+            MapAttachmentResponse(finalized));
     }
 
     /// <summary>
@@ -848,7 +893,9 @@ public class SessionsController : ControllerBase
             BuildAttachmentDownloadPath(attachment.SessionId, attachment.AttachmentId),
             attachment.UploadedAt,
             !string.IsNullOrWhiteSpace(attachment.ExtractedText),
-            preview);
+            preview,
+            attachment.ExtractionStatus.ToString().ToLowerInvariant(),
+            attachment.ExtractionFailureReason);
     }
 
     private int ResolveMaxAllowedBytes(AttachmentRoutingRoute route)
@@ -1095,4 +1142,6 @@ public record SessionAttachmentResponse(
     string AccessUrl,
     DateTimeOffset UploadedAt,
     bool HasExtractedText,
-    string? ExtractedTextPreview);
+    string? ExtractedTextPreview,
+    string ExtractionStatus,
+    string? ExtractionFailureReason);
