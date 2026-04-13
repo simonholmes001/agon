@@ -1,6 +1,8 @@
 using Agon.Application.Interfaces;
 using Agon.Application.Models;
 using Microsoft.Extensions.Logging;
+using System.Diagnostics;
+using System.Diagnostics.Metrics;
 
 namespace Agon.Infrastructure.Attachments;
 
@@ -23,6 +25,7 @@ public sealed class DocumentParseService : IDocumentParser
         DocumentParseRequest request,
         CancellationToken cancellationToken = default)
     {
+        var startedAt = Stopwatch.GetTimestamp();
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(request.Content);
 
@@ -32,20 +35,20 @@ public sealed class DocumentParseService : IDocumentParser
 
         if (route == DocumentParseRoute.Unsupported)
         {
-            return Failure(
+            return Complete(Failure(
                 route,
                 DocumentParseErrorCode.UnsupportedFormat,
                 "Attachment format is not supported.",
-                retryable: false);
+                retryable: false));
         }
 
         if (request.MaxAllowedBytes.HasValue && request.SizeBytes > request.MaxAllowedBytes.Value)
         {
-            return Failure(
+            return Complete(Failure(
                 route,
                 DocumentParseErrorCode.Oversize,
                 $"Attachment exceeds max allowed size of {request.MaxAllowedBytes.Value} bytes.",
-                retryable: false);
+                retryable: false));
         }
 
         try
@@ -58,15 +61,15 @@ public sealed class DocumentParseService : IDocumentParser
 
             if (string.IsNullOrWhiteSpace(extractedText))
             {
-                return Failure(
+                return Complete(Failure(
                     route,
                     DocumentParseErrorCode.NoExtractableText,
                     "No extractable text was produced for this attachment.",
-                    retryable: false);
+                    retryable: false));
             }
 
             var normalizedText = extractedText.Trim();
-            return new DocumentParseResult(
+            return Complete(new DocumentParseResult(
                 ContractVersion,
                 route,
                 Success: true,
@@ -75,7 +78,7 @@ public sealed class DocumentParseService : IDocumentParser
                 ExtractedText: normalizedText,
                 ExtractedTextChars: normalizedText.Length,
                 ErrorCode: null,
-                FailureReason: null);
+                FailureReason: null));
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -87,11 +90,11 @@ public sealed class DocumentParseService : IDocumentParser
                 ex,
                 "Document parse timed out for file {FileName}.",
                 request.FileName);
-            return Failure(
+            return Complete(Failure(
                 route,
                 DocumentParseErrorCode.Timeout,
                 "Attachment extraction timed out.",
-                retryable: true);
+                retryable: true));
         }
         catch (HttpRequestException ex)
         {
@@ -99,11 +102,11 @@ public sealed class DocumentParseService : IDocumentParser
                 ex,
                 "Transient backend failure during document parse for file {FileName}.",
                 request.FileName);
-            return Failure(
+            return Complete(Failure(
                 route,
                 DocumentParseErrorCode.TransientBackendFailure,
                 "Attachment extraction backend is temporarily unavailable.",
-                retryable: true);
+                retryable: true));
         }
         catch (Exception ex)
         {
@@ -111,11 +114,34 @@ public sealed class DocumentParseService : IDocumentParser
                 ex,
                 "Unexpected document parse failure for file {FileName}.",
                 request.FileName);
-            return Failure(
+            return Complete(Failure(
                 route,
                 DocumentParseErrorCode.UnexpectedFailure,
                 "Attachment extraction failed.",
-                retryable: false);
+                retryable: false));
+        }
+
+        DocumentParseResult Complete(DocumentParseResult result)
+        {
+            var tags = new TagList
+            {
+                { "route", ToRouteTag(result.Route) }
+            };
+            var elapsedMs = Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds;
+
+            if (result.Success)
+            {
+                DocumentParseMetrics.ParseSuccess.Add(1, tags);
+            }
+            else
+            {
+                tags.Add("retryable", result.Retryable);
+                tags.Add("error_code", ToErrorCodeTag(result.ErrorCode));
+                DocumentParseMetrics.ParseFailure.Add(1, tags);
+            }
+
+            DocumentParseMetrics.ParseDurationMs.Record(elapsedMs, tags);
+            return result;
         }
     }
 
@@ -159,5 +185,29 @@ public sealed class DocumentParseService : IDocumentParser
             ExtractedTextChars: 0,
             ErrorCode: errorCode,
             FailureReason: reason);
+    }
+
+    private static string ToRouteTag(DocumentParseRoute route)
+    {
+        return route.ToString().ToLowerInvariant();
+    }
+
+    private static string ToErrorCodeTag(DocumentParseErrorCode? errorCode)
+    {
+        if (errorCode is null)
+        {
+            return "none";
+        }
+
+        return errorCode.Value switch
+        {
+            DocumentParseErrorCode.UnsupportedFormat => "unsupported_format",
+            DocumentParseErrorCode.Oversize => "oversize",
+            DocumentParseErrorCode.Timeout => "timeout",
+            DocumentParseErrorCode.NoExtractableText => "no_extractable_text",
+            DocumentParseErrorCode.TransientBackendFailure => "transient_backend_failure",
+            DocumentParseErrorCode.UnexpectedFailure => "unexpected_failure",
+            _ => "unknown"
+        };
     }
 }

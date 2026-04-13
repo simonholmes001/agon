@@ -1,10 +1,12 @@
 using Agon.Domain.Sessions;
+using Agon.Api.Controllers;
 using Agon.Application.Interfaces;
 using Agon.Application.Orchestration;
 using Agon.Api.Configuration;
 using Agon.Infrastructure.Attachments;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
+using System.Reflection;
 
 namespace Agon.Integration.Tests;
 
@@ -179,5 +181,38 @@ public class ProgramIntegrationTests : IClassFixture<AgonWebApplicationFactory>
 
         parser.Should().NotBeNull("canonical document parser should be registered for attachment workflows");
         parser.Should().BeOfType<DocumentParseService>();
+    }
+
+    [Fact]
+    public void ApiControllers_Should_Not_Depend_On_AttachmentTextExtractor_Directly()
+    {
+        var controllerAssembly = typeof(SessionsController).Assembly;
+        var controllerTypes = controllerAssembly
+            .GetTypes()
+            .Where(type => type.IsClass && !type.IsAbstract && type.Name.EndsWith("Controller", StringComparison.Ordinal))
+            .ToList();
+
+        controllerTypes.Should().NotBeEmpty();
+
+        var violatingControllers = controllerTypes
+            .Where(type => type.GetConstructors(BindingFlags.Public | BindingFlags.Instance)
+                .Any(ctor => ctor.GetParameters()
+                    .Any(parameter => parameter.ParameterType == typeof(IAttachmentTextExtractor))))
+            .Select(type => type.Name)
+            .ToList();
+
+        violatingControllers.Should().BeEmpty("controllers must route document parsing via IDocumentParser only");
+    }
+
+    [Fact]
+    public void SessionsController_Should_Depend_On_DocumentParser()
+    {
+        var constructors = typeof(SessionsController).GetConstructors(BindingFlags.Public | BindingFlags.Instance);
+        constructors.Should().NotBeEmpty();
+
+        var hasParserDependency = constructors.Any(ctor =>
+            ctor.GetParameters().Any(parameter => parameter.ParameterType == typeof(IDocumentParser)));
+
+        hasParserDependency.Should().BeTrue("session attachment parsing should use canonical IDocumentParser");
     }
 }

@@ -46,3 +46,11 @@ This document defines the canonical parser contract used by Agon attachment work
 - `success=true`: persist extracted text and mark attachment `ready`.
 - `success=false && retryable=true`: mark attachment `failed` with retry-capable reason (operator can replay).
 - `success=false && retryable=false`: mark attachment `failed` with deterministic reason and require user/operator action.
+
+## Telemetry
+
+Canonical parser operations emit:
+
+- `agon.document_parse.success` (counter)
+- `agon.document_parse.failure` (counter with `error_code` and `retryable` tags)
+- `agon.document_parse.duration.ms` (histogram)

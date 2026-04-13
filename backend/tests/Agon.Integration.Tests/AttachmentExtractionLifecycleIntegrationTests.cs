@@ -78,6 +78,39 @@ public class AttachmentExtractionLifecycleIntegrationTests : IClassFixture<AgonW
         listDoc.RootElement[0].GetProperty("extractionFailureReason").GetString().Should().NotBeNullOrWhiteSpace();
     }
 
+    [Fact]
+    public async Task POST_Attachment_Should_Use_Canonical_DocumentParser_And_Persist_Failure_Reason()
+    {
+        var parser = new StubDocumentParser(_ => new DocumentParseResult(
+            ContractVersion: "1.0",
+            Route: DocumentParseRoute.Text,
+            Success: false,
+            Retryable: false,
+            IsPartial: false,
+            ExtractedText: null,
+            ExtractedTextChars: 0,
+            ErrorCode: DocumentParseErrorCode.NoExtractableText,
+            FailureReason: "No extractable text was produced for this attachment."));
+        using var factory = CreateFactoryWithDocumentParser(parser);
+        var client = factory.CreateClient();
+        var sessionId = await CreateSessionAsync(client, "Canonical parser enforcement");
+
+        using var multipart = new MultipartFormDataContent();
+        var fileContent = new ByteArrayContent(Encoding.UTF8.GetBytes("hello"));
+        fileContent.Headers.ContentType = MediaTypeHeaderValue.Parse("text/plain");
+        multipart.Add(fileContent, "file", "failure.txt");
+
+        var uploadResponse = await client.PostAsync($"/sessions/{sessionId}/attachments", multipart);
+
+        uploadResponse.StatusCode.Should().Be(HttpStatusCode.Created);
+        parser.CallCount.Should().Be(1);
+
+        using var uploadDoc = JsonDocument.Parse(await uploadResponse.Content.ReadAsStringAsync());
+        uploadDoc.RootElement.GetProperty("extractionStatus").GetString().Should().Be("failed");
+        uploadDoc.RootElement.GetProperty("extractionFailureReason").GetString()
+            .Should().Be("No extractable text was produced for this attachment.");
+    }
+
     private WebApplicationFactory<Program> CreateFactoryWithAttachmentServices(IAttachmentTextExtractor extractor)
     {
         return _baseFactory.WithWebHostBuilder(builder =>
@@ -88,6 +121,20 @@ public class AttachmentExtractionLifecycleIntegrationTests : IClassFixture<AgonW
                 services.RemoveAll<IAttachmentTextExtractor>();
                 services.AddSingleton<IAttachmentStorageService, InMemoryAttachmentStorageService>();
                 services.AddSingleton(extractor);
+            });
+        });
+    }
+
+    private WebApplicationFactory<Program> CreateFactoryWithDocumentParser(IDocumentParser parser)
+    {
+        return _baseFactory.WithWebHostBuilder(builder =>
+        {
+            builder.ConfigureServices(services =>
+            {
+                services.RemoveAll<IAttachmentStorageService>();
+                services.RemoveAll<IDocumentParser>();
+                services.AddSingleton<IAttachmentStorageService, InMemoryAttachmentStorageService>();
+                services.AddSingleton(parser);
             });
         });
     }
@@ -146,6 +193,24 @@ public class AttachmentExtractionLifecycleIntegrationTests : IClassFixture<AgonW
         public Task<string?> ExtractAsync(byte[] content, string fileName, string contentType, CancellationToken cancellationToken = default)
         {
             return Task.FromResult(_extract(content));
+        }
+    }
+
+    private sealed class StubDocumentParser : IDocumentParser
+    {
+        private readonly Func<DocumentParseRequest, DocumentParseResult> _parse;
+
+        public StubDocumentParser(Func<DocumentParseRequest, DocumentParseResult> parse)
+        {
+            _parse = parse;
+        }
+
+        public int CallCount { get; private set; }
+
+        public Task<DocumentParseResult> ParseAsync(DocumentParseRequest request, CancellationToken cancellationToken = default)
+        {
+            CallCount++;
+            return Task.FromResult(_parse(request));
         }
     }
 }
