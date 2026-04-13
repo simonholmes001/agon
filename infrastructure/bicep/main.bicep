@@ -122,6 +122,25 @@ param documentIntelligenceModelId string = 'prebuilt-layout'
 @minValue(1)
 param attachmentProcessingMaxExtractedTextChars int = 200000
 
+@description('Reject attachments whose route cannot be resolved to a supported text/image/document family.')
+param attachmentProcessingValidationRejectUnsupportedFormats bool = true
+
+@description('Absolute maximum attachment upload size in bytes.')
+@minValue(1024)
+param attachmentProcessingValidationMaxUploadBytes int = 26214400
+
+@description('Maximum text-route attachment size in bytes.')
+@minValue(1024)
+param attachmentProcessingValidationMaxTextUploadBytes int = 10485760
+
+@description('Maximum document-route attachment size in bytes.')
+@minValue(1024)
+param attachmentProcessingValidationMaxDocumentUploadBytes int = 26214400
+
+@description('Maximum image-route attachment size in bytes.')
+@minValue(1024)
+param attachmentProcessingValidationMaxImageUploadBytes int = 20971520
+
 @description('Enable long-document context-window chunk-loop processing.')
 param attachmentProcessingChunkLoopEnabled bool = true
 
@@ -343,6 +362,11 @@ module appEdge './modules/app-edge-dev.bicep' = {
     attachmentContainerName: attachmentContainerName
     attachmentRetentionDays: attachmentRetentionDays
     attachmentProcessingMaxExtractedTextChars: attachmentProcessingMaxExtractedTextChars
+    attachmentProcessingValidationRejectUnsupportedFormats: attachmentProcessingValidationRejectUnsupportedFormats
+    attachmentProcessingValidationMaxUploadBytes: attachmentProcessingValidationMaxUploadBytes
+    attachmentProcessingValidationMaxTextUploadBytes: attachmentProcessingValidationMaxTextUploadBytes
+    attachmentProcessingValidationMaxDocumentUploadBytes: attachmentProcessingValidationMaxDocumentUploadBytes
+    attachmentProcessingValidationMaxImageUploadBytes: attachmentProcessingValidationMaxImageUploadBytes
     attachmentProcessingChunkLoopEnabled: attachmentProcessingChunkLoopEnabled
     attachmentProcessingChunkLoopActivationThresholdChars: attachmentProcessingChunkLoopActivationThresholdChars
     attachmentProcessingChunkLoopChunkSizeChars: attachmentProcessingChunkLoopChunkSizeChars

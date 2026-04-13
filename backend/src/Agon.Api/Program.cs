@@ -175,6 +175,15 @@ builder.Services.AddSingleton(trialAccessConfig);
 builder.Services.AddSingleton<ITokenUsageRepository, NoOpTokenUsageRepository>();
 builder.Services.AddSingleton<TrialRequestRateLimiter>();
 builder.Services.AddScoped<TrialAccessService>();
+var maxUploadBytes = Math.Max(1, attachmentProcessingConfig.Validation.MaxUploadBytes);
+builder.Services.AddSingleton(new AttachmentUploadValidationOptions
+{
+    RejectUnsupportedFormats = attachmentProcessingConfig.Validation.RejectUnsupportedFormats,
+    MaxUploadBytes = maxUploadBytes,
+    MaxTextUploadBytes = Math.Max(1, Math.Min(maxUploadBytes, attachmentProcessingConfig.Validation.MaxTextUploadBytes)),
+    MaxDocumentUploadBytes = Math.Max(1, Math.Min(maxUploadBytes, attachmentProcessingConfig.Validation.MaxDocumentUploadBytes)),
+    MaxImageUploadBytes = Math.Max(1, Math.Min(maxUploadBytes, attachmentProcessingConfig.Validation.MaxImageUploadBytes))
+});
 builder.Services.AddSingleton(new AttachmentChunkLoopOptions
 {
     Enabled = attachmentProcessingConfig.ChunkLoop.Enabled,

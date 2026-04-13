@@ -16,7 +16,16 @@ This matrix defines deterministic attachment routing for extraction in Agon back
 | Image | `image/png`, `image/jpeg`, `image/jpg`, `image/pjpeg`, `image/gif`, `image/bmp`, `image/webp`, `image/tiff`, `image/heic`, `image/heif` | `.png`, `.jpg`, `.jpeg`, `.gif`, `.bmp`, `.webp`, `.tif`, `.tiff`, `.heic`, `.heif`, `.jfif` | OpenAI Vision first, then Document Intelligence OCR fallback |
 | Document | `application/pdf`, `application/msword`, `application/vnd.openxmlformats-officedocument.wordprocessingml.document`, `application/vnd.ms-excel`, `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`, `application/vnd.ms-powerpoint`, `application/vnd.openxmlformats-officedocument.presentationml.presentation` | `.pdf`, `.doc`, `.docx`, `.xls`, `.xlsx`, `.ppt`, `.pptx` | Document Intelligence extraction |
 
+## Default size limits
+
+- Absolute upload max: `26214400` bytes (`25 MiB`)
+- Text-route max: `10485760` bytes (`10 MiB`)
+- Image-route max: `20971520` bytes (`20 MiB`)
+- Document-route max: `26214400` bytes (`25 MiB`)
+
 ## Notes
 
 - Mismatched metadata is resolved deterministically by precedence. Example: `text/plain` with `.pdf` routes as `Text`.
 - Generic binary uploads rely on extension fallback. Example: `application/octet-stream` with `.pptx` routes as `Document`.
+- Unsupported routes return `415 ATTACHMENT_UNSUPPORTED_FORMAT` when unsupported formats are blocked.
+- Route/global size breaches return `413 ATTACHMENT_SIZE_LIMIT_EXCEEDED`.

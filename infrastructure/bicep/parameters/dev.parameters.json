@@ -59,6 +59,21 @@
     "attachmentProcessingMaxExtractedTextChars": {
       "value": 200000
     },
+    "attachmentProcessingValidationRejectUnsupportedFormats": {
+      "value": true
+    },
+    "attachmentProcessingValidationMaxUploadBytes": {
+      "value": 26214400
+    },
+    "attachmentProcessingValidationMaxTextUploadBytes": {
+      "value": 10485760
+    },
+    "attachmentProcessingValidationMaxDocumentUploadBytes": {
+      "value": 26214400
+    },
+    "attachmentProcessingValidationMaxImageUploadBytes": {
+      "value": 20971520
+    },
     "attachmentProcessingChunkLoopEnabled": {
       "value": true
     },

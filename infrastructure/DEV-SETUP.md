@@ -245,6 +245,11 @@ Azure App Service deployments use managed identity mode by default via app setti
 - `Storage__AttachmentBlobServiceUri=<attachmentStorageBlobEndpoint>`
 - `Storage__AttachmentContainer=<attachmentContainerName>`
 - `AttachmentProcessing__MaxExtractedTextChars=<attachmentProcessingMaxExtractedTextChars>` (default `200000`)
+- `AttachmentProcessing__Validation__RejectUnsupportedFormats=<attachmentProcessingValidationRejectUnsupportedFormats>` (default `true`)
+- `AttachmentProcessing__Validation__MaxUploadBytes=<attachmentProcessingValidationMaxUploadBytes>` (default `26214400`)
+- `AttachmentProcessing__Validation__MaxTextUploadBytes=<attachmentProcessingValidationMaxTextUploadBytes>` (default `10485760`)
+- `AttachmentProcessing__Validation__MaxDocumentUploadBytes=<attachmentProcessingValidationMaxDocumentUploadBytes>` (default `26214400`)
+- `AttachmentProcessing__Validation__MaxImageUploadBytes=<attachmentProcessingValidationMaxImageUploadBytes>` (default `20971520`)
 - `AttachmentProcessing__ChunkLoop__Enabled=<attachmentProcessingChunkLoopEnabled>` (default `true`)
 - `AttachmentProcessing__ChunkLoop__ActivationThresholdChars=<attachmentProcessingChunkLoopActivationThresholdChars>` (default `14000`)
 - `AttachmentProcessing__ChunkLoop__ChunkSizeChars=<attachmentProcessingChunkLoopChunkSizeChars>` (default `12000`)

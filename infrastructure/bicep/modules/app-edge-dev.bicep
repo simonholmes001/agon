@@ -177,6 +177,25 @@ param attachmentRetentionDays int = 90
 @minValue(1)
 param attachmentProcessingMaxExtractedTextChars int = 200000
 
+@description('Reject attachments whose route cannot be resolved to a supported text/image/document family.')
+param attachmentProcessingValidationRejectUnsupportedFormats bool = true
+
+@description('Absolute maximum attachment upload size in bytes.')
+@minValue(1024)
+param attachmentProcessingValidationMaxUploadBytes int = 26214400
+
+@description('Maximum text-route attachment size in bytes.')
+@minValue(1024)
+param attachmentProcessingValidationMaxTextUploadBytes int = 10485760
+
+@description('Maximum document-route attachment size in bytes.')
+@minValue(1024)
+param attachmentProcessingValidationMaxDocumentUploadBytes int = 26214400
+
+@description('Maximum image-route attachment size in bytes.')
+@minValue(1024)
+param attachmentProcessingValidationMaxImageUploadBytes int = 20971520
+
 @description('Enable long-document context-window chunk-loop processing.')
 param attachmentProcessingChunkLoopEnabled bool = true
 
@@ -523,6 +542,26 @@ resource appService 'Microsoft.Web/sites@2023-12-01' = {
         {
           name: 'AttachmentProcessing__MaxExtractedTextChars'
           value: string(attachmentProcessingMaxExtractedTextChars)
+        }
+        {
+          name: 'AttachmentProcessing__Validation__RejectUnsupportedFormats'
+          value: attachmentProcessingValidationRejectUnsupportedFormats ? 'true' : 'false'
+        }
+        {
+          name: 'AttachmentProcessing__Validation__MaxUploadBytes'
+          value: string(attachmentProcessingValidationMaxUploadBytes)
+        }
+        {
+          name: 'AttachmentProcessing__Validation__MaxTextUploadBytes'
+          value: string(attachmentProcessingValidationMaxTextUploadBytes)
+        }
+        {
+          name: 'AttachmentProcessing__Validation__MaxDocumentUploadBytes'
+          value: string(attachmentProcessingValidationMaxDocumentUploadBytes)
+        }
+        {
+          name: 'AttachmentProcessing__Validation__MaxImageUploadBytes'
+          value: string(attachmentProcessingValidationMaxImageUploadBytes)
         }
         {
           name: 'AttachmentProcessing__ChunkLoop__Enabled'

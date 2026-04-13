@@ -1,5 +1,6 @@
 using Agon.Domain.Sessions;
 using Agon.Application.Orchestration;
+using Agon.Api.Configuration;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -116,5 +117,37 @@ public class ProgramIntegrationTests : IClassFixture<AgonWebApplicationFactory>
         options.MaxChunksPerAttachment.Should().Be(12);
         options.MaxChunkNoteChars.Should().Be(900);
         options.MaxFinalNotesPerAgent.Should().Be(6);
+    }
+
+    [Fact]
+    public void AttachmentUploadValidationOptions_Should_Be_Registered_As_Singleton()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var options = scope.ServiceProvider.GetService<AttachmentUploadValidationOptions>();
+
+        options.Should().NotBeNull("upload validation options must be registered for deterministic contracts");
+        options.Should().BeOfType<AttachmentUploadValidationOptions>();
+    }
+
+    [Fact]
+    public void AttachmentUploadValidationOptions_Should_Respect_Configuration_Overrides()
+    {
+        using var factory = _factory.WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting("AttachmentProcessing:Validation:RejectUnsupportedFormats", "true");
+            builder.UseSetting("AttachmentProcessing:Validation:MaxUploadBytes", "1024");
+            builder.UseSetting("AttachmentProcessing:Validation:MaxTextUploadBytes", "128");
+            builder.UseSetting("AttachmentProcessing:Validation:MaxDocumentUploadBytes", "256");
+            builder.UseSetting("AttachmentProcessing:Validation:MaxImageUploadBytes", "512");
+        });
+
+        using var scope = factory.Services.CreateScope();
+        var options = scope.ServiceProvider.GetRequiredService<AttachmentUploadValidationOptions>();
+
+        options.RejectUnsupportedFormats.Should().BeTrue();
+        options.MaxUploadBytes.Should().Be(1024);
+        options.MaxTextUploadBytes.Should().Be(128);
+        options.MaxDocumentUploadBytes.Should().Be(256);
+        options.MaxImageUploadBytes.Should().Be(512);
     }
 }

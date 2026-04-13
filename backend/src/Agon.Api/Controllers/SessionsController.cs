@@ -1,9 +1,11 @@
 using Agon.Api.Observability;
 using Agon.Api.Services;
+using Agon.Api.Configuration;
 using Agon.Application.Interfaces;
 using Agon.Application.Models;
 using Agon.Application.Services;
 using Agon.Domain.Sessions;
+using Agon.Infrastructure.Attachments;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using System.Security.Claims;
@@ -21,12 +23,14 @@ namespace Agon.Api.Controllers;
 [Route("[controller]")]
 public class SessionsController : ControllerBase
 {
-    private const long MaxAttachmentSizeBytes = 25 * 1024 * 1024; // 25 MB
+    private const long MaxAttachmentRequestBodyBytes = 100L * 1024 * 1024;
     private const int AttachmentPreviewChars = 500;
     private const string AttachmentStorageNotConfiguredCode = "ATTACHMENT_STORAGE_NOT_CONFIGURED";
     private const string AttachmentStorageUnavailableCode = "ATTACHMENT_STORAGE_UNAVAILABLE";
     private const string AttachmentMetadataNotConfiguredCode = "ATTACHMENT_METADATA_NOT_CONFIGURED";
     private const string AttachmentMetadataUnavailableCode = "ATTACHMENT_METADATA_UNAVAILABLE";
+    private const string AttachmentUnsupportedFormatCode = "ATTACHMENT_UNSUPPORTED_FORMAT";
+    private const string AttachmentSizeLimitExceededCode = "ATTACHMENT_SIZE_LIMIT_EXCEEDED";
     private const string EntraGroupsClaimType = "groups";
     private const string LegacyGroupsClaimType = "http://schemas.microsoft.com/ws/2008/06/identity/claims/groups";
 
@@ -36,6 +40,7 @@ public class SessionsController : ControllerBase
     private readonly ConversationHistoryService _conversationHistory;
     private readonly ILogger<SessionsController> _logger;
     private readonly TrialAccessService _trialAccessService;
+    private readonly AttachmentUploadValidationOptions _attachmentUploadValidationOptions;
 
     public SessionsController(
         ISessionService sessionService,
@@ -43,6 +48,7 @@ public class SessionsController : ControllerBase
         ConversationHistoryService conversationHistory,
         ILogger<SessionsController> logger,
         TrialAccessService trialAccessService,
+        AttachmentUploadValidationOptions attachmentUploadValidationOptions,
         IAttachmentStorageService? attachmentStorage = null)
     {
         _sessionService = sessionService;
@@ -51,6 +57,7 @@ public class SessionsController : ControllerBase
         _conversationHistory = conversationHistory;
         _logger = logger;
         _trialAccessService = trialAccessService;
+        _attachmentUploadValidationOptions = attachmentUploadValidationOptions;
     }
 
     /// <summary>
@@ -390,9 +397,11 @@ public class SessionsController : ControllerBase
     /// </summary>
     [HttpPost("{id}/attachments")]
     [EnableRateLimiting("attachment-upload")]
-    [RequestSizeLimit(MaxAttachmentSizeBytes)]
+    [RequestSizeLimit(MaxAttachmentRequestBodyBytes)]
     [ProducesResponseType(typeof(SessionAttachmentResponse), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status413PayloadTooLarge)]
+    [ProducesResponseType(StatusCodes.Status415UnsupportedMediaType)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
     public async Task<IActionResult> UploadAttachment(
@@ -400,23 +409,9 @@ public class SessionsController : ControllerBase
         [FromForm] UploadAttachmentRequest request,
         CancellationToken cancellationToken)
     {
-        if (_attachmentStorage is null)
-        {
-            AttachmentMetrics.UploadFailure.Add(1);
-            return AttachmentServiceUnavailable(
-                AttachmentStorageNotConfiguredCode,
-                "Attachment storage is not configured.",
-                "Set ConnectionStrings:BlobStorage and restart the backend.");
-        }
-
         if (request.File is null || request.File.Length == 0)
         {
             return BadRequest(new { error = "Attachment file is required." });
-        }
-
-        if (request.File.Length > MaxAttachmentSizeBytes)
-        {
-            return BadRequest(new { error = $"Attachment exceeds max size of {MaxAttachmentSizeBytes / (1024 * 1024)} MB." });
         }
 
         var session = await _sessionService.GetByUserAsync(id, ResolveCurrentUserId(), cancellationToken);
@@ -429,6 +424,40 @@ public class SessionsController : ControllerBase
         var contentType = string.IsNullOrWhiteSpace(request.File.ContentType)
             ? GuessContentType(safeFileName)
             : request.File.ContentType.Trim();
+        var normalizedContentType = NormalizeContentType(contentType);
+        var route = AttachmentRoutingPolicy.Resolve(safeFileName, normalizedContentType);
+
+        if (_attachmentUploadValidationOptions.RejectUnsupportedFormats &&
+            route == AttachmentRoutingRoute.Unsupported)
+        {
+            return StatusCode(StatusCodes.Status415UnsupportedMediaType, new
+            {
+                errorCode = AttachmentUnsupportedFormatCode,
+                error = "Attachment format is not supported.",
+                hint = "Supported route families are text, image, and document. Ensure MIME type and extension are recognized."
+            });
+        }
+
+        var maxAllowedBytes = ResolveMaxAllowedBytes(route);
+        if (request.File.Length > maxAllowedBytes)
+        {
+            return StatusCode(StatusCodes.Status413PayloadTooLarge, new
+            {
+                errorCode = AttachmentSizeLimitExceededCode,
+                error = $"Attachment exceeds max allowed size of {maxAllowedBytes} bytes for route '{route.ToString().ToLowerInvariant()}'.",
+                route = route.ToString().ToLowerInvariant(),
+                maxAllowedBytes
+            });
+        }
+
+        if (_attachmentStorage is null)
+        {
+            AttachmentMetrics.UploadFailure.Add(1);
+            return AttachmentServiceUnavailable(
+                AttachmentStorageNotConfiguredCode,
+                "Attachment storage is not configured.",
+                "Set ConnectionStrings:BlobStorage and restart the backend.");
+        }
 
         byte[] fileBytes;
         await using (var source = request.File.OpenReadStream())
@@ -820,6 +849,30 @@ public class SessionsController : ControllerBase
             attachment.UploadedAt,
             !string.IsNullOrWhiteSpace(attachment.ExtractedText),
             preview);
+    }
+
+    private int ResolveMaxAllowedBytes(AttachmentRoutingRoute route)
+    {
+        var routeLimit = route switch
+        {
+            AttachmentRoutingRoute.Text => _attachmentUploadValidationOptions.MaxTextUploadBytes,
+            AttachmentRoutingRoute.Document => _attachmentUploadValidationOptions.MaxDocumentUploadBytes,
+            AttachmentRoutingRoute.Image => _attachmentUploadValidationOptions.MaxImageUploadBytes,
+            _ => _attachmentUploadValidationOptions.MaxUploadBytes
+        };
+
+        return Math.Min(_attachmentUploadValidationOptions.MaxUploadBytes, routeLimit);
+    }
+
+    private static string NormalizeContentType(string contentType)
+    {
+        if (string.IsNullOrWhiteSpace(contentType))
+        {
+            return string.Empty;
+        }
+
+        var semicolonIndex = contentType.IndexOf(';');
+        return (semicolonIndex >= 0 ? contentType[..semicolonIndex] : contentType).Trim().ToLowerInvariant();
     }
 
     private static string BuildAttachmentDownloadPath(Guid sessionId, Guid attachmentId) =>
