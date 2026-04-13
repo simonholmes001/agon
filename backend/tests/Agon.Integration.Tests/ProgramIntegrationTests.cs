@@ -1,4 +1,5 @@
 using Agon.Domain.Sessions;
+using Agon.Application.Interfaces;
 using Agon.Application.Orchestration;
 using Agon.Api.Configuration;
 using Agon.Infrastructure.Attachments;
@@ -168,5 +169,15 @@ public class ProgramIntegrationTests : IClassFixture<AgonWebApplicationFactory>
         options.TransientRetry.MaxAttempts.Should().Be(5);
         options.TransientRetry.BaseDelayMs.Should().Be(75);
         options.TransientRetry.MaxDelayMs.Should().Be(900);
+    }
+
+    [Fact]
+    public void DocumentParser_Should_Be_Registered_And_Use_Canonical_Implementation()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var parser = scope.ServiceProvider.GetService<IDocumentParser>();
+
+        parser.Should().NotBeNull("canonical document parser should be registered for attachment workflows");
+        parser.Should().BeOfType<DocumentParseService>();
     }
 }

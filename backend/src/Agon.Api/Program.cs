@@ -232,6 +232,7 @@ builder.Services.AddHttpClient("attachment-extraction", client =>
     client.Timeout = TimeSpan.FromMinutes(3);
 });
 builder.Services.AddScoped<IAttachmentTextExtractor, AttachmentTextExtractor>();
+builder.Services.AddScoped<IDocumentParser, DocumentParseService>();
 
 if (authEnabled)
 {

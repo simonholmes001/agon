@@ -41,6 +41,11 @@ This matrix defines deterministic attachment routing for extraction in Agon back
   - Image route tries OpenAI Vision first, then falls back to Document Intelligence OCR.
   - If no usable text is produced, attachment status resolves to `failed`.
 
+## Canonical parser contract
+
+- Attachment workflows now consume a versioned canonical parser contract (`document.parse` v`1.0`).
+- Contract details, deterministic failure taxonomy, and caller behavior are defined in `backend/docs/document-parse-contract.md`.
+
 ## Notes
 
 - Mismatched metadata is resolved deterministically by precedence. Example: `text/plain` with `.pdf` routes as `Text`.

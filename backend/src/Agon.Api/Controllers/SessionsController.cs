@@ -36,7 +36,7 @@ public class SessionsController : ControllerBase
 
     private readonly ISessionService _sessionService;
     private readonly IAttachmentStorageService? _attachmentStorage;
-    private readonly IAttachmentTextExtractor _attachmentTextExtractor;
+    private readonly IDocumentParser _documentParser;
     private readonly ConversationHistoryService _conversationHistory;
     private readonly ILogger<SessionsController> _logger;
     private readonly TrialAccessService _trialAccessService;
@@ -44,7 +44,7 @@ public class SessionsController : ControllerBase
 
     public SessionsController(
         ISessionService sessionService,
-        IAttachmentTextExtractor attachmentTextExtractor,
+        IDocumentParser documentParser,
         ConversationHistoryService conversationHistory,
         ILogger<SessionsController> logger,
         TrialAccessService trialAccessService,
@@ -53,7 +53,7 @@ public class SessionsController : ControllerBase
     {
         _sessionService = sessionService;
         _attachmentStorage = attachmentStorage;
-        _attachmentTextExtractor = attachmentTextExtractor;
+        _documentParser = documentParser;
         _conversationHistory = conversationHistory;
         _logger = logger;
         _trialAccessService = trialAccessService;
@@ -561,17 +561,20 @@ public class SessionsController : ControllerBase
                 null,
                 cancellationToken);
 
-            var extractedText = await _attachmentTextExtractor.ExtractAsync(
-                fileBytes,
-                safeFileName,
-                contentType,
+            var parseResult = await _documentParser.ParseAsync(
+                new DocumentParseRequest(
+                    fileBytes,
+                    safeFileName,
+                    contentType,
+                    request.File.Length,
+                    maxAllowedBytes),
                 cancellationToken);
-            if (!string.IsNullOrWhiteSpace(extractedText))
+            if (parseResult.Success && !string.IsNullOrWhiteSpace(parseResult.ExtractedText))
             {
                 finalized = await _sessionService.UpdateAttachmentExtractionStateAsync(
                     saved.AttachmentId,
                     AttachmentExtractionStatus.Ready,
-                    extractedText,
+                    parseResult.ExtractedText,
                     null,
                     cancellationToken);
             }
@@ -581,7 +584,7 @@ public class SessionsController : ControllerBase
                     saved.AttachmentId,
                     AttachmentExtractionStatus.Failed,
                     null,
-                    "No extractable text was produced for this attachment.",
+                    parseResult.FailureReason ?? "Attachment extraction failed.",
                     cancellationToken);
             }
         }
