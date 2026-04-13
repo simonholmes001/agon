@@ -561,30 +561,62 @@ export default class Shell extends Command {
         if (nextInputLineCount === currentFrame.inputLineCount) {
           return;
         }
-        // Move to zone row 0 (not above it) so new rows are appended at the
-        // bottom.  If the zone is at the terminal viewport bottom the terminal
-        // scrolls naturally, pushing old content up — matching Codex behaviour.
-        const moveUpLines = cursorLineIndex;
-        if (moveUpLines > 0) {
-          output.write(`\u001b[${moveUpLines}A\r`);
+
+        if (nextInputLineCount > currentFrame.inputLineCount) {
+          // Growing: append rows at the bottom so the viewport never jumps.
+          // Move down to the last row of the current zone.
+          const linesToBottom = currentFrame.inputLineCount - 1 - cursorLineIndex;
+          if (linesToBottom > 0) {
+            output.write(`\u001b[${linesToBottom}B`);
+          }
+          // Append new highlighted padding rows below the current zone.
+          // Each \r\n advances one line (scrolling the terminal if at viewport
+          // bottom, which pushes old content up — matching Codex behaviour).
+          const paddingLine = `${currentFrame.backgroundStart}${' '.repeat(currentFrame.width)}${currentFrame.reset}`;
+          const rowsToAdd = nextInputLineCount - currentFrame.inputLineCount;
+          for (let i = 0; i < rowsToAdd; i++) {
+            output.write(`\r\n${paddingLine}`);
+          }
+          // Cursor is now on the last row of the new zone (row nextInputLineCount - 1).
+          // Update frame dimensions; all other properties are unchanged.
+          currentFrame = {
+            ...currentFrame,
+            inputLineCount: nextInputLineCount,
+            cursorUpLines: nextInputLineCount,
+            cursorDownFromFirstLine: nextInputLineCount
+          };
+          const newCursorLineIndex = getPromptCursorPosition(currentFrame, value, cursorIndex).lineIndex;
+          // Move up from the last row to newCursorLineIndex so redraw() can proceed.
+          const moveUpToContent = nextInputLineCount - 1 - newCursorLineIndex;
+          if (moveUpToContent > 0) {
+            output.write(`\u001b[${moveUpToContent}A\r`);
+          } else {
+            output.write('\r');
+          }
+          cursorLineIndex = newCursorLineIndex;
         } else {
-          output.write('\r');
+          // Shrinking: clear from zone top and re-render (no viewport jump risk
+          // since the zone is getting smaller, not larger).
+          const moveUpLines = cursorLineIndex;
+          if (moveUpLines > 0) {
+            output.write(`\u001b[${moveUpLines}A\r`);
+          } else {
+            output.write('\r');
+          }
+          output.write('\u001b[0J');
+          currentFrame = renderPromptBanner(
+            (line) => output.write(`${line}\n`),
+            { inputLineCount: nextInputLineCount }
+          );
+          const newCursorLineIndex = getPromptCursorPosition(currentFrame, value, cursorIndex).lineIndex;
+          const upToNewCursorLine = currentFrame.cursorUpLines - newCursorLineIndex;
+          if (upToNewCursorLine > 0) {
+            output.write(`\u001b[${upToNewCursorLine}A\r`);
+          } else {
+            output.write('\r');
+          }
+          cursorLineIndex = newCursorLineIndex;
         }
-        output.write('\u001b[0J');
-        currentFrame = renderPromptBanner(
-          (line) => output.write(`${line}\n`),
-          { inputLineCount: nextInputLineCount }
-        );
-        // Position cursor at newCursorLineIndex within the new frame.
-        // redraw() will then move up newCursorLineIndex lines to reach row 0.
-        const newCursorLineIndex = getPromptCursorPosition(currentFrame, value, cursorIndex).lineIndex;
-        const upToNewCursorLine = currentFrame.cursorUpLines - newCursorLineIndex;
-        if (upToNewCursorLine > 0) {
-          output.write(`\u001b[${upToNewCursorLine}A\r`);
-        } else {
-          output.write('\r');
-        }
-        cursorLineIndex = newCursorLineIndex;
       };
 
       const redraw = (): void => {
