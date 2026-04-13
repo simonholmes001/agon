@@ -104,13 +104,13 @@ describe('shell renderer', () => {
     expect(frame.maxInputChars).toBeGreaterThan(0);
     expect(frame.cursorUpLines).toBe(frame.inputLineCount);
     expect(frame.cursorDownFromFirstLine).toBe(frame.inputLineCount);
-    expect(frame.inputLineCount).toBe(1);
-    expect(frame.promptLineOffset).toBe(0);
+    expect(frame.inputLineCount).toBe(3);
+    expect(frame.promptLineOffset).toBe(1);
   });
 
-  it('starts prompt on the first input row (Codex-like compact input zone)', () => {
+  it('starts prompt on the second input row (centered in three-row zone)', () => {
     const frame = renderPromptBanner(() => {});
-    expect(frame.promptLineOffset).toBe(0);
+    expect(frame.promptLineOffset).toBe(1);
   });
 
   it('builds an active prompt line with an input cursor prefix', () => {
@@ -120,7 +120,7 @@ describe('shell renderer', () => {
     const rows = plain.split('\n');
 
     expect(prompt).toContain('\u001b[48;2;63;111;201m');
-    expect(rows[0]).toContain('  > ');
+    expect(rows[1]).toContain('  > ');
   });
 
   it('builds shimmer text variants while preserving visible message', () => {
@@ -158,7 +158,7 @@ describe('shell renderer', () => {
     const rendered = buildPromptInputLine(frame, longValue);
 
     expect(rendered).toContain('\n');
-    expect(getPromptCursorPosition(frame, longValue, longValue.length).lineIndex).toBe(1);
+    expect(getPromptCursorPosition(frame, longValue, longValue.length).lineIndex).toBe(2);
   });
 
   it('wraps on word boundaries when space is available', () => {
@@ -170,7 +170,7 @@ describe('shell renderer', () => {
     const rows = plain.split('\n');
 
     expect(rows[0]).not.toContain('alph');
-    expect(rows[1]).toContain('alpha beta');
+    expect(rows[2]).toContain('alpha beta');
   });
 
   it('preserves explicit newline boundaries in prompt rendering', () => {

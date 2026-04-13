@@ -41,8 +41,11 @@ import { AgonError, ErrorCode } from '../utils/error-handler.js';
 import {
   describeSelfUpdateFailure,
   getSelfUpdateGuidance,
+  getSelfUpdateRestartNotice,
   runNpmGlobalInstall
 } from '../utils/self-update.js';
+import { showUpdatePrompt } from '../utils/update-prompt.js';
+import { getUpdateSkipVersion, setUpdateSkipVersion } from '../utils/update-skip-state.js';
 import { buildRuntimeExecutionProfile } from '../runtime/user-runtime-profile.js';
 import { AGENT_MODEL_IDS } from '../state/agent-model-config.js';
 
@@ -252,17 +255,29 @@ export default class Shell extends Command {
       (line) => this.log(line)
     );
     renderStatusLine((line) => this.log(line));
-    const updateInfo = await checkForCliUpdate({
-      packageName: this.config.pjson.name ?? '@agon_agents/cli',
-      currentVersion: this.config.pjson.version ?? '0.0.0'
-    });
+    const packageName = this.config.pjson.name ?? '@agon_agents/cli';
+    const currentVersion = this.config.pjson.version ?? '0.0.0';
+    const updateInfo = await checkForCliUpdate({ packageName, currentVersion });
     if (updateInfo) {
-      this.log(chalk.yellow(`Update available: v${updateInfo.currentVersion} → v${updateInfo.latestVersion}`));
-      this.log(chalk.cyan('Run now in this shell:'));
-      this.log(chalk.cyan('  /update'));
-      this.log(chalk.dim('Tip: Use /update --check to only verify availability.'));
-      this.log(chalk.dim('If that fails, run:'));
-      this.log(chalk.dim(`  ${updateInfo.installCommand}`));
+      const skipVersion = await getUpdateSkipVersion();
+      if (skipVersion !== updateInfo.latestVersion) {
+        const choice = await showUpdatePrompt(updateInfo);
+        if (choice === 'skip-version') {
+          await setUpdateSkipVersion(updateInfo.latestVersion);
+        } else if (choice === 'update') {
+          const updateSpinner = ora({ text: `Installing ${packageName}@latest...`, color: 'cyan' }).start();
+          try {
+            await runNpmGlobalInstall(packageName);
+            updateSpinner.succeed(`Updated to v${updateInfo.latestVersion}.`);
+            this.log(chalk.yellow(getSelfUpdateRestartNotice(updateInfo.latestVersion)));
+          } catch (updateError) {
+            updateSpinner.fail('Update failed.');
+            const failure = describeSelfUpdateFailure(updateError);
+            this.log(chalk.red(failure.message));
+            this.log(chalk.dim(getSelfUpdateGuidance(failure.category, updateInfo.installCommand)));
+          }
+        }
+      }
     }
     this.log('');
 
@@ -542,9 +557,11 @@ export default class Shell extends Command {
 
     let currentFrame = frame;
     const minInputLineCount = frame.inputLineCount;
+    // Cap the zone at ~8 rows so it never grows large enough to scroll the
+    // terminal and reveal old shell history above the Agon UI.
     const maxInputLineCount = Math.max(
       minInputLineCount,
-      Math.min((output.rows ?? 24) - 8, 18)
+      Math.min((output.rows ?? 24) - 16, 8)
     );
 
     output.write(`\u001b[${currentFrame.cursorUpLines}A\r`);
@@ -561,37 +578,74 @@ export default class Shell extends Command {
         if (nextInputLineCount === currentFrame.inputLineCount) {
           return;
         }
-        const moveUpLines = cursorLineIndex + 1;
-        if (moveUpLines > 0) {
-          output.write(`\u001b[${moveUpLines}A\r`);
+
+        if (nextInputLineCount > currentFrame.inputLineCount) {
+          // Growing: append rows at the bottom so the viewport never jumps.
+          // Move down to the last row of the current zone.
+          const linesToBottom = currentFrame.inputLineCount - 1 - cursorLineIndex;
+          if (linesToBottom > 0) {
+            output.write(`\u001b[${linesToBottom}B`);
+          }
+          // Append new highlighted padding rows below the current zone.
+          // Each \r\n advances one line (scrolling the terminal if at viewport
+          // bottom, which pushes old content up — matching Codex behaviour).
+          const paddingLine = `${currentFrame.backgroundStart}${' '.repeat(currentFrame.width)}${currentFrame.reset}`;
+          const rowsToAdd = nextInputLineCount - currentFrame.inputLineCount;
+          for (let i = 0; i < rowsToAdd; i++) {
+            output.write(`\r\n${paddingLine}`);
+          }
+          // Cursor is now on the last row of the new zone (row nextInputLineCount - 1).
+          // Update frame dimensions; all other properties are unchanged.
+          currentFrame = {
+            ...currentFrame,
+            inputLineCount: nextInputLineCount,
+            cursorUpLines: nextInputLineCount,
+            cursorDownFromFirstLine: nextInputLineCount
+          };
+          const newCursorLineIndex = getPromptCursorPosition(currentFrame, value, cursorIndex).lineIndex;
+          // Move up from the last row to newCursorLineIndex so redraw() can proceed.
+          const moveUpToContent = nextInputLineCount - 1 - newCursorLineIndex;
+          if (moveUpToContent > 0) {
+            output.write(`\u001b[${moveUpToContent}A\r`);
+          } else {
+            output.write('\r');
+          }
+          cursorLineIndex = newCursorLineIndex;
         } else {
-          output.write('\r');
+          // Shrinking: clear from zone top and re-render (no viewport jump risk
+          // since the zone is getting smaller, not larger).
+          const moveUpLines = cursorLineIndex;
+          if (moveUpLines > 0) {
+            output.write(`\u001b[${moveUpLines}A\r`);
+          } else {
+            output.write('\r');
+          }
+          output.write('\u001b[0J');
+          currentFrame = renderPromptBanner(
+            (line) => output.write(`${line}\n`),
+            { inputLineCount: nextInputLineCount }
+          );
+          const newCursorLineIndex = getPromptCursorPosition(currentFrame, value, cursorIndex).lineIndex;
+          const upToNewCursorLine = currentFrame.cursorUpLines - newCursorLineIndex;
+          if (upToNewCursorLine > 0) {
+            output.write(`\u001b[${upToNewCursorLine}A\r`);
+          } else {
+            output.write('\r');
+          }
+          cursorLineIndex = newCursorLineIndex;
         }
-        output.write('\u001b[0J');
-        currentFrame = renderPromptBanner(
-          (line) => output.write(`${line}\n`),
-          { inputLineCount: nextInputLineCount }
-        );
-        // Position cursor at the logical cursor row within the new frame, not at
-        // row 0. redraw() moves up cursorLineIndex lines to reach row 0 before
-        // writing content — if we land at row 0 here, that move goes above the
-        // frame and overwrites the output above it.
-        const newCursorLineIndex = getPromptCursorPosition(currentFrame, value, cursorIndex).lineIndex;
-        const upToNewCursorLine = currentFrame.cursorUpLines - newCursorLineIndex;
-        if (upToNewCursorLine > 0) {
-          output.write(`\u001b[${upToNewCursorLine}A\r`);
-        } else {
-          output.write('\r');
-        }
-        cursorLineIndex = newCursorLineIndex;
       };
 
       const redraw = (): void => {
         const preview = this.buildLiveAttachmentPreview(value, cursorIndex, activeSessionId);
         const requiredLines = getWrappedLineCount(preview.displayValue, currentFrame.maxInputCharsPerLine);
+        // Always reserve one empty row at the bottom (beyond promptLineOffset at
+        // top), so spacing is preserved even when the zone is at maxInputLineCount.
+        const maxEditableRows = Math.max(1, maxInputLineCount - currentFrame.promptLineOffset - 1);
+        const clampedRequiredLines = Math.min(requiredLines, maxEditableRows);
         const desiredInputLineCount = Math.min(
           maxInputLineCount,
-          Math.max(minInputLineCount, currentFrame.promptLineOffset + requiredLines)
+          Math.max(minInputLineCount, currentFrame.promptLineOffset + clampedRequiredLines + 1)
         );
         if (desiredInputLineCount !== currentFrame.inputLineCount) {
           resizePromptFrame(desiredInputLineCount);
