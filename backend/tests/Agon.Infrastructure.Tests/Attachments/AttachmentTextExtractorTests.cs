@@ -43,6 +43,60 @@ public class AttachmentTextExtractorTests
     }
 
     [Fact]
+    public async Task ExtractAsync_TextContentType_WithDocumentExtension_DoesNotInvokeDocumentIntelligence()
+    {
+        var handler = new SequenceHandler([]);
+        var extractor = CreateExtractor(new AttachmentExtractionOptions
+        {
+            DocumentIntelligence = new DocumentIntelligenceExtractionOptions
+            {
+                Enabled = true,
+                Endpoint = "https://example.cognitiveservices.azure.com",
+                UseManagedIdentity = false,
+                ApiKey = "test-doc-key",
+                PollIntervalMs = 1,
+                MaxPollAttempts = 2
+            }
+        }, handler);
+
+        var bytes = Encoding.UTF8.GetBytes("plain text content");
+        var result = await extractor.ExtractAsync(bytes, "notes.pdf", "text/plain");
+
+        result.Should().Be("plain text content");
+        handler.CallCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task ExtractAsync_TextContentType_WithImageExtension_DoesNotInvokeVisionOrDocumentIntelligence()
+    {
+        var handler = new SequenceHandler([]);
+        var extractor = CreateExtractor(new AttachmentExtractionOptions
+        {
+            DocumentIntelligence = new DocumentIntelligenceExtractionOptions
+            {
+                Enabled = true,
+                Endpoint = "https://example.cognitiveservices.azure.com",
+                UseManagedIdentity = false,
+                ApiKey = "test-doc-key",
+                PollIntervalMs = 1,
+                MaxPollAttempts = 2
+            },
+            OpenAiVision = new OpenAiVisionExtractionOptions
+            {
+                Enabled = true,
+                ApiKey = "test-key",
+                Model = "gpt-4o-mini"
+            }
+        }, handler);
+
+        var bytes = Encoding.UTF8.GetBytes("{\"ok\":true}");
+        var result = await extractor.ExtractAsync(bytes, "payload.png", "application/json");
+
+        result.Should().Be("{\"ok\":true}");
+        handler.CallCount.Should().Be(0);
+    }
+
+    [Fact]
     public async Task ExtractAsync_DocumentWithoutEndpoint_ReturnsNull()
     {
         var extractor = CreateExtractor(new AttachmentExtractionOptions

@@ -15,63 +15,6 @@ public sealed class AttachmentTextExtractor : IAttachmentTextExtractor
 {
     private const string CognitiveServicesScope = "https://cognitiveservices.azure.com/.default";
 
-    private static readonly HashSet<string> TextContentTypes = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "application/json",
-        "application/xml",
-        "application/x-yaml",
-        "application/yaml",
-        "text/csv",
-        "application/csv",
-        "application/x-www-form-urlencoded",
-        "application/javascript",
-        "application/x-javascript",
-        "application/typescript",
-        "application/sql",
-        "application/rtf"
-    };
-
-    private static readonly HashSet<string> TextExtensions = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ".txt", ".md", ".markdown", ".json", ".yaml", ".yml", ".csv", ".xml", ".html", ".htm",
-        ".log", ".ini", ".cfg", ".conf", ".toml", ".sql", ".ts", ".js", ".tsx", ".jsx",
-        ".cs", ".py", ".java", ".go", ".rb", ".php", ".ps1", ".sh", ".bat", ".env", ".rtf"
-    };
-
-    private static readonly HashSet<string> DocumentExtensions = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx"
-    };
-
-    private static readonly HashSet<string> DocumentContentTypes = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "application/pdf",
-        "application/msword",
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        "application/vnd.ms-excel",
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        "application/vnd.ms-powerpoint",
-        "application/vnd.openxmlformats-officedocument.presentationml.presentation"
-    };
-
-    private static readonly HashSet<string> ImageExtensions = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".tif", ".tiff", ".heic", ".heif", ".jfif"
-    };
-
-    private static readonly HashSet<string> ImageContentTypes = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "image/png",
-        "image/jpeg",
-        "image/jpg",
-        "image/pjpeg",
-        "image/gif",
-        "image/bmp",
-        "image/webp",
-        "image/tiff",
-        "image/heic",
-        "image/heif"
-    };
     private static readonly Regex ModelRefusalRegex = new(
         @"\b(i\s*(?:am|'m)\s*unable\s*to\s*(?:assist|help)|i\s*cannot\s*(?:assist|help)|i\s*can'?t\s*(?:assist|help)|can'?t\s*access\s*(?:the\s*)?(?:attached\s*)?(?:image|file)|unable\s*to\s*access\s*(?:the\s*)?(?:image|attachment))\b",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
@@ -107,8 +50,8 @@ public sealed class AttachmentTextExtractor : IAttachmentTextExtractor
         }
 
         var normalizedContentType = NormalizeContentType(contentType);
-
-        if (IsImage(fileName, normalizedContentType))
+        var route = AttachmentRoutingPolicy.Resolve(fileName, normalizedContentType);
+        if (route == AttachmentRoutingRoute.Image)
         {
             var visionResult = await ExtractWithOpenAiVisionAsync(content, normalizedContentType, cancellationToken);
             var normalizedVision = NormalizeText(visionResult);
@@ -121,7 +64,7 @@ public sealed class AttachmentTextExtractor : IAttachmentTextExtractor
             return NormalizeText(imageOcrResult);
         }
 
-        if (IsDocument(fileName, normalizedContentType))
+        if (route == AttachmentRoutingRoute.Document)
         {
             var documentResult = await ExtractWithDocumentIntelligenceAsync(content, cancellationToken);
             if (!string.IsNullOrWhiteSpace(documentResult))
@@ -130,7 +73,7 @@ public sealed class AttachmentTextExtractor : IAttachmentTextExtractor
             }
         }
 
-        if (IsTextLike(fileName, normalizedContentType))
+        if (route == AttachmentRoutingRoute.Text)
         {
             return NormalizeText(TryExtractUtf8(content));
         }
@@ -394,45 +337,6 @@ public sealed class AttachmentTextExtractor : IAttachmentTextExtractor
 
         var trimmed = value.Trim();
         return !(trimmed.StartsWith("${", StringComparison.Ordinal) && trimmed.EndsWith("}", StringComparison.Ordinal));
-    }
-
-    private static bool IsImage(string fileName, string contentType)
-    {
-        if (!string.IsNullOrWhiteSpace(contentType) &&
-            ImageContentTypes.Contains(contentType))
-        {
-            return true;
-        }
-
-        var extension = Path.GetExtension(fileName);
-        return !string.IsNullOrWhiteSpace(extension) && ImageExtensions.Contains(extension);
-    }
-
-    private static bool IsDocument(string fileName, string contentType)
-    {
-        if (!string.IsNullOrWhiteSpace(contentType) &&
-            DocumentContentTypes.Contains(contentType))
-        {
-            return true;
-        }
-
-        var extension = Path.GetExtension(fileName);
-        return !string.IsNullOrWhiteSpace(extension) && DocumentExtensions.Contains(extension);
-    }
-
-    private static bool IsTextLike(string fileName, string contentType)
-    {
-        if (!string.IsNullOrWhiteSpace(contentType))
-        {
-            if (contentType.StartsWith("text/", StringComparison.OrdinalIgnoreCase) ||
-                TextContentTypes.Contains(contentType))
-            {
-                return true;
-            }
-        }
-
-        var extension = Path.GetExtension(fileName);
-        return !string.IsNullOrWhiteSpace(extension) && TextExtensions.Contains(extension);
     }
 
     private static string? TryExtractUtf8(byte[] content)
