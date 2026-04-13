@@ -41,8 +41,11 @@ import { AgonError, ErrorCode } from '../utils/error-handler.js';
 import {
   describeSelfUpdateFailure,
   getSelfUpdateGuidance,
+  getSelfUpdateRestartNotice,
   runNpmGlobalInstall
 } from '../utils/self-update.js';
+import { showUpdatePrompt } from '../utils/update-prompt.js';
+import { getUpdateSkipVersion, setUpdateSkipVersion } from '../utils/update-skip-state.js';
 import { buildRuntimeExecutionProfile } from '../runtime/user-runtime-profile.js';
 import { AGENT_MODEL_IDS } from '../state/agent-model-config.js';
 
@@ -252,17 +255,29 @@ export default class Shell extends Command {
       (line) => this.log(line)
     );
     renderStatusLine((line) => this.log(line));
-    const updateInfo = await checkForCliUpdate({
-      packageName: this.config.pjson.name ?? '@agon_agents/cli',
-      currentVersion: this.config.pjson.version ?? '0.0.0'
-    });
+    const packageName = this.config.pjson.name ?? '@agon_agents/cli';
+    const currentVersion = this.config.pjson.version ?? '0.0.0';
+    const updateInfo = await checkForCliUpdate({ packageName, currentVersion });
     if (updateInfo) {
-      this.log(chalk.yellow(`Update available: v${updateInfo.currentVersion} → v${updateInfo.latestVersion}`));
-      this.log(chalk.cyan('Run now in this shell:'));
-      this.log(chalk.cyan('  /update'));
-      this.log(chalk.dim('Tip: Use /update --check to only verify availability.'));
-      this.log(chalk.dim('If that fails, run:'));
-      this.log(chalk.dim(`  ${updateInfo.installCommand}`));
+      const skipVersion = await getUpdateSkipVersion();
+      if (skipVersion !== updateInfo.latestVersion) {
+        const choice = await showUpdatePrompt(updateInfo);
+        if (choice === 'skip-version') {
+          await setUpdateSkipVersion(updateInfo.latestVersion);
+        } else if (choice === 'update') {
+          const updateSpinner = ora({ text: `Installing ${packageName}@latest...`, color: 'cyan' }).start();
+          try {
+            await runNpmGlobalInstall(packageName);
+            updateSpinner.succeed(`Updated to v${updateInfo.latestVersion}.`);
+            this.log(chalk.yellow(getSelfUpdateRestartNotice(updateInfo.latestVersion)));
+          } catch (updateError) {
+            updateSpinner.fail('Update failed.');
+            const failure = describeSelfUpdateFailure(updateError);
+            this.log(chalk.red(failure.message));
+            this.log(chalk.dim(getSelfUpdateGuidance(failure.category, updateInfo.installCommand)));
+          }
+        }
+      }
     }
     this.log('');
 
