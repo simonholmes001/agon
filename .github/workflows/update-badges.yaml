@@ -147,7 +147,7 @@ jobs:
 
       - name: Fallback create badges PR when action API call fails
         if: steps.create_badges_pr.outcome == 'failure'
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           script: |
             const owner = context.repo.owner;

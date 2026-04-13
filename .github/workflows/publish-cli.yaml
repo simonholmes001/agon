@@ -68,7 +68,7 @@ jobs:
           NPM_CONFIG_PROVENANCE: "true"
 
       - name: Exempt changeset release PR from required checks
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         env:
           CHANGESET_PR_NUMBER: ${{ steps.changesets.outputs.pullRequestNumber }}
         with:
