@@ -4,6 +4,7 @@ using Agon.Application.Services;
 using Agon.Domain.Sessions;
 using Agon.Domain.TruthMap;
 using Microsoft.Extensions.Logging;
+using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -531,6 +532,9 @@ public sealed class AgentRunner : IAgentRunner
         var chunkedAttachments = BuildChunkedAttachmentPlans(state.Attachments);
         if (chunkedAttachments.Count > 0)
         {
+            AttachmentChunkLoopMetrics.Activations.Add(1);
+            AttachmentChunkLoopMetrics.ChunkedAttachments.Add(chunkedAttachments.Count);
+
             var chunkPreludeNotes = await RunAttachmentChunkPreludeAsync(
                 state,
                 councilAgents,
@@ -700,6 +704,7 @@ public sealed class AgentRunner : IAgentRunner
         IReadOnlyList<ChunkedAttachmentPlan> chunkedAttachments,
         CancellationToken cancellationToken)
     {
+        var startedAt = Stopwatch.GetTimestamp();
         var notesByAgent = new Dictionary<string, List<string>>(StringComparer.Ordinal);
         var totalPasses = chunkedAttachments.Max(plan => plan.Chunks.Count);
         if (totalPasses <= 0)
@@ -714,6 +719,8 @@ public sealed class AgentRunner : IAgentRunner
             {
                 continue;
             }
+
+            AttachmentChunkLoopMetrics.Passes.Add(1);
 
             var directive = BuildChunkPassDirective(passIndex + 1, totalPasses, chunkedAttachments);
             var contexts = councilAgents.Select(_ =>
@@ -731,8 +738,20 @@ public sealed class AgentRunner : IAgentRunner
             var responses = await DispatchParallelAsync(councilAgents, contexts, cancellationToken);
             await AccumulateTokensAsync(state, responses, cancellationToken);
 
-            foreach (var response in responses.Where(response => !response.TimedOut && !string.IsNullOrWhiteSpace(response.Message)))
+            foreach (var response in responses)
             {
+                var responseTags = new System.Diagnostics.TagList
+                {
+                    { "agent_id", response.AgentId },
+                    { "timed_out", response.TimedOut }
+                };
+                AttachmentChunkLoopMetrics.Responses.Add(1, responseTags);
+
+                if (response.TimedOut || string.IsNullOrWhiteSpace(response.Message))
+                {
+                    continue;
+                }
+
                 if (!notesByAgent.TryGetValue(response.AgentId, out var notes))
                 {
                     notes = [];
@@ -740,9 +759,15 @@ public sealed class AgentRunner : IAgentRunner
                 }
 
                 notes.Add(TruncateAndNormalizeForPrompt(response.Message, _chunkLoopOptions.MaxChunkNoteChars));
+                var notesTags = new System.Diagnostics.TagList
+                {
+                    { "agent_id", response.AgentId }
+                };
+                AttachmentChunkLoopMetrics.NotesGenerated.Add(1, notesTags);
             }
         }
 
+        AttachmentChunkLoopMetrics.PreludeDurationMs.Record(Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds);
         return notesByAgent;
     }
 

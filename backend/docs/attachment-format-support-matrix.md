@@ -46,6 +46,16 @@ This matrix defines deterministic attachment routing for extraction in Agon back
 - Attachment workflows now consume a versioned canonical parser contract (`document.parse` v`1.0`).
 - Contract details, deterministic failure taxonomy, and caller behavior are defined in `backend/docs/document-parse-contract.md`.
 
+## Chunk-loop observability
+
+- Chunk-loop analysis prelude emits:
+  - `agon.attachment_chunk_loop.activations`
+  - `agon.attachment_chunk_loop.attachments`
+  - `agon.attachment_chunk_loop.passes`
+  - `agon.attachment_chunk_loop.responses`
+  - `agon.attachment_chunk_loop.notes_generated`
+  - `agon.attachment_chunk_loop.prelude.duration.ms`
+
 ## Notes
 
 - Mismatched metadata is resolved deterministically by precedence. Example: `text/plain` with `.pdf` routes as `Text`.
