@@ -177,6 +177,33 @@ param attachmentRetentionDays int = 90
 @minValue(1)
 param attachmentProcessingMaxExtractedTextChars int = 200000
 
+@description('Enable long-document context-window chunk-loop processing.')
+param attachmentProcessingChunkLoopEnabled bool = true
+
+@description('Extracted text length threshold that activates chunk-loop processing.')
+@minValue(1)
+param attachmentProcessingChunkLoopActivationThresholdChars int = 14000
+
+@description('Target chunk size in characters for chunk-loop processing.')
+@minValue(1)
+param attachmentProcessingChunkLoopChunkSizeChars int = 12000
+
+@description('Chunk overlap in characters between adjacent chunk-loop passes.')
+@minValue(0)
+param attachmentProcessingChunkLoopChunkOverlapChars int = 1000
+
+@description('Maximum chunk count processed per attachment during chunk-loop prelude.')
+@minValue(1)
+param attachmentProcessingChunkLoopMaxChunksPerAttachment int = 20
+
+@description('Maximum chars retained from each chunk-pass note before final synthesis.')
+@minValue(1)
+param attachmentProcessingChunkLoopMaxChunkNoteChars int = 1200
+
+@description('Maximum chunk-pass notes retained per agent before final synthesis.')
+@minValue(1)
+param attachmentProcessingChunkLoopMaxFinalNotesPerAgent int = 8
+
 var tags = {
   environment: environment
   workload: workloadName
@@ -496,6 +523,34 @@ resource appService 'Microsoft.Web/sites@2023-12-01' = {
         {
           name: 'AttachmentProcessing__MaxExtractedTextChars'
           value: string(attachmentProcessingMaxExtractedTextChars)
+        }
+        {
+          name: 'AttachmentProcessing__ChunkLoop__Enabled'
+          value: attachmentProcessingChunkLoopEnabled ? 'true' : 'false'
+        }
+        {
+          name: 'AttachmentProcessing__ChunkLoop__ActivationThresholdChars'
+          value: string(attachmentProcessingChunkLoopActivationThresholdChars)
+        }
+        {
+          name: 'AttachmentProcessing__ChunkLoop__ChunkSizeChars'
+          value: string(attachmentProcessingChunkLoopChunkSizeChars)
+        }
+        {
+          name: 'AttachmentProcessing__ChunkLoop__ChunkOverlapChars'
+          value: string(attachmentProcessingChunkLoopChunkOverlapChars)
+        }
+        {
+          name: 'AttachmentProcessing__ChunkLoop__MaxChunksPerAttachment'
+          value: string(attachmentProcessingChunkLoopMaxChunksPerAttachment)
+        }
+        {
+          name: 'AttachmentProcessing__ChunkLoop__MaxChunkNoteChars'
+          value: string(attachmentProcessingChunkLoopMaxChunkNoteChars)
+        }
+        {
+          name: 'AttachmentProcessing__ChunkLoop__MaxFinalNotesPerAgent'
+          value: string(attachmentProcessingChunkLoopMaxFinalNotesPerAgent)
         }
         {
           name: 'OPENAI_KEY'

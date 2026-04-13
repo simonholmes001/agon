@@ -1,6 +1,6 @@
 using Agon.Domain.Sessions;
+using Agon.Application.Orchestration;
 using FluentAssertions;
-using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Agon.Integration.Tests;
@@ -80,5 +80,41 @@ public class ProgramIntegrationTests : IClassFixture<AgonWebApplicationFactory>
 
         // Assert
         policy1.Should().BeSameAs(policy2, "RoundPolicy is registered as Singleton and should return the same instance");
+    }
+
+    [Fact]
+    public void AttachmentChunkLoopOptions_Should_Be_Registered_As_Singleton()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var options = scope.ServiceProvider.GetService<AttachmentChunkLoopOptions>();
+
+        options.Should().NotBeNull("chunk-loop options must be registered for runtime tuning");
+        options.Should().BeOfType<AttachmentChunkLoopOptions>();
+    }
+
+    [Fact]
+    public void AttachmentChunkLoopOptions_Should_Respect_Configuration_Overrides()
+    {
+        using var factory = _factory.WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting("AttachmentProcessing:ChunkLoop:Enabled", "false");
+            builder.UseSetting("AttachmentProcessing:ChunkLoop:ActivationThresholdChars", "8000");
+            builder.UseSetting("AttachmentProcessing:ChunkLoop:ChunkSizeChars", "6000");
+            builder.UseSetting("AttachmentProcessing:ChunkLoop:ChunkOverlapChars", "400");
+            builder.UseSetting("AttachmentProcessing:ChunkLoop:MaxChunksPerAttachment", "12");
+            builder.UseSetting("AttachmentProcessing:ChunkLoop:MaxChunkNoteChars", "900");
+            builder.UseSetting("AttachmentProcessing:ChunkLoop:MaxFinalNotesPerAgent", "6");
+        });
+
+        using var scope = factory.Services.CreateScope();
+        var options = scope.ServiceProvider.GetRequiredService<AttachmentChunkLoopOptions>();
+
+        options.Enabled.Should().BeFalse();
+        options.ActivationThresholdChars.Should().Be(8000);
+        options.ChunkSizeChars.Should().Be(6000);
+        options.ChunkOverlapChars.Should().Be(400);
+        options.MaxChunksPerAttachment.Should().Be(12);
+        options.MaxChunkNoteChars.Should().Be(900);
+        options.MaxFinalNotesPerAgent.Should().Be(6);
     }
 }

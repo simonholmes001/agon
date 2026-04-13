@@ -175,6 +175,16 @@ builder.Services.AddSingleton(trialAccessConfig);
 builder.Services.AddSingleton<ITokenUsageRepository, NoOpTokenUsageRepository>();
 builder.Services.AddSingleton<TrialRequestRateLimiter>();
 builder.Services.AddScoped<TrialAccessService>();
+builder.Services.AddSingleton(new AttachmentChunkLoopOptions
+{
+    Enabled = attachmentProcessingConfig.ChunkLoop.Enabled,
+    ActivationThresholdChars = attachmentProcessingConfig.ChunkLoop.ActivationThresholdChars,
+    ChunkSizeChars = attachmentProcessingConfig.ChunkLoop.ChunkSizeChars,
+    ChunkOverlapChars = attachmentProcessingConfig.ChunkLoop.ChunkOverlapChars,
+    MaxChunksPerAttachment = attachmentProcessingConfig.ChunkLoop.MaxChunksPerAttachment,
+    MaxChunkNoteChars = attachmentProcessingConfig.ChunkLoop.MaxChunkNoteChars,
+    MaxFinalNotesPerAgent = attachmentProcessingConfig.ChunkLoop.MaxFinalNotesPerAgent
+});
 builder.Services.AddSingleton(new AttachmentExtractionOptions
 {
     MaxExtractedTextChars = attachmentProcessingConfig.MaxExtractedTextChars,

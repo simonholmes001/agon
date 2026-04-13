@@ -59,6 +59,27 @@
     "attachmentProcessingMaxExtractedTextChars": {
       "value": 200000
     },
+    "attachmentProcessingChunkLoopEnabled": {
+      "value": true
+    },
+    "attachmentProcessingChunkLoopActivationThresholdChars": {
+      "value": 14000
+    },
+    "attachmentProcessingChunkLoopChunkSizeChars": {
+      "value": 12000
+    },
+    "attachmentProcessingChunkLoopChunkOverlapChars": {
+      "value": 1000
+    },
+    "attachmentProcessingChunkLoopMaxChunksPerAttachment": {
+      "value": 20
+    },
+    "attachmentProcessingChunkLoopMaxChunkNoteChars": {
+      "value": 1200
+    },
+    "attachmentProcessingChunkLoopMaxFinalNotesPerAgent": {
+      "value": 8
+    },
     "authEnabled": {
       "value": true
     },

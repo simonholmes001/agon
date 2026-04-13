@@ -122,6 +122,33 @@ param documentIntelligenceModelId string = 'prebuilt-layout'
 @minValue(1)
 param attachmentProcessingMaxExtractedTextChars int = 200000
 
+@description('Enable long-document context-window chunk-loop processing.')
+param attachmentProcessingChunkLoopEnabled bool = true
+
+@description('Extracted text length threshold that activates chunk-loop processing.')
+@minValue(1)
+param attachmentProcessingChunkLoopActivationThresholdChars int = 14000
+
+@description('Target chunk size in characters for chunk-loop processing.')
+@minValue(1)
+param attachmentProcessingChunkLoopChunkSizeChars int = 12000
+
+@description('Chunk overlap in characters between adjacent chunk-loop passes.')
+@minValue(0)
+param attachmentProcessingChunkLoopChunkOverlapChars int = 1000
+
+@description('Maximum chunk count processed per attachment during chunk-loop prelude.')
+@minValue(1)
+param attachmentProcessingChunkLoopMaxChunksPerAttachment int = 20
+
+@description('Maximum chars retained from each chunk-pass note before final synthesis.')
+@minValue(1)
+param attachmentProcessingChunkLoopMaxChunkNoteChars int = 1200
+
+@description('Maximum chunk-pass notes retained per agent before final synthesis.')
+@minValue(1)
+param attachmentProcessingChunkLoopMaxFinalNotesPerAgent int = 8
+
 @description('Enable JWT bearer authentication in the backend API.')
 param authEnabled bool = false
 
@@ -316,6 +343,13 @@ module appEdge './modules/app-edge-dev.bicep' = {
     attachmentContainerName: attachmentContainerName
     attachmentRetentionDays: attachmentRetentionDays
     attachmentProcessingMaxExtractedTextChars: attachmentProcessingMaxExtractedTextChars
+    attachmentProcessingChunkLoopEnabled: attachmentProcessingChunkLoopEnabled
+    attachmentProcessingChunkLoopActivationThresholdChars: attachmentProcessingChunkLoopActivationThresholdChars
+    attachmentProcessingChunkLoopChunkSizeChars: attachmentProcessingChunkLoopChunkSizeChars
+    attachmentProcessingChunkLoopChunkOverlapChars: attachmentProcessingChunkLoopChunkOverlapChars
+    attachmentProcessingChunkLoopMaxChunksPerAttachment: attachmentProcessingChunkLoopMaxChunksPerAttachment
+    attachmentProcessingChunkLoopMaxChunkNoteChars: attachmentProcessingChunkLoopMaxChunkNoteChars
+    attachmentProcessingChunkLoopMaxFinalNotesPerAgent: attachmentProcessingChunkLoopMaxFinalNotesPerAgent
     documentIntelligenceEndpoint: data.outputs.documentIntelligenceEndpoint
     documentIntelligenceModelId: documentIntelligenceModelId
     attachmentStorageBlobEndpoint: data.outputs.attachmentStorageBlobEndpoint

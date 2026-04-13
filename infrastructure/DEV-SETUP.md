@@ -245,6 +245,13 @@ Azure App Service deployments use managed identity mode by default via app setti
 - `Storage__AttachmentBlobServiceUri=<attachmentStorageBlobEndpoint>`
 - `Storage__AttachmentContainer=<attachmentContainerName>`
 - `AttachmentProcessing__MaxExtractedTextChars=<attachmentProcessingMaxExtractedTextChars>` (default `200000`)
+- `AttachmentProcessing__ChunkLoop__Enabled=<attachmentProcessingChunkLoopEnabled>` (default `true`)
+- `AttachmentProcessing__ChunkLoop__ActivationThresholdChars=<attachmentProcessingChunkLoopActivationThresholdChars>` (default `14000`)
+- `AttachmentProcessing__ChunkLoop__ChunkSizeChars=<attachmentProcessingChunkLoopChunkSizeChars>` (default `12000`)
+- `AttachmentProcessing__ChunkLoop__ChunkOverlapChars=<attachmentProcessingChunkLoopChunkOverlapChars>` (default `1000`)
+- `AttachmentProcessing__ChunkLoop__MaxChunksPerAttachment=<attachmentProcessingChunkLoopMaxChunksPerAttachment>` (default `20`)
+- `AttachmentProcessing__ChunkLoop__MaxChunkNoteChars=<attachmentProcessingChunkLoopMaxChunkNoteChars>` (default `1200`)
+- `AttachmentProcessing__ChunkLoop__MaxFinalNotesPerAgent=<attachmentProcessingChunkLoopMaxFinalNotesPerAgent>` (default `8`)
 
 Local development can still use connection-string mode:
 - `ConnectionStrings__BlobStorage` (or `BLOB_STORAGE_CONNECTION_STRING` placeholder source)
