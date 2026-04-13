@@ -9,9 +9,9 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="9.0.14" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="9.0.14" />
-    <PackageReference Include="Microsoft.Agents.AI" Version="1.0.0" />
-    <PackageReference Include="Microsoft.Agents.AI.OpenAI" Version="1.0.0" />
-    <PackageReference Include="Anthropic" Version="12.10.0" />
+    <PackageReference Include="Microsoft.Agents.AI" Version="1.1.0" />
+    <PackageReference Include="Microsoft.Agents.AI.OpenAI" Version="1.1.0" />
+    <PackageReference Include="Anthropic" Version="12.13.0" />
     <PackageReference Include="Anthropic.Foundry" Version="0.5.0" />
     <PackageReference Include="Google.GenAI" Version="1.0.0-beta02" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="9.0.0">
