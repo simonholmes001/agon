@@ -46,6 +46,7 @@
     "pack:dry-run": "npm pack --dry-run",
     "release:check": "npm run test && npm run pack:dry-run",
     "release:publish": "npm run release:check && npm publish",
+    "ci:publish": "npm run build && npm publish",
     "postpack": "rm -f ./README.md",
     "prepare": "npm run build"
   },

@@ -5,6 +5,9 @@
   "workspaces": [
     "cli"
   ],
+  "devDependencies": {
+    "@changesets/cli": "^2.27.12"
+  },
   "overrides": {
     "fast-xml-parser": "^5.5.6"
   }

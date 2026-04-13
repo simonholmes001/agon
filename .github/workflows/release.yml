@@ -1,0 +1,58 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+concurrency: ${{ github.workflow }}-${{ github.ref }}
+
+jobs:
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write       # create GitHub Releases and tags
+      pull-requests: write  # open/update the "Version Packages" PR
+      id-token: write       # npm provenance attestation
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Full history is required so changesets can diff against the base branch
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+          cache: 'npm'
+          cache-dependency-path: cli/package-lock.json
+
+      - name: Install root dependencies (provides @changesets/cli)
+        run: npm install
+        working-directory: .
+
+      - name: Install CLI dependencies
+        run: npm ci
+        working-directory: cli
+
+      - name: Create Release PR or Publish to npm
+        uses: changesets/action@v1
+        with:
+          # Run changeset commands from inside the cli/ directory where
+          # .changeset/config.json lives.
+          cwd: cli
+          # Command run when the "Version Packages" PR is merged:
+          # builds the package and publishes to npm (tests already passed in CI).
+          publish: npm run ci:publish
+          # Customise the version PR title and commit message.
+          title: 'chore: version packages'
+          commit: 'chore: version packages'
+          # Automatically create a GitHub Release for each published package.
+          createGithubReleases: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
