@@ -62,3 +62,4 @@ This matrix defines deterministic attachment routing for extraction in Agon back
 - Generic binary uploads rely on extension fallback. Example: `application/octet-stream` with `.pptx` routes as `Document`.
 - Unsupported routes return `415 ATTACHMENT_UNSUPPORTED_FORMAT` when unsupported formats are blocked.
 - Route/global size breaches return `413 ATTACHMENT_SIZE_LIMIT_EXCEEDED`.
+- Rollout/migration/operations procedures are defined in `backend/docs/document-pipeline-v2-rollout-runbook.md`.

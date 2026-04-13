@@ -313,6 +313,8 @@ Both infra workflows now include a preflight warning step to detect this conditi
   - `infrastructure/runbooks/app-gateway-https-cutover.md`
 - Observability and release-gate queries:
   - `infrastructure/runbooks/app-gateway-https-observability.md`
+- Document pipeline v2 rollout, migration, and operator diagnostics:
+  - `backend/docs/document-pipeline-v2-rollout-runbook.md`
 
 ## Security Posture (Dev Baseline)
 
