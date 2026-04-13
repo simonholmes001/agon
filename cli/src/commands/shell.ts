@@ -542,9 +542,11 @@ export default class Shell extends Command {
 
     let currentFrame = frame;
     const minInputLineCount = frame.inputLineCount;
+    // Cap the zone at ~8 rows so it never grows large enough to scroll the
+    // terminal and reveal old shell history above the Agon UI.
     const maxInputLineCount = Math.max(
       minInputLineCount,
-      Math.min((output.rows ?? 24) - 8, 18)
+      Math.min((output.rows ?? 24) - 16, 8)
     );
 
     output.write(`\u001b[${currentFrame.cursorUpLines}A\r`);
@@ -622,9 +624,13 @@ export default class Shell extends Command {
       const redraw = (): void => {
         const preview = this.buildLiveAttachmentPreview(value, cursorIndex, activeSessionId);
         const requiredLines = getWrappedLineCount(preview.displayValue, currentFrame.maxInputCharsPerLine);
+        // Always reserve one empty row at the bottom (beyond promptLineOffset at
+        // top), so spacing is preserved even when the zone is at maxInputLineCount.
+        const maxEditableRows = Math.max(1, maxInputLineCount - currentFrame.promptLineOffset - 1);
+        const clampedRequiredLines = Math.min(requiredLines, maxEditableRows);
         const desiredInputLineCount = Math.min(
           maxInputLineCount,
-          Math.max(minInputLineCount, currentFrame.promptLineOffset + requiredLines + 1)
+          Math.max(minInputLineCount, currentFrame.promptLineOffset + clampedRequiredLines + 1)
         );
         if (desiredInputLineCount !== currentFrame.inputLineCount) {
           resizePromptFrame(desiredInputLineCount);
