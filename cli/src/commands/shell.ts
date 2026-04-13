@@ -561,7 +561,10 @@ export default class Shell extends Command {
         if (nextInputLineCount === currentFrame.inputLineCount) {
           return;
         }
-        const moveUpLines = cursorLineIndex + 1;
+        // Move to zone row 0 (not above it) so new rows are appended at the
+        // bottom.  If the zone is at the terminal viewport bottom the terminal
+        // scrolls naturally, pushing old content up — matching Codex behaviour.
+        const moveUpLines = cursorLineIndex;
         if (moveUpLines > 0) {
           output.write(`\u001b[${moveUpLines}A\r`);
         } else {
@@ -572,10 +575,8 @@ export default class Shell extends Command {
           (line) => output.write(`${line}\n`),
           { inputLineCount: nextInputLineCount }
         );
-        // Position cursor at the logical cursor row within the new frame, not at
-        // row 0. redraw() moves up cursorLineIndex lines to reach row 0 before
-        // writing content — if we land at row 0 here, that move goes above the
-        // frame and overwrites the output above it.
+        // Position cursor at newCursorLineIndex within the new frame.
+        // redraw() will then move up newCursorLineIndex lines to reach row 0.
         const newCursorLineIndex = getPromptCursorPosition(currentFrame, value, cursorIndex).lineIndex;
         const upToNewCursorLine = currentFrame.cursorUpLines - newCursorLineIndex;
         if (upToNewCursorLine > 0) {
