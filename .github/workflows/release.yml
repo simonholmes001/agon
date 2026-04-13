@@ -42,12 +42,9 @@ jobs:
       - name: Create Release PR or Publish to npm
         uses: changesets/action@v1
         with:
-          # Run changeset commands from inside the cli/ directory where
-          # .changeset/config.json lives.
-          cwd: cli
           # Command run when the "Version Packages" PR is merged:
           # builds the package and publishes to npm (tests already passed in CI).
-          publish: npm run ci:publish
+          publish: npm run ci:publish --prefix cli
           # Customise the version PR title and commit message.
           title: 'chore: version packages'
           commit: 'chore: version packages'
