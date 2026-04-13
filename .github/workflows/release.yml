@@ -18,13 +18,13 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           # Full history is required so changesets can diff against the base branch
           fetch-depth: 0
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: '20'
           registry-url: 'https://registry.npmjs.org'
@@ -35,12 +35,16 @@ jobs:
         run: npm ci
         working-directory: .
 
+      - name: Build CLI (required before changeset publish)
+        run: npm run build
+        working-directory: cli
+
       - name: Create Release PR or Publish to npm
         uses: changesets/action@v1
         with:
-          # Command run when the "Version Packages" PR is merged:
-          # builds the package and publishes to npm (tests already passed in CI).
-          publish: npm run ci:publish --prefix cli
+          # changeset publish skips versions already on npm, preventing
+          # re-publish failures when the pipeline retries.
+          publish: npx changeset publish
           # Customise the version PR title and commit message.
           title: 'chore: version packages'
           commit: 'chore: version packages'
