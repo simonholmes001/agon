@@ -184,12 +184,23 @@ builder.Services.AddSingleton(new AttachmentUploadValidationOptions
     MaxDocumentUploadBytes = Math.Max(1, Math.Min(maxUploadBytes, attachmentProcessingConfig.Validation.MaxDocumentUploadBytes)),
     MaxImageUploadBytes = Math.Max(1, Math.Min(maxUploadBytes, attachmentProcessingConfig.Validation.MaxImageUploadBytes))
 });
+builder.Services.AddSingleton(new AttachmentAsyncExtractionOptions
+{
+    Enabled = attachmentProcessingConfig.AsyncExtraction.Enabled,
+    QueueCapacity = attachmentProcessingConfig.AsyncExtraction.QueueCapacity
+});
 builder.Services.AddSingleton(new AttachmentChunkLoopOptions
 {
     Enabled = attachmentProcessingConfig.ChunkLoop.Enabled,
     ActivationThresholdChars = attachmentProcessingConfig.ChunkLoop.ActivationThresholdChars,
     ChunkSizeChars = attachmentProcessingConfig.ChunkLoop.ChunkSizeChars,
     ChunkOverlapChars = attachmentProcessingConfig.ChunkLoop.ChunkOverlapChars,
+    UseTokenAwareSizing = attachmentProcessingConfig.ChunkLoop.UseTokenAwareSizing,
+    TargetChunkTokens = attachmentProcessingConfig.ChunkLoop.TargetChunkTokens,
+    EstimatedCharsPerToken = attachmentProcessingConfig.ChunkLoop.EstimatedCharsPerToken,
+    EnableQueryFocusedSecondPass = attachmentProcessingConfig.ChunkLoop.EnableQueryFocusedSecondPass,
+    MaxFocusedChunksPerAttachment = attachmentProcessingConfig.ChunkLoop.MaxFocusedChunksPerAttachment,
+    MinQueryKeywordLength = attachmentProcessingConfig.ChunkLoop.MinQueryKeywordLength,
     MaxChunksPerAttachment = attachmentProcessingConfig.ChunkLoop.MaxChunksPerAttachment,
     MaxChunkNoteChars = attachmentProcessingConfig.ChunkLoop.MaxChunkNoteChars,
     MaxFinalNotesPerAgent = attachmentProcessingConfig.ChunkLoop.MaxFinalNotesPerAgent
@@ -233,6 +244,8 @@ builder.Services.AddHttpClient("attachment-extraction", client =>
 });
 builder.Services.AddScoped<IAttachmentTextExtractor, AttachmentTextExtractor>();
 builder.Services.AddScoped<IDocumentParser, DocumentParseService>();
+builder.Services.AddSingleton<IAttachmentExtractionJobQueue, AttachmentExtractionJobQueue>();
+builder.Services.AddHostedService<AttachmentExtractionWorkerService>();
 
 if (authEnabled)
 {

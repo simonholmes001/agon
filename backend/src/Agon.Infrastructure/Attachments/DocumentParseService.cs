@@ -8,7 +8,9 @@ namespace Agon.Infrastructure.Attachments;
 
 public sealed class DocumentParseService : IDocumentParser
 {
-    private const string ContractVersion = "1.0";
+    private const string ContractVersion = "1.1";
+    private const int DefaultEstimatedCharsPerToken = 4;
+    private const int DefaultChunkHintTokens = 3000;
 
     private readonly IAttachmentTextExtractor _attachmentTextExtractor;
     private readonly ILogger<DocumentParseService> _logger;
@@ -78,7 +80,8 @@ public sealed class DocumentParseService : IDocumentParser
                 ExtractedText: normalizedText,
                 ExtractedTextChars: normalizedText.Length,
                 ErrorCode: null,
-                FailureReason: null));
+                FailureReason: null,
+                StructureMetadata: BuildStructureMetadata(normalizedText)));
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -184,7 +187,158 @@ public sealed class DocumentParseService : IDocumentParser
             ExtractedText: null,
             ExtractedTextChars: 0,
             ErrorCode: errorCode,
-            FailureReason: reason);
+            FailureReason: reason,
+            StructureMetadata: null);
+    }
+
+    private static DocumentParseStructureMetadata BuildStructureMetadata(string extractedText)
+    {
+        var sections = BuildSections(extractedText);
+        var chunkHints = BuildChunkHints(extractedText, sections);
+        var estimatedTokenCount = EstimateTokenCount(extractedText.Length);
+
+        return new DocumentParseStructureMetadata(
+            EstimatedTokenCount: estimatedTokenCount,
+            HeadingCount: Math.Max(0, sections.Count - 1),
+            SectionCount: sections.Count,
+            Sections: sections,
+            ChunkHints: chunkHints);
+    }
+
+    private static IReadOnlyList<DocumentParseSectionBoundary> BuildSections(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return
+            [
+                new DocumentParseSectionBoundary("full_document", 0, 0)
+            ];
+        }
+
+        var headingAnchors = new List<(int Position, string Label)>();
+        var lines = text.Split('\n');
+        var cursor = 0;
+        foreach (var rawLine in lines)
+        {
+            var line = rawLine.Trim();
+            if (IsSectionHeading(line))
+            {
+                headingAnchors.Add((cursor, NormalizeHeadingLabel(line)));
+            }
+
+            cursor += rawLine.Length + 1;
+        }
+
+        if (headingAnchors.Count == 0)
+        {
+            return
+            [
+                new DocumentParseSectionBoundary("full_document", 0, text.Length)
+            ];
+        }
+
+        var sections = new List<DocumentParseSectionBoundary>();
+        if (headingAnchors[0].Position > 0)
+        {
+            sections.Add(new DocumentParseSectionBoundary(
+                Label: "preface",
+                StartChar: 0,
+                EndChar: headingAnchors[0].Position));
+        }
+
+        for (var index = 0; index < headingAnchors.Count; index++)
+        {
+            var start = headingAnchors[index].Position;
+            var end = index + 1 < headingAnchors.Count
+                ? headingAnchors[index + 1].Position
+                : text.Length;
+            sections.Add(new DocumentParseSectionBoundary(
+                Label: headingAnchors[index].Label,
+                StartChar: start,
+                EndChar: end));
+        }
+
+        return sections;
+    }
+
+    private static IReadOnlyList<DocumentParseChunkHint> BuildChunkHints(
+        string text,
+        IReadOnlyList<DocumentParseSectionBoundary> sections)
+    {
+        var chunkHints = new List<DocumentParseChunkHint>();
+        var chunkChars = DefaultChunkHintTokens * DefaultEstimatedCharsPerToken;
+        var start = 0;
+
+        while (start < text.Length)
+        {
+            var end = Math.Min(text.Length, start + chunkChars);
+            var sectionLabel = ResolveSectionLabel(start, end, sections);
+            chunkHints.Add(new DocumentParseChunkHint(
+                StartChar: start,
+                EndChar: end,
+                EstimatedTokens: EstimateTokenCount(end - start),
+                SectionLabel: sectionLabel));
+
+            if (end >= text.Length)
+            {
+                break;
+            }
+
+            start = end;
+        }
+
+        if (chunkHints.Count == 0)
+        {
+            chunkHints.Add(new DocumentParseChunkHint(
+                StartChar: 0,
+                EndChar: 0,
+                EstimatedTokens: 0,
+                SectionLabel: sections.Count > 0 ? sections[0].Label : "full_document"));
+        }
+
+        return chunkHints;
+    }
+
+    private static string ResolveSectionLabel(
+        int chunkStart,
+        int chunkEnd,
+        IReadOnlyList<DocumentParseSectionBoundary> sections)
+    {
+        for (var index = 0; index < sections.Count; index++)
+        {
+            var section = sections[index];
+            if (chunkStart < section.EndChar && chunkEnd > section.StartChar)
+            {
+                return section.Label;
+            }
+        }
+
+        return sections.Count > 0 ? sections[0].Label : "full_document";
+    }
+
+    private static bool IsSectionHeading(string line)
+    {
+        return line.StartsWith("#", StringComparison.Ordinal)
+            || line.StartsWith("Section ", StringComparison.OrdinalIgnoreCase)
+            || line.StartsWith("Chapter ", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string NormalizeHeadingLabel(string line)
+    {
+        var cleaned = line.Trim().TrimStart('#').Trim();
+        return string.IsNullOrWhiteSpace(cleaned)
+            ? "section"
+            : cleaned;
+    }
+
+    private static int EstimateTokenCount(int chars)
+    {
+        if (chars <= 0)
+        {
+            return 0;
+        }
+
+        return (int)Math.Ceiling(chars / (double)DefaultEstimatedCharsPerToken);
     }
 
     private static string ToRouteTag(DocumentParseRoute route)

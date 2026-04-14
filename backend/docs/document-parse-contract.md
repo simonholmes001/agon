@@ -1,4 +1,4 @@
-# `document.parse` Contract (v1.0)
+# `document.parse` Contract (v1.1)
 
 This document defines the canonical parser contract used by Agon attachment workflows.
 
@@ -23,6 +23,7 @@ This document defines the canonical parser contract used by Agon attachment work
 `DocumentParseResult`
 
 - `contractVersion`: current contract version (`1.0`).
+- `contractVersion`: current contract version (`1.1`).
 - `route`: `text | image | document | unsupported`.
 - `success`: parse success flag.
 - `retryable`: indicates whether caller should retry later.
@@ -31,6 +32,12 @@ This document defines the canonical parser contract used by Agon attachment work
 - `extractedTextChars`: extracted text character count.
 - `errorCode`: deterministic failure class when `success=false`.
 - `failureReason`: stable user/operator-facing failure reason.
+- `structureMetadata`: deterministic parse metadata for downstream chunk-loop ingestion:
+  - `estimatedTokenCount`: conservative token estimate of extracted text.
+  - `headingCount`: detected heading count.
+  - `sectionCount`: detected section count.
+  - `sections[]`: section boundaries (`label`, `startChar`, `endChar`).
+  - `chunkHints[]`: deterministic chunk hints (`startChar`, `endChar`, `estimatedTokens`, `sectionLabel`).
 
 ## Error Taxonomy
 

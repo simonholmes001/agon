@@ -42,6 +42,13 @@ Backfill behavior:
 3. Phase 2: Validate long-document behavior (`ready` extraction + chunk-loop synthesis).
 4. Phase 3: Raise limits gradually if latency/error budgets remain healthy.
 
+## Regression Corpus
+
+- Integration test corpus fixture:
+  - `backend/tests/Agon.Integration.Tests/Fixtures/large-document-corpus.json`
+- Regression gate test:
+  - `LargeDocumentRegressionCorpusIntegrationTests`
+
 ## Go/No-Go Criteria
 
 Go if all are true:
@@ -109,6 +116,9 @@ Use these telemetry signals together:
   - `agon.attachment_chunk_loop.responses`
   - `agon.attachment_chunk_loop.notes_generated`
   - `agon.attachment_chunk_loop.prelude.duration.ms`
+- Azure alert rules (when `documentPipelineAlertsEnabled=true` in IaC):
+  - `alert-<prefix>-doc-parse-failures`
+  - `alert-<prefix>-chunk-loop-latency`
 
 ## Incident Playbook (Minimal)
 

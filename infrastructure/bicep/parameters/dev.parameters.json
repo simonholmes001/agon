@@ -74,6 +74,12 @@
     "attachmentProcessingValidationMaxImageUploadBytes": {
       "value": 20971520
     },
+    "attachmentProcessingAsyncExtractionEnabled": {
+      "value": true
+    },
+    "attachmentProcessingAsyncExtractionQueueCapacity": {
+      "value": 200
+    },
     "attachmentProcessingTransientRetryMaxAttempts": {
       "value": 3
     },
@@ -94,6 +100,24 @@
     },
     "attachmentProcessingChunkLoopChunkOverlapChars": {
       "value": 1000
+    },
+    "attachmentProcessingChunkLoopUseTokenAwareSizing": {
+      "value": true
+    },
+    "attachmentProcessingChunkLoopTargetChunkTokens": {
+      "value": 3000
+    },
+    "attachmentProcessingChunkLoopEstimatedCharsPerToken": {
+      "value": 4
+    },
+    "attachmentProcessingChunkLoopEnableQueryFocusedSecondPass": {
+      "value": true
+    },
+    "attachmentProcessingChunkLoopMaxFocusedChunksPerAttachment": {
+      "value": 3
+    },
+    "attachmentProcessingChunkLoopMinQueryKeywordLength": {
+      "value": 4
     },
     "attachmentProcessingChunkLoopMaxChunksPerAttachment": {
       "value": 20
@@ -157,6 +181,9 @@
     },
     "alertEmail": {
       "value": "simonholmesabc@gmail.com"
+    },
+    "documentPipelineAlertsEnabled": {
+      "value": true
     },
     "postgresAdminLogin": {
       "value": "agonadmin"

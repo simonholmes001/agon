@@ -156,4 +156,5 @@ jobs:
           --filter "(FullyQualifiedName~AttachmentRoutingPolicyTests)
           |(FullyQualifiedName~DocumentParseServiceTests)
           |(FullyQualifiedName~AttachmentExtractionLifecycleIntegrationTests)
+          |(FullyQualifiedName~LargeDocumentRegressionCorpusIntegrationTests)
           |(FullyQualifiedName~RunAnalysisRoundAsync_LongAttachment_UsesChunkPreludeAndFinalSynthesisPass)"

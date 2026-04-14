@@ -9,6 +9,7 @@ public sealed class AttachmentProcessingConfiguration
 
     public int MaxExtractedTextChars { get; set; } = 200000;
     public AttachmentValidationConfiguration Validation { get; set; } = new();
+    public AttachmentAsyncExtractionConfiguration AsyncExtraction { get; set; } = new();
     public DocumentIntelligenceProcessingConfiguration DocumentIntelligence { get; set; } = new();
     public OpenAiVisionProcessingConfiguration OpenAiVision { get; set; } = new();
     public AttachmentTransientRetryConfiguration TransientRetry { get; set; } = new();
@@ -22,6 +23,12 @@ public sealed class AttachmentValidationConfiguration
     public int MaxTextUploadBytes { get; set; } = 10 * 1024 * 1024;
     public int MaxDocumentUploadBytes { get; set; } = 25 * 1024 * 1024;
     public int MaxImageUploadBytes { get; set; } = 20 * 1024 * 1024;
+}
+
+public sealed class AttachmentAsyncExtractionConfiguration
+{
+    public bool Enabled { get; set; } = true;
+    public int QueueCapacity { get; set; } = 200;
 }
 
 public sealed class DocumentIntelligenceProcessingConfiguration
@@ -52,6 +59,12 @@ public sealed class AttachmentChunkLoopConfiguration
     public int ActivationThresholdChars { get; set; } = 14000;
     public int ChunkSizeChars { get; set; } = 12000;
     public int ChunkOverlapChars { get; set; } = 1000;
+    public bool UseTokenAwareSizing { get; set; } = true;
+    public int TargetChunkTokens { get; set; } = 3000;
+    public int EstimatedCharsPerToken { get; set; } = 4;
+    public bool EnableQueryFocusedSecondPass { get; set; } = true;
+    public int MaxFocusedChunksPerAttachment { get; set; } = 3;
+    public int MinQueryKeywordLength { get; set; } = 4;
     public int MaxChunksPerAttachment { get; set; } = 20;
     public int MaxChunkNoteChars { get; set; } = 1200;
     public int MaxFinalNotesPerAgent { get; set; } = 8;

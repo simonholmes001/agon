@@ -37,16 +37,14 @@ public class AttachmentExtractionLifecycleIntegrationTests : IClassFixture<AgonW
 
         uploadResponse.StatusCode.Should().Be(HttpStatusCode.Created);
         using var uploadDoc = JsonDocument.Parse(await uploadResponse.Content.ReadAsStringAsync());
-        uploadDoc.RootElement.GetProperty("extractionStatus").GetString().Should().Be("ready");
-        uploadDoc.RootElement.GetProperty("hasExtractedText").GetBoolean().Should().BeTrue();
+        var attachmentId = uploadDoc.RootElement.GetProperty("id").GetGuid();
+        uploadDoc.RootElement.GetProperty("extractionStatus").GetString().Should().Be("extracting");
         uploadDoc.RootElement.GetProperty("extractionFailureReason").ValueKind.Should().Be(JsonValueKind.Null);
 
-        var listResponse = await client.GetAsync($"/sessions/{sessionId}/attachments");
-        listResponse.StatusCode.Should().Be(HttpStatusCode.OK);
-        using var listDoc = JsonDocument.Parse(await listResponse.Content.ReadAsStringAsync());
-        listDoc.RootElement.GetArrayLength().Should().Be(1);
-        listDoc.RootElement[0].GetProperty("extractionStatus").GetString().Should().Be("ready");
-        listDoc.RootElement[0].GetProperty("hasExtractedText").GetBoolean().Should().BeTrue();
+        var finalized = await WaitForAttachmentTerminalStateAsync(client, sessionId, attachmentId);
+        finalized.ExtractionStatus.Should().Be("ready");
+        finalized.HasExtractedText.Should().BeTrue();
+        finalized.ExtractionFailureReason.Should().BeNull();
     }
 
     [Fact]
@@ -65,17 +63,14 @@ public class AttachmentExtractionLifecycleIntegrationTests : IClassFixture<AgonW
 
         uploadResponse.StatusCode.Should().Be(HttpStatusCode.Created);
         using var uploadDoc = JsonDocument.Parse(await uploadResponse.Content.ReadAsStringAsync());
-        uploadDoc.RootElement.GetProperty("extractionStatus").GetString().Should().Be("failed");
-        uploadDoc.RootElement.GetProperty("hasExtractedText").GetBoolean().Should().BeFalse();
-        uploadDoc.RootElement.GetProperty("extractionFailureReason").GetString().Should().NotBeNullOrWhiteSpace();
+        var attachmentId = uploadDoc.RootElement.GetProperty("id").GetGuid();
+        uploadDoc.RootElement.GetProperty("extractionStatus").GetString().Should().Be("extracting");
+        uploadDoc.RootElement.GetProperty("extractionFailureReason").ValueKind.Should().Be(JsonValueKind.Null);
 
-        var listResponse = await client.GetAsync($"/sessions/{sessionId}/attachments");
-        listResponse.StatusCode.Should().Be(HttpStatusCode.OK);
-        using var listDoc = JsonDocument.Parse(await listResponse.Content.ReadAsStringAsync());
-        listDoc.RootElement.GetArrayLength().Should().Be(1);
-        listDoc.RootElement[0].GetProperty("extractionStatus").GetString().Should().Be("failed");
-        listDoc.RootElement[0].GetProperty("hasExtractedText").GetBoolean().Should().BeFalse();
-        listDoc.RootElement[0].GetProperty("extractionFailureReason").GetString().Should().NotBeNullOrWhiteSpace();
+        var finalized = await WaitForAttachmentTerminalStateAsync(client, sessionId, attachmentId);
+        finalized.ExtractionStatus.Should().Be("failed");
+        finalized.HasExtractedText.Should().BeFalse();
+        finalized.ExtractionFailureReason.Should().NotBeNullOrWhiteSpace();
     }
 
     [Fact]
@@ -103,12 +98,48 @@ public class AttachmentExtractionLifecycleIntegrationTests : IClassFixture<AgonW
         var uploadResponse = await client.PostAsync($"/sessions/{sessionId}/attachments", multipart);
 
         uploadResponse.StatusCode.Should().Be(HttpStatusCode.Created);
-        parser.CallCount.Should().Be(1);
-
         using var uploadDoc = JsonDocument.Parse(await uploadResponse.Content.ReadAsStringAsync());
-        uploadDoc.RootElement.GetProperty("extractionStatus").GetString().Should().Be("failed");
-        uploadDoc.RootElement.GetProperty("extractionFailureReason").GetString()
+        var attachmentId = uploadDoc.RootElement.GetProperty("id").GetGuid();
+        uploadDoc.RootElement.GetProperty("extractionStatus").GetString().Should().Be("extracting");
+
+        var finalized = await WaitForAttachmentTerminalStateAsync(client, sessionId, attachmentId);
+        parser.CallCount.Should().Be(1);
+        finalized.ExtractionStatus.Should().Be("failed");
+        finalized.ExtractionFailureReason
             .Should().Be("No extractable text was produced for this attachment.");
+    }
+
+    private static async Task<AttachmentStateSnapshot> WaitForAttachmentTerminalStateAsync(
+        HttpClient client,
+        Guid sessionId,
+        Guid attachmentId,
+        TimeSpan? timeout = null)
+    {
+        var deadline = DateTimeOffset.UtcNow + (timeout ?? TimeSpan.FromSeconds(5));
+
+        while (DateTimeOffset.UtcNow <= deadline)
+        {
+            var listResponse = await client.GetAsync($"/sessions/{sessionId}/attachments");
+            listResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+
+            using var listDoc = JsonDocument.Parse(await listResponse.Content.ReadAsStringAsync());
+            var attachment = listDoc.RootElement
+                .EnumerateArray()
+                .Single(a => a.GetProperty("id").GetGuid() == attachmentId);
+
+            var status = attachment.GetProperty("extractionStatus").GetString();
+            if (status is "ready" or "failed")
+            {
+                return new AttachmentStateSnapshot(
+                    status,
+                    attachment.GetProperty("hasExtractedText").GetBoolean(),
+                    attachment.GetProperty("extractionFailureReason").GetString());
+            }
+
+            await Task.Delay(TimeSpan.FromMilliseconds(50));
+        }
+
+        throw new TimeoutException($"Attachment {attachmentId} did not reach terminal extraction state before timeout.");
     }
 
     private WebApplicationFactory<Program> CreateFactoryWithAttachmentServices(IAttachmentTextExtractor extractor)
@@ -213,4 +244,9 @@ public class AttachmentExtractionLifecycleIntegrationTests : IClassFixture<AgonW
             return Task.FromResult(_parse(request));
         }
     }
+
+    private sealed record AttachmentStateSnapshot(
+        string? ExtractionStatus,
+        bool HasExtractedText,
+        string? ExtractionFailureReason);
 }

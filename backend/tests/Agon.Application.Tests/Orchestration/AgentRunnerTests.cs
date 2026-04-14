@@ -172,6 +172,7 @@ public class AgentRunnerTests
                 ActivationThresholdChars = 10,
                 ChunkSizeChars = 10,
                 ChunkOverlapChars = 0,
+                UseTokenAwareSizing = false,
                 MaxChunksPerAttachment = 10,
                 MaxChunkNoteChars = 120,
                 MaxFinalNotesPerAgent = 10
@@ -199,6 +200,49 @@ public class AgentRunnerTests
     }
 
     [Fact]
+    public async Task RunAnalysisRoundAsync_WithQueryFocusedSecondPass_AddsFocusedPreludePasses()
+    {
+        var capturedContexts = new List<AgentContext>();
+        var agent = Substitute.For<ICouncilAgent>();
+        agent.AgentId.Returns(AgentId.GptAgent);
+        agent.ModelProvider.Returns("fake/model");
+        agent.RunAsync(Arg.Do<AgentContext>(capturedContexts.Add), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(SuccessResponse(AgentId.GptAgent, patch: null)));
+
+        var runner = BuildRunner(
+            [agent],
+            chunkLoopOptions: new AttachmentChunkLoopOptions
+            {
+                Enabled = true,
+                ActivationThresholdChars = 10,
+                ChunkSizeChars = 10,
+                ChunkOverlapChars = 0,
+                UseTokenAwareSizing = false,
+                EnableQueryFocusedSecondPass = true,
+                MaxFocusedChunksPerAttachment = 1,
+                MinQueryKeywordLength = 4,
+                MaxChunksPerAttachment = 10,
+                MaxChunkNoteChars = 120,
+                MaxFinalNotesPerAgent = 10
+            });
+
+        var state = BuildSessionState();
+        state.UserMessages.Add(new UserMessage("Please focus on keyword 1234567890", DateTimeOffset.UtcNow, 1));
+        state.Attachments.Add(BuildAttachmentWithExtractedText(
+            "large.md",
+            "text/markdown",
+            "ABCDEFGHIJ1234567890XYZ"));
+
+        await runner.RunAnalysisRoundAsync(state, CancellationToken.None);
+
+        capturedContexts.Should().HaveCount(5); // 3 base passes + 1 focused pass + 1 final pass
+        capturedContexts.Any(context => context.MicroDirective?.Contains("Focused query chunk pass 1/1", StringComparison.Ordinal) == true)
+            .Should().BeTrue();
+        capturedContexts.Any(context => context.MicroDirective?.Contains("User query focus: Please focus on keyword 1234567890", StringComparison.Ordinal) == true)
+            .Should().BeTrue();
+    }
+
+    [Fact]
     public async Task RunAnalysisRoundAsync_WhenChunkingDisabled_UsesLegacySinglePass()
     {
         var capturedContexts = new List<AgentContext>();
@@ -215,7 +259,8 @@ public class AgentRunnerTests
                 Enabled = false,
                 ActivationThresholdChars = 10,
                 ChunkSizeChars = 10,
-                ChunkOverlapChars = 0
+                ChunkOverlapChars = 0,
+                UseTokenAwareSizing = false
             });
 
         var longText = "ABCDEFGHIJ1234567890XYZ";

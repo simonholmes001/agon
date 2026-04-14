@@ -3,9 +3,11 @@ using Agon.Api.Controllers;
 using Agon.Application.Interfaces;
 using Agon.Application.Orchestration;
 using Agon.Api.Configuration;
+using Agon.Api.Services;
 using Agon.Infrastructure.Attachments;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using System.Reflection;
 
 namespace Agon.Integration.Tests;
@@ -106,6 +108,12 @@ public class ProgramIntegrationTests : IClassFixture<AgonWebApplicationFactory>
             builder.UseSetting("AttachmentProcessing:ChunkLoop:ActivationThresholdChars", "8000");
             builder.UseSetting("AttachmentProcessing:ChunkLoop:ChunkSizeChars", "6000");
             builder.UseSetting("AttachmentProcessing:ChunkLoop:ChunkOverlapChars", "400");
+            builder.UseSetting("AttachmentProcessing:ChunkLoop:UseTokenAwareSizing", "false");
+            builder.UseSetting("AttachmentProcessing:ChunkLoop:TargetChunkTokens", "2200");
+            builder.UseSetting("AttachmentProcessing:ChunkLoop:EstimatedCharsPerToken", "5");
+            builder.UseSetting("AttachmentProcessing:ChunkLoop:EnableQueryFocusedSecondPass", "false");
+            builder.UseSetting("AttachmentProcessing:ChunkLoop:MaxFocusedChunksPerAttachment", "2");
+            builder.UseSetting("AttachmentProcessing:ChunkLoop:MinQueryKeywordLength", "6");
             builder.UseSetting("AttachmentProcessing:ChunkLoop:MaxChunksPerAttachment", "12");
             builder.UseSetting("AttachmentProcessing:ChunkLoop:MaxChunkNoteChars", "900");
             builder.UseSetting("AttachmentProcessing:ChunkLoop:MaxFinalNotesPerAgent", "6");
@@ -118,6 +126,12 @@ public class ProgramIntegrationTests : IClassFixture<AgonWebApplicationFactory>
         options.ActivationThresholdChars.Should().Be(8000);
         options.ChunkSizeChars.Should().Be(6000);
         options.ChunkOverlapChars.Should().Be(400);
+        options.UseTokenAwareSizing.Should().BeFalse();
+        options.TargetChunkTokens.Should().Be(2200);
+        options.EstimatedCharsPerToken.Should().Be(5);
+        options.EnableQueryFocusedSecondPass.Should().BeFalse();
+        options.MaxFocusedChunksPerAttachment.Should().Be(2);
+        options.MinQueryKeywordLength.Should().Be(6);
         options.MaxChunksPerAttachment.Should().Be(12);
         options.MaxChunkNoteChars.Should().Be(900);
         options.MaxFinalNotesPerAgent.Should().Be(6);
@@ -171,6 +185,44 @@ public class ProgramIntegrationTests : IClassFixture<AgonWebApplicationFactory>
         options.TransientRetry.MaxAttempts.Should().Be(5);
         options.TransientRetry.BaseDelayMs.Should().Be(75);
         options.TransientRetry.MaxDelayMs.Should().Be(900);
+    }
+
+    [Fact]
+    public void AttachmentAsyncExtractionOptions_Should_Be_Registered_And_Respect_Overrides()
+    {
+        using var factory = _factory.WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting("AttachmentProcessing:AsyncExtraction:Enabled", "true");
+            builder.UseSetting("AttachmentProcessing:AsyncExtraction:QueueCapacity", "64");
+        });
+
+        using var scope = factory.Services.CreateScope();
+        var options = scope.ServiceProvider.GetRequiredService<AttachmentAsyncExtractionOptions>();
+
+        options.Enabled.Should().BeTrue();
+        options.QueueCapacity.Should().Be(64);
+    }
+
+    [Fact]
+    public void AttachmentExtractionQueue_Should_Be_Registered_As_Singleton()
+    {
+        using var scope1 = _factory.Services.CreateScope();
+        using var scope2 = _factory.Services.CreateScope();
+
+        var queue1 = scope1.ServiceProvider.GetRequiredService<IAttachmentExtractionJobQueue>();
+        var queue2 = scope2.ServiceProvider.GetRequiredService<IAttachmentExtractionJobQueue>();
+
+        queue1.Should().BeSameAs(queue2, "extraction jobs must share one process queue");
+    }
+
+    [Fact]
+    public void AttachmentExtractionWorkerService_Should_Be_Registered_As_HostedService()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var hostedServices = scope.ServiceProvider.GetServices<IHostedService>();
+
+        hostedServices.Any(service => service.GetType() == typeof(AttachmentExtractionWorkerService))
+            .Should().BeTrue("async extraction worker must be active to process queued attachment jobs");
     }
 
     [Fact]

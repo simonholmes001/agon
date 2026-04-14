@@ -26,9 +26,16 @@ This matrix defines deterministic attachment routing for extraction in Agon back
 ## Extraction lifecycle states
 
 - `uploaded`: metadata persisted and blob upload completed.
-- `extracting`: extraction has started.
+- `extracting`: extraction job is queued/running in the async worker.
 - `ready`: extraction completed with usable extracted text.
 - `failed`: extraction completed without usable text or raised an extraction error.
+
+## Async extraction worker
+
+- Upload path persists metadata, then enqueues extraction work; extraction no longer blocks upload request completion.
+- Runtime knobs:
+  - `AttachmentProcessing:AsyncExtraction:Enabled` (default `true`)
+  - `AttachmentProcessing:AsyncExtraction:QueueCapacity` (default `200`)
 
 ## Retry/backoff policy
 
@@ -43,7 +50,7 @@ This matrix defines deterministic attachment routing for extraction in Agon back
 
 ## Canonical parser contract
 
-- Attachment workflows now consume a versioned canonical parser contract (`document.parse` v`1.0`).
+- Attachment workflows now consume a versioned canonical parser contract (`document.parse` v`1.1`).
 - Contract details, deterministic failure taxonomy, and caller behavior are defined in `backend/docs/document-parse-contract.md`.
 
 ## Chunk-loop observability
@@ -55,6 +62,14 @@ This matrix defines deterministic attachment routing for extraction in Agon back
   - `agon.attachment_chunk_loop.responses`
   - `agon.attachment_chunk_loop.notes_generated`
   - `agon.attachment_chunk_loop.prelude.duration.ms`
+
+## Chunking policy (no RAG)
+
+- Primary pass: section-aware, token-budget-aware chunking.
+  - heading/section boundaries are preferred when splitting (`#`, `Section`, `Chapter`)
+  - token sizing uses configurable token-to-char estimation
+- Secondary pass: query-focused chunk loop over top keyword-matching chunks.
+  - no vector store or retrieval index is used
 
 ## Notes
 

@@ -37,6 +37,8 @@ public class SessionsController : ControllerBase
     private readonly ISessionService _sessionService;
     private readonly IAttachmentStorageService? _attachmentStorage;
     private readonly IDocumentParser _documentParser;
+    private readonly IAttachmentExtractionJobQueue _extractionJobQueue;
+    private readonly AttachmentAsyncExtractionOptions _asyncExtractionOptions;
     private readonly ConversationHistoryService _conversationHistory;
     private readonly ILogger<SessionsController> _logger;
     private readonly TrialAccessService _trialAccessService;
@@ -45,6 +47,8 @@ public class SessionsController : ControllerBase
     public SessionsController(
         ISessionService sessionService,
         IDocumentParser documentParser,
+        IAttachmentExtractionJobQueue extractionJobQueue,
+        AttachmentAsyncExtractionOptions asyncExtractionOptions,
         ConversationHistoryService conversationHistory,
         ILogger<SessionsController> logger,
         TrialAccessService trialAccessService,
@@ -54,6 +58,8 @@ public class SessionsController : ControllerBase
         _sessionService = sessionService;
         _attachmentStorage = attachmentStorage;
         _documentParser = documentParser;
+        _extractionJobQueue = extractionJobQueue;
+        _asyncExtractionOptions = asyncExtractionOptions;
         _conversationHistory = conversationHistory;
         _logger = logger;
         _trialAccessService = trialAccessService;
@@ -552,73 +558,131 @@ public class SessionsController : ControllerBase
         }
 
         SessionAttachment finalized = saved;
-        try
+        if (_asyncExtractionOptions.Enabled)
         {
-            await _sessionService.UpdateAttachmentExtractionStateAsync(
-                saved.AttachmentId,
-                AttachmentExtractionStatus.Extracting,
-                null,
-                null,
-                cancellationToken);
-
-            var parseResult = await _documentParser.ParseAsync(
-                new DocumentParseRequest(
-                    fileBytes,
-                    safeFileName,
-                    contentType,
-                    request.File.Length,
-                    maxAllowedBytes),
-                cancellationToken);
-            if (parseResult.Success && !string.IsNullOrWhiteSpace(parseResult.ExtractedText))
-            {
-                finalized = await _sessionService.UpdateAttachmentExtractionStateAsync(
-                    saved.AttachmentId,
-                    AttachmentExtractionStatus.Ready,
-                    parseResult.ExtractedText,
-                    null,
-                    cancellationToken);
-            }
-            else
-            {
-                finalized = await _sessionService.UpdateAttachmentExtractionStateAsync(
-                    saved.AttachmentId,
-                    AttachmentExtractionStatus.Failed,
-                    null,
-                    parseResult.FailureReason ?? "Attachment extraction failed.",
-                    cancellationToken);
-            }
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            AttachmentMetrics.ExtractionFailure.Add(1);
-            _logger.LogWarning(
-                ex,
-                "Attachment text extraction failed for session {SessionId}. Category=AttachmentExtractionFailed, FileName={FileName}, ContentType={ContentType}, SizeBytes={SizeBytes}",
-                id,
-                safeFileName,
-                contentType,
-                request.File.Length);
-
             try
             {
                 finalized = await _sessionService.UpdateAttachmentExtractionStateAsync(
                     saved.AttachmentId,
-                    AttachmentExtractionStatus.Failed,
-                    null,
-                    "Attachment extraction failed.",
+                    AttachmentExtractionStatus.Extracting,
+                    extractedText: null,
+                    extractionFailureReason: null,
+                    cancellationToken);
+
+                await _extractionJobQueue.EnqueueAsync(
+                    new AttachmentExtractionJob(
+                        AttachmentId: saved.AttachmentId,
+                        SessionId: id,
+                        BlobName: saved.BlobName,
+                        FileName: safeFileName,
+                        ContentType: contentType,
+                        SizeBytes: request.File.Length,
+                        MaxAllowedBytes: maxAllowedBytes),
                     cancellationToken);
             }
-            catch (Exception statusEx)
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                AttachmentMetrics.ExtractionFailure.Add(1);
                 _logger.LogWarning(
-                    statusEx,
-                    "Failed to persist attachment extraction failure status for AttachmentId={AttachmentId}.",
-                    saved.AttachmentId);
-                finalized = saved;
+                    ex,
+                    "Attachment extraction enqueue failed for session {SessionId}. AttachmentId={AttachmentId}, FileName={FileName}",
+                    id,
+                    saved.AttachmentId,
+                    safeFileName);
+
+                try
+                {
+                    finalized = await _sessionService.UpdateAttachmentExtractionStateAsync(
+                        saved.AttachmentId,
+                        AttachmentExtractionStatus.Failed,
+                        extractedText: null,
+                        extractionFailureReason: "Attachment extraction queue is unavailable.",
+                        cancellationToken);
+                }
+                catch (Exception statusEx)
+                {
+                    _logger.LogWarning(
+                        statusEx,
+                        "Failed to persist attachment extraction queue failure status for AttachmentId={AttachmentId}.",
+                        saved.AttachmentId);
+                    finalized = saved;
+                }
+            }
+        }
+        else
+        {
+            try
+            {
+                finalized = await _sessionService.UpdateAttachmentExtractionStateAsync(
+                    saved.AttachmentId,
+                    AttachmentExtractionStatus.Extracting,
+                    extractedText: null,
+                    extractionFailureReason: null,
+                    cancellationToken);
+
+                var parseResult = await _documentParser.ParseAsync(
+                    new DocumentParseRequest(
+                        fileBytes,
+                        safeFileName,
+                        contentType,
+                        request.File.Length,
+                        maxAllowedBytes),
+                    cancellationToken);
+                if (parseResult.Success && !string.IsNullOrWhiteSpace(parseResult.ExtractedText))
+                {
+                    finalized = await _sessionService.UpdateAttachmentExtractionStateAsync(
+                        saved.AttachmentId,
+                        AttachmentExtractionStatus.Ready,
+                        parseResult.ExtractedText,
+                        extractionFailureReason: null,
+                        cancellationToken);
+                }
+                else
+                {
+                    finalized = await _sessionService.UpdateAttachmentExtractionStateAsync(
+                        saved.AttachmentId,
+                        AttachmentExtractionStatus.Failed,
+                        extractedText: null,
+                        parseResult.FailureReason ?? "Attachment extraction failed.",
+                        cancellationToken);
+                }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                AttachmentMetrics.ExtractionFailure.Add(1);
+                _logger.LogWarning(
+                    ex,
+                    "Attachment text extraction failed for session {SessionId}. Category=AttachmentExtractionFailed, FileName={FileName}, ContentType={ContentType}, SizeBytes={SizeBytes}",
+                    id,
+                    safeFileName,
+                    contentType,
+                    request.File.Length);
+
+                try
+                {
+                    finalized = await _sessionService.UpdateAttachmentExtractionStateAsync(
+                        saved.AttachmentId,
+                        AttachmentExtractionStatus.Failed,
+                        extractedText: null,
+                        extractionFailureReason: "Attachment extraction failed.",
+                        cancellationToken);
+                }
+                catch (Exception statusEx)
+                {
+                    _logger.LogWarning(
+                        statusEx,
+                        "Failed to persist attachment extraction failure status for AttachmentId={AttachmentId}.",
+                        saved.AttachmentId);
+                    finalized = saved;
+                }
             }
         }
 

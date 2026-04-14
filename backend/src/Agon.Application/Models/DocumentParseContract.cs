@@ -34,4 +34,23 @@ public sealed record DocumentParseResult(
     string? ExtractedText,
     int ExtractedTextChars,
     DocumentParseErrorCode? ErrorCode,
-    string? FailureReason);
+    string? FailureReason,
+    DocumentParseStructureMetadata? StructureMetadata = null);
+
+public sealed record DocumentParseSectionBoundary(
+    string Label,
+    int StartChar,
+    int EndChar);
+
+public sealed record DocumentParseChunkHint(
+    int StartChar,
+    int EndChar,
+    int EstimatedTokens,
+    string? SectionLabel = null);
+
+public sealed record DocumentParseStructureMetadata(
+    int EstimatedTokenCount,
+    int HeadingCount,
+    int SectionCount,
+    IReadOnlyList<DocumentParseSectionBoundary> Sections,
+    IReadOnlyList<DocumentParseChunkHint> ChunkHints);

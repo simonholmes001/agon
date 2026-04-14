@@ -18,6 +18,9 @@ param namePrefix string = 'agon-dev-swc'
 @description('Alert email receiver for action groups.')
 param alertEmail string = 'simonholmesabc@gmail.com'
 
+@description('Enable document pipeline custom telemetry alerts (parser failures and chunk-loop latency).')
+param documentPipelineAlertsEnabled bool = true
+
 @description('PostgreSQL admin username used for bootstrap operations.')
 param postgresAdminLogin string = 'agonadmin'
 
@@ -141,6 +144,13 @@ param attachmentProcessingValidationMaxDocumentUploadBytes int = 26214400
 @minValue(1024)
 param attachmentProcessingValidationMaxImageUploadBytes int = 20971520
 
+@description('Enable async attachment extraction worker pipeline.')
+param attachmentProcessingAsyncExtractionEnabled bool = true
+
+@description('Bounded queue capacity for async attachment extraction jobs.')
+@minValue(1)
+param attachmentProcessingAsyncExtractionQueueCapacity int = 200
+
 @description('Maximum transient retry attempts for attachment extraction HTTP operations.')
 @minValue(1)
 param attachmentProcessingTransientRetryMaxAttempts int = 3
@@ -167,6 +177,28 @@ param attachmentProcessingChunkLoopChunkSizeChars int = 12000
 @description('Chunk overlap in characters between adjacent chunk-loop passes.')
 @minValue(0)
 param attachmentProcessingChunkLoopChunkOverlapChars int = 1000
+
+@description('Enable token-aware chunk sizing for chunk-loop processing.')
+param attachmentProcessingChunkLoopUseTokenAwareSizing bool = true
+
+@description('Target token budget per chunk when token-aware chunk sizing is enabled.')
+@minValue(1)
+param attachmentProcessingChunkLoopTargetChunkTokens int = 3000
+
+@description('Estimated chars-per-token factor used for token-aware chunk sizing.')
+@minValue(1)
+param attachmentProcessingChunkLoopEstimatedCharsPerToken int = 4
+
+@description('Enable query-focused second-pass chunk-loop processing.')
+param attachmentProcessingChunkLoopEnableQueryFocusedSecondPass bool = true
+
+@description('Maximum focused chunks retained per attachment for second-pass query analysis.')
+@minValue(1)
+param attachmentProcessingChunkLoopMaxFocusedChunksPerAttachment int = 3
+
+@description('Minimum keyword length for query-focused chunk matching.')
+@minValue(1)
+param attachmentProcessingChunkLoopMinQueryKeywordLength int = 4
 
 @description('Maximum chunk count processed per attachment during chunk-loop prelude.')
 @minValue(1)
@@ -332,6 +364,7 @@ module appEdge './modules/app-edge-dev.bicep' = {
     workloadName: workloadName
     namePrefix: namePrefix
     alertEmail: alertEmail
+    documentPipelineAlertsEnabled: documentPipelineAlertsEnabled
     appGatewayResourceSuffix: appGatewayResourceSuffix
     appGatewaySkuName: appGatewaySkuName
     appGatewaySkuTier: appGatewaySkuTier
@@ -379,6 +412,8 @@ module appEdge './modules/app-edge-dev.bicep' = {
     attachmentProcessingValidationMaxTextUploadBytes: attachmentProcessingValidationMaxTextUploadBytes
     attachmentProcessingValidationMaxDocumentUploadBytes: attachmentProcessingValidationMaxDocumentUploadBytes
     attachmentProcessingValidationMaxImageUploadBytes: attachmentProcessingValidationMaxImageUploadBytes
+    attachmentProcessingAsyncExtractionEnabled: attachmentProcessingAsyncExtractionEnabled
+    attachmentProcessingAsyncExtractionQueueCapacity: attachmentProcessingAsyncExtractionQueueCapacity
     attachmentProcessingTransientRetryMaxAttempts: attachmentProcessingTransientRetryMaxAttempts
     attachmentProcessingTransientRetryBaseDelayMs: attachmentProcessingTransientRetryBaseDelayMs
     attachmentProcessingTransientRetryMaxDelayMs: attachmentProcessingTransientRetryMaxDelayMs
@@ -386,6 +421,12 @@ module appEdge './modules/app-edge-dev.bicep' = {
     attachmentProcessingChunkLoopActivationThresholdChars: attachmentProcessingChunkLoopActivationThresholdChars
     attachmentProcessingChunkLoopChunkSizeChars: attachmentProcessingChunkLoopChunkSizeChars
     attachmentProcessingChunkLoopChunkOverlapChars: attachmentProcessingChunkLoopChunkOverlapChars
+    attachmentProcessingChunkLoopUseTokenAwareSizing: attachmentProcessingChunkLoopUseTokenAwareSizing
+    attachmentProcessingChunkLoopTargetChunkTokens: attachmentProcessingChunkLoopTargetChunkTokens
+    attachmentProcessingChunkLoopEstimatedCharsPerToken: attachmentProcessingChunkLoopEstimatedCharsPerToken
+    attachmentProcessingChunkLoopEnableQueryFocusedSecondPass: attachmentProcessingChunkLoopEnableQueryFocusedSecondPass
+    attachmentProcessingChunkLoopMaxFocusedChunksPerAttachment: attachmentProcessingChunkLoopMaxFocusedChunksPerAttachment
+    attachmentProcessingChunkLoopMinQueryKeywordLength: attachmentProcessingChunkLoopMinQueryKeywordLength
     attachmentProcessingChunkLoopMaxChunksPerAttachment: attachmentProcessingChunkLoopMaxChunksPerAttachment
     attachmentProcessingChunkLoopMaxChunkNoteChars: attachmentProcessingChunkLoopMaxChunkNoteChars
     attachmentProcessingChunkLoopMaxFinalNotesPerAgent: attachmentProcessingChunkLoopMaxFinalNotesPerAgent

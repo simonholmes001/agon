@@ -23,6 +23,7 @@ public class DocumentParseServiceTests
         result.Route.Should().Be(DocumentParseRoute.Unsupported);
         result.ErrorCode.Should().Be(DocumentParseErrorCode.UnsupportedFormat);
         result.Retryable.Should().BeFalse();
+        result.StructureMetadata.Should().BeNull();
     }
 
     [Fact]
@@ -41,6 +42,7 @@ public class DocumentParseServiceTests
         result.Route.Should().Be(DocumentParseRoute.Text);
         result.ErrorCode.Should().Be(DocumentParseErrorCode.Oversize);
         result.Retryable.Should().BeFalse();
+        result.StructureMetadata.Should().BeNull();
     }
 
     [Fact]
@@ -58,6 +60,7 @@ public class DocumentParseServiceTests
         result.Route.Should().Be(DocumentParseRoute.Document);
         result.ErrorCode.Should().Be(DocumentParseErrorCode.NoExtractableText);
         result.FailureReason.Should().Be("No extractable text was produced for this attachment.");
+        result.StructureMetadata.Should().BeNull();
     }
 
     [Fact]
@@ -74,6 +77,7 @@ public class DocumentParseServiceTests
         result.Success.Should().BeFalse();
         result.ErrorCode.Should().Be(DocumentParseErrorCode.TransientBackendFailure);
         result.Retryable.Should().BeTrue();
+        result.StructureMetadata.Should().BeNull();
     }
 
     [Fact]
@@ -90,12 +94,13 @@ public class DocumentParseServiceTests
         result.Success.Should().BeFalse();
         result.ErrorCode.Should().Be(DocumentParseErrorCode.Timeout);
         result.Retryable.Should().BeTrue();
+        result.StructureMetadata.Should().BeNull();
     }
 
     [Fact]
     public async Task ParseAsync_Success_ReturnsVersionedContractPayload()
     {
-        var parser = CreateParser(new StubExtractor(_ => "  parsed content  "));
+        var parser = CreateParser(new StubExtractor(_ => "  # Intro\nParsed content block.\n\nSection 2 Scope\nMore details.  "));
 
         var result = await parser.ParseAsync(new DocumentParseRequest(
             Content: [1, 2, 3],
@@ -104,11 +109,17 @@ public class DocumentParseServiceTests
             SizeBytes: 3));
 
         result.Success.Should().BeTrue();
-        result.ContractVersion.Should().Be("1.0");
+        result.ContractVersion.Should().Be("1.1");
         result.Route.Should().Be(DocumentParseRoute.Document);
-        result.ExtractedText.Should().Be("parsed content");
-        result.ExtractedTextChars.Should().Be("parsed content".Length);
+        result.ExtractedText.Should().Be("# Intro\nParsed content block.\n\nSection 2 Scope\nMore details.");
+        result.ExtractedTextChars.Should().Be(result.ExtractedText!.Length);
         result.ErrorCode.Should().BeNull();
+        result.StructureMetadata.Should().NotBeNull();
+        result.StructureMetadata!.EstimatedTokenCount.Should().BeGreaterThan(0);
+        result.StructureMetadata.HeadingCount.Should().BeGreaterThan(0);
+        result.StructureMetadata.SectionCount.Should().BeGreaterThan(0);
+        result.StructureMetadata.Sections.Should().NotBeEmpty();
+        result.StructureMetadata.ChunkHints.Should().NotBeEmpty();
     }
 
     private static DocumentParseService CreateParser(IAttachmentTextExtractor extractor)
