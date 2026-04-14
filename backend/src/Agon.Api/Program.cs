@@ -33,6 +33,7 @@ using System.Globalization;
 using System.Security.Claims;
 using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.AspNetCore.Http.Features;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -184,10 +185,21 @@ builder.Services.AddSingleton(new AttachmentUploadValidationOptions
     MaxDocumentUploadBytes = Math.Max(1, Math.Min(maxUploadBytes, attachmentProcessingConfig.Validation.MaxDocumentUploadBytes)),
     MaxImageUploadBytes = Math.Max(1, Math.Min(maxUploadBytes, attachmentProcessingConfig.Validation.MaxImageUploadBytes))
 });
+builder.Services.Configure<FormOptions>(options =>
+{
+    options.MultipartBodyLengthLimit = maxUploadBytes + (1 * 1024 * 1024);
+});
+var asyncBatchSize = attachmentProcessingConfig.AsyncExtraction.BatchSize > 0
+    ? attachmentProcessingConfig.AsyncExtraction.BatchSize
+    : Math.Max(1, attachmentProcessingConfig.AsyncExtraction.QueueCapacity);
 builder.Services.AddSingleton(new AttachmentAsyncExtractionOptions
 {
     Enabled = attachmentProcessingConfig.AsyncExtraction.Enabled,
-    QueueCapacity = attachmentProcessingConfig.AsyncExtraction.QueueCapacity
+    BatchSize = asyncBatchSize,
+    PollIntervalMs = attachmentProcessingConfig.AsyncExtraction.PollIntervalMs,
+    RequeueStaleExtractingEnabled = attachmentProcessingConfig.AsyncExtraction.RequeueStaleExtractingEnabled,
+    StaleExtractingAfterMinutes = attachmentProcessingConfig.AsyncExtraction.StaleExtractingAfterMinutes,
+    ReconcileIntervalMs = attachmentProcessingConfig.AsyncExtraction.ReconcileIntervalMs
 });
 builder.Services.AddSingleton(new AttachmentChunkLoopOptions
 {
@@ -244,7 +256,6 @@ builder.Services.AddHttpClient("attachment-extraction", client =>
 });
 builder.Services.AddScoped<IAttachmentTextExtractor, AttachmentTextExtractor>();
 builder.Services.AddScoped<IDocumentParser, DocumentParseService>();
-builder.Services.AddSingleton<IAttachmentExtractionJobQueue, AttachmentExtractionJobQueue>();
 builder.Services.AddHostedService<AttachmentExtractionWorkerService>();
 
 if (authEnabled)

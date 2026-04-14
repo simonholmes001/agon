@@ -193,26 +193,22 @@ public class ProgramIntegrationTests : IClassFixture<AgonWebApplicationFactory>
         using var factory = _factory.WithWebHostBuilder(builder =>
         {
             builder.UseSetting("AttachmentProcessing:AsyncExtraction:Enabled", "true");
-            builder.UseSetting("AttachmentProcessing:AsyncExtraction:QueueCapacity", "64");
+            builder.UseSetting("AttachmentProcessing:AsyncExtraction:BatchSize", "12");
+            builder.UseSetting("AttachmentProcessing:AsyncExtraction:PollIntervalMs", "850");
+            builder.UseSetting("AttachmentProcessing:AsyncExtraction:RequeueStaleExtractingEnabled", "true");
+            builder.UseSetting("AttachmentProcessing:AsyncExtraction:StaleExtractingAfterMinutes", "9");
+            builder.UseSetting("AttachmentProcessing:AsyncExtraction:ReconcileIntervalMs", "22000");
         });
 
         using var scope = factory.Services.CreateScope();
         var options = scope.ServiceProvider.GetRequiredService<AttachmentAsyncExtractionOptions>();
 
         options.Enabled.Should().BeTrue();
-        options.QueueCapacity.Should().Be(64);
-    }
-
-    [Fact]
-    public void AttachmentExtractionQueue_Should_Be_Registered_As_Singleton()
-    {
-        using var scope1 = _factory.Services.CreateScope();
-        using var scope2 = _factory.Services.CreateScope();
-
-        var queue1 = scope1.ServiceProvider.GetRequiredService<IAttachmentExtractionJobQueue>();
-        var queue2 = scope2.ServiceProvider.GetRequiredService<IAttachmentExtractionJobQueue>();
-
-        queue1.Should().BeSameAs(queue2, "extraction jobs must share one process queue");
+        options.BatchSize.Should().Be(12);
+        options.PollIntervalMs.Should().Be(850);
+        options.RequeueStaleExtractingEnabled.Should().BeTrue();
+        options.StaleExtractingAfterMinutes.Should().Be(9);
+        options.ReconcileIntervalMs.Should().Be(22000);
     }
 
     [Fact]

@@ -22,7 +22,6 @@ This document defines the canonical parser contract used by Agon attachment work
 
 `DocumentParseResult`
 
-- `contractVersion`: current contract version (`1.0`).
 - `contractVersion`: current contract version (`1.1`).
 - `route`: `text | image | document | unsupported`.
 - `success`: parse success flag.

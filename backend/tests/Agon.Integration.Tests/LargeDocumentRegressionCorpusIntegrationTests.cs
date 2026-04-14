@@ -45,7 +45,7 @@ public sealed class LargeDocumentRegressionCorpusIntegrationTests : IClassFixtur
 
             using var uploadDoc = JsonDocument.Parse(await uploadResponse.Content.ReadAsStringAsync());
             var attachmentId = uploadDoc.RootElement.GetProperty("id").GetGuid();
-            uploadDoc.RootElement.GetProperty("extractionStatus").GetString().Should().Be("extracting");
+            uploadDoc.RootElement.GetProperty("extractionStatus").GetString().Should().BeOneOf("uploaded", "extracting");
 
             var terminal = await WaitForTerminalStateAsync(client, sessionId, attachmentId);
             terminal.Status.Should().Be("ready");

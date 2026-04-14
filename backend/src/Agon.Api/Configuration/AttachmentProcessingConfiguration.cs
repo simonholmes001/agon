@@ -28,7 +28,12 @@ public sealed class AttachmentValidationConfiguration
 public sealed class AttachmentAsyncExtractionConfiguration
 {
     public bool Enabled { get; set; } = true;
-    public int QueueCapacity { get; set; } = 200;
+    public int BatchSize { get; set; } = 20;
+    public int PollIntervalMs { get; set; } = 1000;
+    public bool RequeueStaleExtractingEnabled { get; set; } = true;
+    public int StaleExtractingAfterMinutes { get; set; } = 15;
+    public int ReconcileIntervalMs { get; set; } = 30000;
+    public int QueueCapacity { get; set; } = 0; // Legacy alias; if > 0 and BatchSize is unset, it becomes BatchSize.
 }
 
 public sealed class DocumentIntelligenceProcessingConfiguration

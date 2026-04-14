@@ -4,6 +4,7 @@ using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Agon.Application.Attachments;
 using Agon.Application.Interfaces;
 using Azure.Core;
 using Azure.Identity;
@@ -100,7 +101,7 @@ public sealed class AttachmentTextExtractor : IAttachmentTextExtractor
         var requestBody = new { base64Source = Convert.ToBase64String(content) };
 
         var client = _httpClientFactory.CreateClient("attachment-extraction");
-        using var startResponse = await SendWithTransientRetryAsync(
+        var startSend = await SendWithTransientRetryAsync(
             client,
             async ct =>
             {
@@ -113,8 +114,20 @@ public sealed class AttachmentTextExtractor : IAttachmentTextExtractor
             },
             "document-intelligence-analyze-start",
             cancellationToken);
+
+        using var startResponse = startSend.Response;
         if (startResponse is null)
         {
+            if (startSend.FailureKind == RetryFailureKind.Timeout)
+            {
+                throw new TaskCanceledException("Document Intelligence analyze request timed out after retries.");
+            }
+
+            if (startSend.FailureKind == RetryFailureKind.HttpException)
+            {
+                throw new HttpRequestException("Document Intelligence analyze request failed after retries.");
+            }
+
             return null;
         }
 
@@ -127,6 +140,11 @@ public sealed class AttachmentTextExtractor : IAttachmentTextExtractor
         if (startResponse.StatusCode != HttpStatusCode.Accepted)
         {
             var errorPayload = await startResponse.Content.ReadAsStringAsync(cancellationToken);
+            if (IsTransientStatusCode(startResponse.StatusCode))
+            {
+                throw new HttpRequestException($"Document Intelligence analyze request failed with transient status {(int)startResponse.StatusCode}.");
+            }
+
             _logger.LogWarning(
                 "Document Intelligence analyze request failed. Status={StatusCode}, Payload={Payload}",
                 (int)startResponse.StatusCode,
@@ -151,7 +169,7 @@ public sealed class AttachmentTextExtractor : IAttachmentTextExtractor
         {
             await Task.Delay(Math.Max(250, _options.DocumentIntelligence.PollIntervalMs), cancellationToken);
 
-            using var pollResponse = await SendWithTransientRetryAsync(
+            var pollSend = await SendWithTransientRetryAsync(
                 client,
                 async ct =>
                 {
@@ -161,8 +179,20 @@ public sealed class AttachmentTextExtractor : IAttachmentTextExtractor
                 },
                 "document-intelligence-analyze-poll",
                 cancellationToken);
+
+            using var pollResponse = pollSend.Response;
             if (pollResponse is null)
             {
+                if (pollSend.FailureKind == RetryFailureKind.Timeout)
+                {
+                    throw new TaskCanceledException("Document Intelligence polling timed out after retries.");
+                }
+
+                if (pollSend.FailureKind == RetryFailureKind.HttpException)
+                {
+                    throw new HttpRequestException("Document Intelligence polling failed after retries.");
+                }
+
                 return null;
             }
 
@@ -170,6 +200,11 @@ public sealed class AttachmentTextExtractor : IAttachmentTextExtractor
 
             if (!pollResponse.IsSuccessStatusCode)
             {
+                if (IsTransientStatusCode(pollResponse.StatusCode))
+                {
+                    throw new HttpRequestException($"Document Intelligence poll failed with transient status {(int)pollResponse.StatusCode}.");
+                }
+
                 _logger.LogWarning(
                     "Document Intelligence poll request failed. Status={StatusCode}, Payload={Payload}",
                     (int)pollResponse.StatusCode,
@@ -191,7 +226,7 @@ public sealed class AttachmentTextExtractor : IAttachmentTextExtractor
         }
 
         _logger.LogWarning("Document Intelligence analysis timed out after {Attempts} polling attempts.", _options.DocumentIntelligence.MaxPollAttempts);
-        return null;
+        throw new TaskCanceledException("Document Intelligence analysis timed out while polling.");
     }
 
     private async Task ApplyDocumentIntelligenceAuthAsync(HttpRequestMessage request, CancellationToken cancellationToken)
@@ -316,7 +351,7 @@ public sealed class AttachmentTextExtractor : IAttachmentTextExtractor
         };
 
         var client = _httpClientFactory.CreateClient("attachment-extraction");
-        using var response = await SendWithTransientRetryAsync(
+        var sendResult = await SendWithTransientRetryAsync(
             client,
             _ =>
             {
@@ -329,6 +364,8 @@ public sealed class AttachmentTextExtractor : IAttachmentTextExtractor
             },
             $"openai-vision-{model}",
             cancellationToken);
+
+        using var response = sendResult.Response;
         if (response is null)
         {
             return new OpenAiVisionAttemptResult(null, null);
@@ -577,7 +614,7 @@ public sealed class AttachmentTextExtractor : IAttachmentTextExtractor
             : value[..maxLength] + "...";
     }
 
-    private async Task<HttpResponseMessage?> SendWithTransientRetryAsync(
+    private async Task<HttpRetrySendResult> SendWithTransientRetryAsync(
         HttpClient client,
         Func<CancellationToken, Task<HttpRequestMessage>> requestFactory,
         string operationName,
@@ -606,7 +643,7 @@ public sealed class AttachmentTextExtractor : IAttachmentTextExtractor
                     continue;
                 }
 
-                return response;
+                return new HttpRetrySendResult(response, RetryFailureKind.None);
             }
             catch (HttpRequestException ex)
             {
@@ -627,7 +664,7 @@ public sealed class AttachmentTextExtractor : IAttachmentTextExtractor
                     "HTTP exception during {Operation} after {Attempts} attempts.",
                     operationName,
                     maxAttempts);
-                return null;
+                return new HttpRetrySendResult(null, RetryFailureKind.HttpException);
             }
             catch (TaskCanceledException ex) when (!cancellationToken.IsCancellationRequested)
             {
@@ -648,11 +685,11 @@ public sealed class AttachmentTextExtractor : IAttachmentTextExtractor
                     "Timeout during {Operation} after {Attempts} attempts.",
                     operationName,
                     maxAttempts);
-                return null;
+                return new HttpRetrySendResult(null, RetryFailureKind.Timeout);
             }
         }
 
-        return null;
+        return new HttpRetrySendResult(null, RetryFailureKind.None);
     }
 
     private static bool IsTransientStatusCode(HttpStatusCode statusCode)
@@ -669,6 +706,17 @@ public sealed class AttachmentTextExtractor : IAttachmentTextExtractor
         var delayMs = (int)Math.Min(maxDelayMs, baseDelayMs * Math.Pow(2, exponent));
         return TimeSpan.FromMilliseconds(Math.Max(1, delayMs));
     }
+
+    private enum RetryFailureKind
+    {
+        None = 0,
+        HttpException = 1,
+        Timeout = 2
+    }
+
+    private readonly record struct HttpRetrySendResult(
+        HttpResponseMessage? Response,
+        RetryFailureKind FailureKind);
 
     private readonly record struct OpenAiVisionAttemptResult(
         string? Text,

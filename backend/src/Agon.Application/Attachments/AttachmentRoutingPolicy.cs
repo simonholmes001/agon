@@ -1,4 +1,4 @@
-namespace Agon.Infrastructure.Attachments;
+namespace Agon.Application.Attachments;
 
 public enum AttachmentRoutingRoute
 {

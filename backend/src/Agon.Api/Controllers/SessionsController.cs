@@ -5,6 +5,7 @@ using Agon.Application.Interfaces;
 using Agon.Application.Models;
 using Agon.Application.Services;
 using Agon.Domain.Sessions;
+using Agon.Application.Attachments;
 using Agon.Infrastructure.Attachments;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
@@ -23,7 +24,7 @@ namespace Agon.Api.Controllers;
 [Route("[controller]")]
 public class SessionsController : ControllerBase
 {
-    private const long MaxAttachmentRequestBodyBytes = 100L * 1024 * 1024;
+    private const long MaxAttachmentRequestBodyBytes = 26L * 1024 * 1024;
     private const int AttachmentPreviewChars = 500;
     private const string AttachmentStorageNotConfiguredCode = "ATTACHMENT_STORAGE_NOT_CONFIGURED";
     private const string AttachmentStorageUnavailableCode = "ATTACHMENT_STORAGE_UNAVAILABLE";
@@ -37,7 +38,6 @@ public class SessionsController : ControllerBase
     private readonly ISessionService _sessionService;
     private readonly IAttachmentStorageService? _attachmentStorage;
     private readonly IDocumentParser _documentParser;
-    private readonly IAttachmentExtractionJobQueue _extractionJobQueue;
     private readonly AttachmentAsyncExtractionOptions _asyncExtractionOptions;
     private readonly ConversationHistoryService _conversationHistory;
     private readonly ILogger<SessionsController> _logger;
@@ -47,7 +47,6 @@ public class SessionsController : ControllerBase
     public SessionsController(
         ISessionService sessionService,
         IDocumentParser documentParser,
-        IAttachmentExtractionJobQueue extractionJobQueue,
         AttachmentAsyncExtractionOptions asyncExtractionOptions,
         ConversationHistoryService conversationHistory,
         ILogger<SessionsController> logger,
@@ -58,7 +57,6 @@ public class SessionsController : ControllerBase
         _sessionService = sessionService;
         _attachmentStorage = attachmentStorage;
         _documentParser = documentParser;
-        _extractionJobQueue = extractionJobQueue;
         _asyncExtractionOptions = asyncExtractionOptions;
         _conversationHistory = conversationHistory;
         _logger = logger;
@@ -444,6 +442,17 @@ public class SessionsController : ControllerBase
             });
         }
 
+        if (request.File.Length > _attachmentUploadValidationOptions.MaxUploadBytes)
+        {
+            return StatusCode(StatusCodes.Status413PayloadTooLarge, new
+            {
+                errorCode = AttachmentSizeLimitExceededCode,
+                error = $"Attachment exceeds global max allowed size of {_attachmentUploadValidationOptions.MaxUploadBytes} bytes.",
+                route = route.ToString().ToLowerInvariant(),
+                maxAllowedBytes = _attachmentUploadValidationOptions.MaxUploadBytes
+            });
+        }
+
         var maxAllowedBytes = ResolveMaxAllowedBytes(route);
         if (request.File.Length > maxAllowedBytes)
         {
@@ -465,24 +474,35 @@ public class SessionsController : ControllerBase
                 "Set ConnectionStrings:BlobStorage and restart the backend.");
         }
 
-        byte[] fileBytes;
-        await using (var source = request.File.OpenReadStream())
-        await using (var copy = new MemoryStream())
-        {
-            await source.CopyToAsync(copy, cancellationToken);
-            fileBytes = copy.ToArray();
-        }
-
+        byte[]? fileBytes = null;
         var blobName = $"{id:N}/{DateTimeOffset.UtcNow:yyyyMMddHHmmssfff}-{Guid.NewGuid():N}-{safeFileName}";
         AttachmentUploadResult uploaded;
+
         try
         {
-            await using var uploadStream = new MemoryStream(fileBytes, writable: false);
-            uploaded = await _attachmentStorage.UploadAsync(
-                blobName,
-                uploadStream,
-                contentType,
-                cancellationToken);
+            if (_asyncExtractionOptions.Enabled)
+            {
+                await using var uploadStream = request.File.OpenReadStream();
+                uploaded = await _attachmentStorage.UploadAsync(
+                    blobName,
+                    uploadStream,
+                    contentType,
+                    cancellationToken);
+            }
+            else
+            {
+                await using var source = request.File.OpenReadStream();
+                await using var copy = new MemoryStream();
+                await source.CopyToAsync(copy, cancellationToken);
+                fileBytes = copy.ToArray();
+
+                await using var uploadStream = new MemoryStream(fileBytes, writable: false);
+                uploaded = await _attachmentStorage.UploadAsync(
+                    blobName,
+                    uploadStream,
+                    contentType,
+                    cancellationToken);
+            }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -558,62 +578,7 @@ public class SessionsController : ControllerBase
         }
 
         SessionAttachment finalized = saved;
-        if (_asyncExtractionOptions.Enabled)
-        {
-            try
-            {
-                finalized = await _sessionService.UpdateAttachmentExtractionStateAsync(
-                    saved.AttachmentId,
-                    AttachmentExtractionStatus.Extracting,
-                    extractedText: null,
-                    extractionFailureReason: null,
-                    cancellationToken);
-
-                await _extractionJobQueue.EnqueueAsync(
-                    new AttachmentExtractionJob(
-                        AttachmentId: saved.AttachmentId,
-                        SessionId: id,
-                        BlobName: saved.BlobName,
-                        FileName: safeFileName,
-                        ContentType: contentType,
-                        SizeBytes: request.File.Length,
-                        MaxAllowedBytes: maxAllowedBytes),
-                    cancellationToken);
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                throw;
-            }
-            catch (Exception ex)
-            {
-                AttachmentMetrics.ExtractionFailure.Add(1);
-                _logger.LogWarning(
-                    ex,
-                    "Attachment extraction enqueue failed for session {SessionId}. AttachmentId={AttachmentId}, FileName={FileName}",
-                    id,
-                    saved.AttachmentId,
-                    safeFileName);
-
-                try
-                {
-                    finalized = await _sessionService.UpdateAttachmentExtractionStateAsync(
-                        saved.AttachmentId,
-                        AttachmentExtractionStatus.Failed,
-                        extractedText: null,
-                        extractionFailureReason: "Attachment extraction queue is unavailable.",
-                        cancellationToken);
-                }
-                catch (Exception statusEx)
-                {
-                    _logger.LogWarning(
-                        statusEx,
-                        "Failed to persist attachment extraction queue failure status for AttachmentId={AttachmentId}.",
-                        saved.AttachmentId);
-                    finalized = saved;
-                }
-            }
-        }
-        else
+        if (!_asyncExtractionOptions.Enabled)
         {
             try
             {
@@ -626,12 +591,13 @@ public class SessionsController : ControllerBase
 
                 var parseResult = await _documentParser.ParseAsync(
                     new DocumentParseRequest(
-                        fileBytes,
+                        fileBytes ?? Array.Empty<byte>(),
                         safeFileName,
                         contentType,
                         request.File.Length,
                         maxAllowedBytes),
                     cancellationToken);
+
                 if (parseResult.Success && !string.IsNullOrWhiteSpace(parseResult.ExtractedText))
                 {
                     finalized = await _sessionService.UpdateAttachmentExtractionStateAsync(
@@ -1210,5 +1176,5 @@ public record SessionAttachmentResponse(
     DateTimeOffset UploadedAt,
     bool HasExtractedText,
     string? ExtractedTextPreview,
-    string ExtractionStatus,
-    string? ExtractionFailureReason);
+    string? ExtractionStatus = null,
+    string? ExtractionFailureReason = null);

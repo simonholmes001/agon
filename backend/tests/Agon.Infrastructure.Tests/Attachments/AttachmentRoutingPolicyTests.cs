@@ -1,4 +1,4 @@
-using Agon.Infrastructure.Attachments;
+using Agon.Application.Attachments;
 using FluentAssertions;
 
 namespace Agon.Infrastructure.Tests.Attachments;

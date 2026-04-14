@@ -26,16 +26,22 @@ This matrix defines deterministic attachment routing for extraction in Agon back
 ## Extraction lifecycle states
 
 - `uploaded`: metadata persisted and blob upload completed.
-- `extracting`: extraction job is queued/running in the async worker.
+- `extracting`: extraction is actively being processed by the async worker.
 - `ready`: extraction completed with usable extracted text.
 - `failed`: extraction completed without usable text or raised an extraction error.
 
 ## Async extraction worker
 
-- Upload path persists metadata, then enqueues extraction work; extraction no longer blocks upload request completion.
+- Upload path persists metadata with `uploaded` state; extraction is claimed and processed by a durable DB-backed worker poll loop.
+- Multi-instance safe claiming uses atomic state transitions (`uploaded` -> `extracting` -> `ready|failed`).
+- Stale `extracting` rows are periodically requeued to `uploaded` for recovery.
 - Runtime knobs:
   - `AttachmentProcessing:AsyncExtraction:Enabled` (default `true`)
-  - `AttachmentProcessing:AsyncExtraction:QueueCapacity` (default `200`)
+  - `AttachmentProcessing:AsyncExtraction:BatchSize` (default `20`)
+  - `AttachmentProcessing:AsyncExtraction:PollIntervalMs` (default `1000`)
+  - `AttachmentProcessing:AsyncExtraction:RequeueStaleExtractingEnabled` (default `true`)
+  - `AttachmentProcessing:AsyncExtraction:StaleExtractingAfterMinutes` (default `15`)
+  - `AttachmentProcessing:AsyncExtraction:ReconcileIntervalMs` (default `30000`)
 
 ## Retry/backoff policy
 

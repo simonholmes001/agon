@@ -147,7 +147,7 @@ param attachmentProcessingValidationMaxImageUploadBytes int = 20971520
 @description('Enable async attachment extraction worker pipeline.')
 param attachmentProcessingAsyncExtractionEnabled bool = true
 
-@description('Bounded queue capacity for async attachment extraction jobs.')
+@description('Batch size per poll for async attachment extraction worker claiming.')
 @minValue(1)
 param attachmentProcessingAsyncExtractionQueueCapacity int = 200
 

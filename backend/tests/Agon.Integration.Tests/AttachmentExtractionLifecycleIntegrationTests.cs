@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Json;
 using Agon.Application.Interfaces;
 using Agon.Application.Models;
+using Agon.Application.Services;
 using FluentAssertions;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
@@ -38,7 +39,7 @@ public class AttachmentExtractionLifecycleIntegrationTests : IClassFixture<AgonW
         uploadResponse.StatusCode.Should().Be(HttpStatusCode.Created);
         using var uploadDoc = JsonDocument.Parse(await uploadResponse.Content.ReadAsStringAsync());
         var attachmentId = uploadDoc.RootElement.GetProperty("id").GetGuid();
-        uploadDoc.RootElement.GetProperty("extractionStatus").GetString().Should().Be("extracting");
+        uploadDoc.RootElement.GetProperty("extractionStatus").GetString().Should().BeOneOf("uploaded", "extracting");
         uploadDoc.RootElement.GetProperty("extractionFailureReason").ValueKind.Should().Be(JsonValueKind.Null);
 
         var finalized = await WaitForAttachmentTerminalStateAsync(client, sessionId, attachmentId);
@@ -64,7 +65,7 @@ public class AttachmentExtractionLifecycleIntegrationTests : IClassFixture<AgonW
         uploadResponse.StatusCode.Should().Be(HttpStatusCode.Created);
         using var uploadDoc = JsonDocument.Parse(await uploadResponse.Content.ReadAsStringAsync());
         var attachmentId = uploadDoc.RootElement.GetProperty("id").GetGuid();
-        uploadDoc.RootElement.GetProperty("extractionStatus").GetString().Should().Be("extracting");
+        uploadDoc.RootElement.GetProperty("extractionStatus").GetString().Should().BeOneOf("uploaded", "extracting");
         uploadDoc.RootElement.GetProperty("extractionFailureReason").ValueKind.Should().Be(JsonValueKind.Null);
 
         var finalized = await WaitForAttachmentTerminalStateAsync(client, sessionId, attachmentId);
@@ -100,7 +101,7 @@ public class AttachmentExtractionLifecycleIntegrationTests : IClassFixture<AgonW
         uploadResponse.StatusCode.Should().Be(HttpStatusCode.Created);
         using var uploadDoc = JsonDocument.Parse(await uploadResponse.Content.ReadAsStringAsync());
         var attachmentId = uploadDoc.RootElement.GetProperty("id").GetGuid();
-        uploadDoc.RootElement.GetProperty("extractionStatus").GetString().Should().Be("extracting");
+        uploadDoc.RootElement.GetProperty("extractionStatus").GetString().Should().BeOneOf("uploaded", "extracting");
 
         var finalized = await WaitForAttachmentTerminalStateAsync(client, sessionId, attachmentId);
         parser.CallCount.Should().Be(1);
@@ -109,6 +110,68 @@ public class AttachmentExtractionLifecycleIntegrationTests : IClassFixture<AgonW
             .Should().Be("No extractable text was produced for this attachment.");
     }
 
+
+    [Fact]
+    public async Task Async_Worker_Should_Requeue_Stale_Extracting_Attachments_And_Complete_Extraction()
+    {
+        using var factory = _baseFactory.WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting("AttachmentProcessing:AsyncExtraction:Enabled", "true");
+            builder.UseSetting("AttachmentProcessing:AsyncExtraction:BatchSize", "8");
+            builder.UseSetting("AttachmentProcessing:AsyncExtraction:PollIntervalMs", "75");
+            builder.UseSetting("AttachmentProcessing:AsyncExtraction:RequeueStaleExtractingEnabled", "true");
+            builder.UseSetting("AttachmentProcessing:AsyncExtraction:StaleExtractingAfterMinutes", "1");
+            builder.UseSetting("AttachmentProcessing:AsyncExtraction:ReconcileIntervalMs", "75");
+
+            builder.ConfigureServices(services =>
+            {
+                services.RemoveAll<IAttachmentStorageService>();
+                services.RemoveAll<IAttachmentTextExtractor>();
+                services.AddSingleton<IAttachmentStorageService, InMemoryAttachmentStorageService>();
+                services.AddSingleton<IAttachmentTextExtractor>(new StubAttachmentTextExtractor(_ => "recovered text"));
+            });
+        });
+
+        var client = factory.CreateClient();
+        var sessionId = await CreateSessionAsync(client, "stale extracting recovery");
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var sessionService = scope.ServiceProvider.GetRequiredService<ISessionService>();
+            var storage = scope.ServiceProvider.GetRequiredService<IAttachmentStorageService>();
+            var state = await sessionService.GetAsync(sessionId, CancellationToken.None);
+            state.Should().NotBeNull();
+
+            var attachmentId = Guid.NewGuid();
+            var blobName = $"{sessionId:N}/stale-{attachmentId:N}.txt";
+            await using (var stream = new MemoryStream(Encoding.UTF8.GetBytes("stale attachment payload"), writable: false))
+            {
+                _ = await storage.UploadAsync(blobName, stream, "text/plain", CancellationToken.None);
+            }
+
+            var staleAttachment = new SessionAttachment(
+                AttachmentId: attachmentId,
+                SessionId: sessionId,
+                UserId: state!.UserId,
+                FileName: "stale.txt",
+                ContentType: "text/plain",
+                SizeBytes: 24,
+                BlobName: blobName,
+                BlobUri: $"https://unit.test/{blobName}",
+                AccessUrl: $"/sessions/{sessionId}/attachments/{attachmentId}/content",
+                ExtractedText: null,
+                UploadedAt: DateTimeOffset.UtcNow.AddMinutes(-10),
+                ExtractionStatus: AttachmentExtractionStatus.Extracting,
+                ExtractionFailureReason: null);
+
+            _ = await sessionService.SaveAttachmentAsync(staleAttachment, CancellationToken.None);
+
+            var finalized = await WaitForAttachmentTerminalStateAsync(client, sessionId, attachmentId, TimeSpan.FromSeconds(10));
+            finalized.ExtractionStatus.Should().Be("ready");
+            finalized.HasExtractedText.Should().BeTrue();
+            finalized.ExtractionFailureReason.Should().BeNull();
+        }
+    }
     private static async Task<AttachmentStateSnapshot> WaitForAttachmentTerminalStateAsync(
         HttpClient client,
         Guid sessionId,
