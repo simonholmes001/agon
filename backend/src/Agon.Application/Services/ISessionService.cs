@@ -47,6 +47,13 @@ public interface ISessionService
         SessionAttachment attachment,
         CancellationToken cancellationToken = default);
 
+    Task<SessionAttachment> UpdateAttachmentExtractionStateAsync(
+        Guid attachmentId,
+        AttachmentExtractionStatus extractionStatus,
+        string? extractedText,
+        string? extractionFailureReason,
+        CancellationToken cancellationToken = default);
+
     /// <summary>
     /// Begins the clarification phase for a session.
     /// </summary>

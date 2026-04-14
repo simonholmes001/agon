@@ -33,6 +33,7 @@ using System.Globalization;
 using System.Security.Claims;
 using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.AspNetCore.Http.Features;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -175,6 +176,47 @@ builder.Services.AddSingleton(trialAccessConfig);
 builder.Services.AddSingleton<ITokenUsageRepository, NoOpTokenUsageRepository>();
 builder.Services.AddSingleton<TrialRequestRateLimiter>();
 builder.Services.AddScoped<TrialAccessService>();
+var maxUploadBytes = Math.Max(1, attachmentProcessingConfig.Validation.MaxUploadBytes);
+builder.Services.AddSingleton(new AttachmentUploadValidationOptions
+{
+    RejectUnsupportedFormats = attachmentProcessingConfig.Validation.RejectUnsupportedFormats,
+    MaxUploadBytes = maxUploadBytes,
+    MaxTextUploadBytes = Math.Max(1, Math.Min(maxUploadBytes, attachmentProcessingConfig.Validation.MaxTextUploadBytes)),
+    MaxDocumentUploadBytes = Math.Max(1, Math.Min(maxUploadBytes, attachmentProcessingConfig.Validation.MaxDocumentUploadBytes)),
+    MaxImageUploadBytes = Math.Max(1, Math.Min(maxUploadBytes, attachmentProcessingConfig.Validation.MaxImageUploadBytes))
+});
+builder.Services.Configure<FormOptions>(options =>
+{
+    options.MultipartBodyLengthLimit = maxUploadBytes + (1 * 1024 * 1024);
+});
+var asyncBatchSize = attachmentProcessingConfig.AsyncExtraction.BatchSize > 0
+    ? attachmentProcessingConfig.AsyncExtraction.BatchSize
+    : Math.Max(1, attachmentProcessingConfig.AsyncExtraction.QueueCapacity);
+builder.Services.AddSingleton(new AttachmentAsyncExtractionOptions
+{
+    Enabled = attachmentProcessingConfig.AsyncExtraction.Enabled,
+    BatchSize = asyncBatchSize,
+    PollIntervalMs = attachmentProcessingConfig.AsyncExtraction.PollIntervalMs,
+    RequeueStaleExtractingEnabled = attachmentProcessingConfig.AsyncExtraction.RequeueStaleExtractingEnabled,
+    StaleExtractingAfterMinutes = attachmentProcessingConfig.AsyncExtraction.StaleExtractingAfterMinutes,
+    ReconcileIntervalMs = attachmentProcessingConfig.AsyncExtraction.ReconcileIntervalMs
+});
+builder.Services.AddSingleton(new AttachmentChunkLoopOptions
+{
+    Enabled = attachmentProcessingConfig.ChunkLoop.Enabled,
+    ActivationThresholdChars = attachmentProcessingConfig.ChunkLoop.ActivationThresholdChars,
+    ChunkSizeChars = attachmentProcessingConfig.ChunkLoop.ChunkSizeChars,
+    ChunkOverlapChars = attachmentProcessingConfig.ChunkLoop.ChunkOverlapChars,
+    UseTokenAwareSizing = attachmentProcessingConfig.ChunkLoop.UseTokenAwareSizing,
+    TargetChunkTokens = attachmentProcessingConfig.ChunkLoop.TargetChunkTokens,
+    EstimatedCharsPerToken = attachmentProcessingConfig.ChunkLoop.EstimatedCharsPerToken,
+    EnableQueryFocusedSecondPass = attachmentProcessingConfig.ChunkLoop.EnableQueryFocusedSecondPass,
+    MaxFocusedChunksPerAttachment = attachmentProcessingConfig.ChunkLoop.MaxFocusedChunksPerAttachment,
+    MinQueryKeywordLength = attachmentProcessingConfig.ChunkLoop.MinQueryKeywordLength,
+    MaxChunksPerAttachment = attachmentProcessingConfig.ChunkLoop.MaxChunksPerAttachment,
+    MaxChunkNoteChars = attachmentProcessingConfig.ChunkLoop.MaxChunkNoteChars,
+    MaxFinalNotesPerAgent = attachmentProcessingConfig.ChunkLoop.MaxFinalNotesPerAgent
+});
 builder.Services.AddSingleton(new AttachmentExtractionOptions
 {
     MaxExtractedTextChars = attachmentProcessingConfig.MaxExtractedTextChars,
@@ -200,6 +242,12 @@ builder.Services.AddSingleton(new AttachmentExtractionOptions
         MaxTokens = attachmentProcessingConfig.OpenAiVision.MaxTokens,
         Detail = attachmentProcessingConfig.OpenAiVision.Detail,
         MaxImageBytes = attachmentProcessingConfig.OpenAiVision.MaxImageBytes
+    },
+    TransientRetry = new AttachmentTransientRetryOptions
+    {
+        MaxAttempts = attachmentProcessingConfig.TransientRetry.MaxAttempts,
+        BaseDelayMs = attachmentProcessingConfig.TransientRetry.BaseDelayMs,
+        MaxDelayMs = attachmentProcessingConfig.TransientRetry.MaxDelayMs
     }
 });
 builder.Services.AddHttpClient("attachment-extraction", client =>
@@ -207,6 +255,8 @@ builder.Services.AddHttpClient("attachment-extraction", client =>
     client.Timeout = TimeSpan.FromMinutes(3);
 });
 builder.Services.AddScoped<IAttachmentTextExtractor, AttachmentTextExtractor>();
+builder.Services.AddScoped<IDocumentParser, DocumentParseService>();
+builder.Services.AddHostedService<AttachmentExtractionWorkerService>();
 
 if (authEnabled)
 {

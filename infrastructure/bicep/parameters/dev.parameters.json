@@ -56,6 +56,78 @@
     "documentIntelligenceModelId": {
       "value": "prebuilt-layout"
     },
+    "attachmentProcessingMaxExtractedTextChars": {
+      "value": 200000
+    },
+    "attachmentProcessingValidationRejectUnsupportedFormats": {
+      "value": true
+    },
+    "attachmentProcessingValidationMaxUploadBytes": {
+      "value": 26214400
+    },
+    "attachmentProcessingValidationMaxTextUploadBytes": {
+      "value": 10485760
+    },
+    "attachmentProcessingValidationMaxDocumentUploadBytes": {
+      "value": 26214400
+    },
+    "attachmentProcessingValidationMaxImageUploadBytes": {
+      "value": 20971520
+    },
+    "attachmentProcessingAsyncExtractionEnabled": {
+      "value": true
+    },
+    "attachmentProcessingAsyncExtractionQueueCapacity": {
+      "value": 200
+    },
+    "attachmentProcessingTransientRetryMaxAttempts": {
+      "value": 3
+    },
+    "attachmentProcessingTransientRetryBaseDelayMs": {
+      "value": 250
+    },
+    "attachmentProcessingTransientRetryMaxDelayMs": {
+      "value": 2000
+    },
+    "attachmentProcessingChunkLoopEnabled": {
+      "value": true
+    },
+    "attachmentProcessingChunkLoopActivationThresholdChars": {
+      "value": 14000
+    },
+    "attachmentProcessingChunkLoopChunkSizeChars": {
+      "value": 12000
+    },
+    "attachmentProcessingChunkLoopChunkOverlapChars": {
+      "value": 1000
+    },
+    "attachmentProcessingChunkLoopUseTokenAwareSizing": {
+      "value": true
+    },
+    "attachmentProcessingChunkLoopTargetChunkTokens": {
+      "value": 3000
+    },
+    "attachmentProcessingChunkLoopEstimatedCharsPerToken": {
+      "value": 4
+    },
+    "attachmentProcessingChunkLoopEnableQueryFocusedSecondPass": {
+      "value": true
+    },
+    "attachmentProcessingChunkLoopMaxFocusedChunksPerAttachment": {
+      "value": 3
+    },
+    "attachmentProcessingChunkLoopMinQueryKeywordLength": {
+      "value": 4
+    },
+    "attachmentProcessingChunkLoopMaxChunksPerAttachment": {
+      "value": 20
+    },
+    "attachmentProcessingChunkLoopMaxChunkNoteChars": {
+      "value": 1200
+    },
+    "attachmentProcessingChunkLoopMaxFinalNotesPerAgent": {
+      "value": 8
+    },
     "authEnabled": {
       "value": true
     },
@@ -109,6 +181,9 @@
     },
     "alertEmail": {
       "value": "simonholmesabc@gmail.com"
+    },
+    "documentPipelineAlertsEnabled": {
+      "value": true
     },
     "postgresAdminLogin": {
       "value": "agonadmin"

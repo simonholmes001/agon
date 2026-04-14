@@ -21,6 +21,8 @@ namespace Agon.Integration.Tests;
 /// </summary>
 public class AgonWebApplicationFactory : WebApplicationFactory<Program>
 {
+    private readonly string _databaseName = $"AgonIntegrationTests-{Guid.NewGuid():N}";
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         // Set environment to Testing to load appsettings.Testing.json if exists
@@ -59,7 +61,7 @@ public class AgonWebApplicationFactory : WebApplicationFactory<Program>
             services.AddSingleton<DbContextOptions<AgonDbContext>>(sp =>
             {
                 var builder = new DbContextOptionsBuilder<AgonDbContext>();
-                builder.UseInMemoryDatabase("AgonIntegrationTests");
+                builder.UseInMemoryDatabase(_databaseName);
                 return builder.Options;
             });
 
@@ -72,9 +74,11 @@ public class AgonWebApplicationFactory : WebApplicationFactory<Program>
             services.RemoveAll<ISessionRepository>();
             services.RemoveAll<ITruthMapRepository>();
             services.RemoveAll<IAgentMessageRepository>();
+            services.RemoveAll<IAttachmentRepository>();
             services.AddScoped<ISessionRepository, SessionRepository>();
             services.AddScoped<ITruthMapRepository, TruthMapRepository>();
             services.AddScoped<IAgentMessageRepository, AgentMessageRepository>();
+            services.AddScoped<IAttachmentRepository, AttachmentRepository>();
 
             // Remove Redis dependencies if they were registered
             services.RemoveAll<StackExchange.Redis.IConnectionMultiplexer>();

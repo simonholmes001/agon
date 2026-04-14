@@ -19,6 +19,9 @@ param appGatewayResourceSuffix string = ''
 @description('Alert email receiver for action groups.')
 param alertEmail string
 
+@description('Enable document pipeline custom telemetry alerts (parser failures and chunk-loop latency).')
+param documentPipelineAlertsEnabled bool = true
+
 @description('Application Gateway SKU name. Use Basic/Standard_v2 for modern SKUs, or Standard_Small/Standard_Medium/Standard_Large for legacy v1.')
 @allowed([
   'Basic'
@@ -172,6 +175,97 @@ param attachmentStorageBlobEndpoint string = ''
 @description('Retention window (days) for attachment lifecycle and backend cleanup alignment.')
 @minValue(1)
 param attachmentRetentionDays int = 90
+
+@description('Maximum extracted attachment text chars passed to backend processing.')
+@minValue(1)
+param attachmentProcessingMaxExtractedTextChars int = 200000
+
+@description('Reject attachments whose route cannot be resolved to a supported text/image/document family.')
+param attachmentProcessingValidationRejectUnsupportedFormats bool = true
+
+@description('Absolute maximum attachment upload size in bytes.')
+@minValue(1024)
+param attachmentProcessingValidationMaxUploadBytes int = 26214400
+
+@description('Maximum text-route attachment size in bytes.')
+@minValue(1024)
+param attachmentProcessingValidationMaxTextUploadBytes int = 10485760
+
+@description('Maximum document-route attachment size in bytes.')
+@minValue(1024)
+param attachmentProcessingValidationMaxDocumentUploadBytes int = 26214400
+
+@description('Maximum image-route attachment size in bytes.')
+@minValue(1024)
+param attachmentProcessingValidationMaxImageUploadBytes int = 20971520
+
+@description('Enable async attachment extraction worker pipeline.')
+param attachmentProcessingAsyncExtractionEnabled bool = true
+
+@description('Batch size per poll for async attachment extraction worker claiming.')
+@minValue(1)
+param attachmentProcessingAsyncExtractionQueueCapacity int = 200
+
+@description('Maximum transient retry attempts for attachment extraction HTTP operations.')
+@minValue(1)
+param attachmentProcessingTransientRetryMaxAttempts int = 3
+
+@description('Base retry delay in milliseconds for transient attachment extraction failures.')
+@minValue(1)
+param attachmentProcessingTransientRetryBaseDelayMs int = 250
+
+@description('Maximum retry delay in milliseconds for transient attachment extraction failures.')
+@minValue(1)
+param attachmentProcessingTransientRetryMaxDelayMs int = 2000
+
+@description('Enable long-document context-window chunk-loop processing.')
+param attachmentProcessingChunkLoopEnabled bool = true
+
+@description('Extracted text length threshold that activates chunk-loop processing.')
+@minValue(1)
+param attachmentProcessingChunkLoopActivationThresholdChars int = 14000
+
+@description('Target chunk size in characters for chunk-loop processing.')
+@minValue(1)
+param attachmentProcessingChunkLoopChunkSizeChars int = 12000
+
+@description('Chunk overlap in characters between adjacent chunk-loop passes.')
+@minValue(0)
+param attachmentProcessingChunkLoopChunkOverlapChars int = 1000
+
+@description('Enable token-aware chunk sizing for chunk-loop processing.')
+param attachmentProcessingChunkLoopUseTokenAwareSizing bool = true
+
+@description('Target token budget per chunk when token-aware chunk sizing is enabled.')
+@minValue(1)
+param attachmentProcessingChunkLoopTargetChunkTokens int = 3000
+
+@description('Estimated chars-per-token factor used for token-aware chunk sizing.')
+@minValue(1)
+param attachmentProcessingChunkLoopEstimatedCharsPerToken int = 4
+
+@description('Enable query-focused second-pass chunk-loop processing.')
+param attachmentProcessingChunkLoopEnableQueryFocusedSecondPass bool = true
+
+@description('Maximum focused chunks retained per attachment for second-pass query analysis.')
+@minValue(1)
+param attachmentProcessingChunkLoopMaxFocusedChunksPerAttachment int = 3
+
+@description('Minimum keyword length for query-focused chunk matching.')
+@minValue(1)
+param attachmentProcessingChunkLoopMinQueryKeywordLength int = 4
+
+@description('Maximum chunk count processed per attachment during chunk-loop prelude.')
+@minValue(1)
+param attachmentProcessingChunkLoopMaxChunksPerAttachment int = 20
+
+@description('Maximum chars retained from each chunk-pass note before final synthesis.')
+@minValue(1)
+param attachmentProcessingChunkLoopMaxChunkNoteChars int = 1200
+
+@description('Maximum chunk-pass notes retained per agent before final synthesis.')
+@minValue(1)
+param attachmentProcessingChunkLoopMaxFinalNotesPerAgent int = 8
 
 var tags = {
   environment: environment
@@ -488,6 +582,102 @@ resource appService 'Microsoft.Web/sites@2023-12-01' = {
         {
           name: 'AttachmentOperations__Retention__RetentionDays'
           value: string(attachmentRetentionDays)
+        }
+        {
+          name: 'AttachmentProcessing__MaxExtractedTextChars'
+          value: string(attachmentProcessingMaxExtractedTextChars)
+        }
+        {
+          name: 'AttachmentProcessing__Validation__RejectUnsupportedFormats'
+          value: attachmentProcessingValidationRejectUnsupportedFormats ? 'true' : 'false'
+        }
+        {
+          name: 'AttachmentProcessing__Validation__MaxUploadBytes'
+          value: string(attachmentProcessingValidationMaxUploadBytes)
+        }
+        {
+          name: 'AttachmentProcessing__Validation__MaxTextUploadBytes'
+          value: string(attachmentProcessingValidationMaxTextUploadBytes)
+        }
+        {
+          name: 'AttachmentProcessing__Validation__MaxDocumentUploadBytes'
+          value: string(attachmentProcessingValidationMaxDocumentUploadBytes)
+        }
+        {
+          name: 'AttachmentProcessing__Validation__MaxImageUploadBytes'
+          value: string(attachmentProcessingValidationMaxImageUploadBytes)
+        }
+        {
+          name: 'AttachmentProcessing__AsyncExtraction__Enabled'
+          value: attachmentProcessingAsyncExtractionEnabled ? 'true' : 'false'
+        }
+        {
+          name: 'AttachmentProcessing__AsyncExtraction__BatchSize'
+          value: string(attachmentProcessingAsyncExtractionQueueCapacity)
+        }
+        {
+          name: 'AttachmentProcessing__TransientRetry__MaxAttempts'
+          value: string(attachmentProcessingTransientRetryMaxAttempts)
+        }
+        {
+          name: 'AttachmentProcessing__TransientRetry__BaseDelayMs'
+          value: string(attachmentProcessingTransientRetryBaseDelayMs)
+        }
+        {
+          name: 'AttachmentProcessing__TransientRetry__MaxDelayMs'
+          value: string(attachmentProcessingTransientRetryMaxDelayMs)
+        }
+        {
+          name: 'AttachmentProcessing__ChunkLoop__Enabled'
+          value: attachmentProcessingChunkLoopEnabled ? 'true' : 'false'
+        }
+        {
+          name: 'AttachmentProcessing__ChunkLoop__ActivationThresholdChars'
+          value: string(attachmentProcessingChunkLoopActivationThresholdChars)
+        }
+        {
+          name: 'AttachmentProcessing__ChunkLoop__ChunkSizeChars'
+          value: string(attachmentProcessingChunkLoopChunkSizeChars)
+        }
+        {
+          name: 'AttachmentProcessing__ChunkLoop__ChunkOverlapChars'
+          value: string(attachmentProcessingChunkLoopChunkOverlapChars)
+        }
+        {
+          name: 'AttachmentProcessing__ChunkLoop__UseTokenAwareSizing'
+          value: attachmentProcessingChunkLoopUseTokenAwareSizing ? 'true' : 'false'
+        }
+        {
+          name: 'AttachmentProcessing__ChunkLoop__TargetChunkTokens'
+          value: string(attachmentProcessingChunkLoopTargetChunkTokens)
+        }
+        {
+          name: 'AttachmentProcessing__ChunkLoop__EstimatedCharsPerToken'
+          value: string(attachmentProcessingChunkLoopEstimatedCharsPerToken)
+        }
+        {
+          name: 'AttachmentProcessing__ChunkLoop__EnableQueryFocusedSecondPass'
+          value: attachmentProcessingChunkLoopEnableQueryFocusedSecondPass ? 'true' : 'false'
+        }
+        {
+          name: 'AttachmentProcessing__ChunkLoop__MaxFocusedChunksPerAttachment'
+          value: string(attachmentProcessingChunkLoopMaxFocusedChunksPerAttachment)
+        }
+        {
+          name: 'AttachmentProcessing__ChunkLoop__MinQueryKeywordLength'
+          value: string(attachmentProcessingChunkLoopMinQueryKeywordLength)
+        }
+        {
+          name: 'AttachmentProcessing__ChunkLoop__MaxChunksPerAttachment'
+          value: string(attachmentProcessingChunkLoopMaxChunksPerAttachment)
+        }
+        {
+          name: 'AttachmentProcessing__ChunkLoop__MaxChunkNoteChars'
+          value: string(attachmentProcessingChunkLoopMaxChunkNoteChars)
+        }
+        {
+          name: 'AttachmentProcessing__ChunkLoop__MaxFinalNotesPerAgent'
+          value: string(attachmentProcessingChunkLoopMaxFinalNotesPerAgent)
         }
         {
           name: 'OPENAI_KEY'
@@ -809,6 +999,92 @@ resource appServiceAvailabilityAlert 'Microsoft.Insights/metricAlerts@2018-03-01
         actionGroupId: actionGroup.id
       }
     ]
+  }
+}
+
+resource documentParseFailureAlert 'Microsoft.Insights/scheduledQueryRules@2022-06-15' = if (documentPipelineAlertsEnabled) {
+  name: 'alert-${namePrefix}-doc-parse-failures'
+  location: location
+  tags: tags
+  properties: {
+    description: 'Alerts on sustained document.parse failures.'
+    displayName: 'Document parse failures'
+    enabled: true
+    severity: 2
+    evaluationFrequency: 'PT5M'
+    windowSize: 'PT15M'
+    scopes: [
+      logAnalytics.id
+    ]
+    criteria: {
+      allOf: [
+        {
+          query: '''
+            customMetrics
+            | where name == "agon.document_parse.failure"
+            | summarize Failures = sum(todouble(value)) by bin(timestamp, 5m)
+          '''
+          timeAggregation: 'Maximum'
+          metricMeasureColumn: 'Failures'
+          operator: 'GreaterThan'
+          threshold: 5
+          failingPeriods: {
+            numberOfEvaluationPeriods: 1
+            minFailingPeriodsToAlert: 1
+          }
+        }
+      ]
+    }
+    actions: {
+      actionGroups: [
+        actionGroup.id
+      ]
+    }
+    autoMitigate: true
+    skipQueryValidation: true
+  }
+}
+
+resource chunkLoopLatencyAlert 'Microsoft.Insights/scheduledQueryRules@2022-06-15' = if (documentPipelineAlertsEnabled) {
+  name: 'alert-${namePrefix}-chunk-loop-latency'
+  location: location
+  tags: tags
+  properties: {
+    description: 'Alerts when chunk-loop prelude latency exceeds threshold.'
+    displayName: 'Chunk-loop prelude latency'
+    enabled: true
+    severity: 3
+    evaluationFrequency: 'PT5M'
+    windowSize: 'PT15M'
+    scopes: [
+      logAnalytics.id
+    ]
+    criteria: {
+      allOf: [
+        {
+          query: '''
+            customMetrics
+            | where name == "agon.attachment_chunk_loop.prelude.duration.ms"
+            | summarize P95LatencyMs = percentile(todouble(value), 95) by bin(timestamp, 5m)
+          '''
+          timeAggregation: 'Maximum'
+          metricMeasureColumn: 'P95LatencyMs'
+          operator: 'GreaterThan'
+          threshold: 20000
+          failingPeriods: {
+            numberOfEvaluationPeriods: 1
+            minFailingPeriodsToAlert: 1
+          }
+        }
+      ]
+    }
+    actions: {
+      actionGroups: [
+        actionGroup.id
+      ]
+    }
+    autoMitigate: true
+    skipQueryValidation: true
   }
 }
 

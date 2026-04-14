@@ -1,9 +1,12 @@
 using Agon.Api.Observability;
 using Agon.Api.Services;
+using Agon.Api.Configuration;
 using Agon.Application.Interfaces;
 using Agon.Application.Models;
 using Agon.Application.Services;
 using Agon.Domain.Sessions;
+using Agon.Application.Attachments;
+using Agon.Infrastructure.Attachments;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using System.Security.Claims;
@@ -21,36 +24,44 @@ namespace Agon.Api.Controllers;
 [Route("[controller]")]
 public class SessionsController : ControllerBase
 {
-    private const long MaxAttachmentSizeBytes = 25 * 1024 * 1024; // 25 MB
+    private const long MaxAttachmentRequestBodyBytes = 26L * 1024 * 1024;
     private const int AttachmentPreviewChars = 500;
     private const string AttachmentStorageNotConfiguredCode = "ATTACHMENT_STORAGE_NOT_CONFIGURED";
     private const string AttachmentStorageUnavailableCode = "ATTACHMENT_STORAGE_UNAVAILABLE";
     private const string AttachmentMetadataNotConfiguredCode = "ATTACHMENT_METADATA_NOT_CONFIGURED";
     private const string AttachmentMetadataUnavailableCode = "ATTACHMENT_METADATA_UNAVAILABLE";
+    private const string AttachmentUnsupportedFormatCode = "ATTACHMENT_UNSUPPORTED_FORMAT";
+    private const string AttachmentSizeLimitExceededCode = "ATTACHMENT_SIZE_LIMIT_EXCEEDED";
     private const string EntraGroupsClaimType = "groups";
     private const string LegacyGroupsClaimType = "http://schemas.microsoft.com/ws/2008/06/identity/claims/groups";
 
     private readonly ISessionService _sessionService;
     private readonly IAttachmentStorageService? _attachmentStorage;
-    private readonly IAttachmentTextExtractor _attachmentTextExtractor;
+    private readonly IDocumentParser _documentParser;
+    private readonly AttachmentAsyncExtractionOptions _asyncExtractionOptions;
     private readonly ConversationHistoryService _conversationHistory;
     private readonly ILogger<SessionsController> _logger;
     private readonly TrialAccessService _trialAccessService;
+    private readonly AttachmentUploadValidationOptions _attachmentUploadValidationOptions;
 
     public SessionsController(
         ISessionService sessionService,
-        IAttachmentTextExtractor attachmentTextExtractor,
+        IDocumentParser documentParser,
+        AttachmentAsyncExtractionOptions asyncExtractionOptions,
         ConversationHistoryService conversationHistory,
         ILogger<SessionsController> logger,
         TrialAccessService trialAccessService,
+        AttachmentUploadValidationOptions attachmentUploadValidationOptions,
         IAttachmentStorageService? attachmentStorage = null)
     {
         _sessionService = sessionService;
         _attachmentStorage = attachmentStorage;
-        _attachmentTextExtractor = attachmentTextExtractor;
+        _documentParser = documentParser;
+        _asyncExtractionOptions = asyncExtractionOptions;
         _conversationHistory = conversationHistory;
         _logger = logger;
         _trialAccessService = trialAccessService;
+        _attachmentUploadValidationOptions = attachmentUploadValidationOptions;
     }
 
     /// <summary>
@@ -390,9 +401,11 @@ public class SessionsController : ControllerBase
     /// </summary>
     [HttpPost("{id}/attachments")]
     [EnableRateLimiting("attachment-upload")]
-    [RequestSizeLimit(MaxAttachmentSizeBytes)]
+    [RequestSizeLimit(MaxAttachmentRequestBodyBytes)]
     [ProducesResponseType(typeof(SessionAttachmentResponse), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status413PayloadTooLarge)]
+    [ProducesResponseType(StatusCodes.Status415UnsupportedMediaType)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
     public async Task<IActionResult> UploadAttachment(
@@ -400,23 +413,9 @@ public class SessionsController : ControllerBase
         [FromForm] UploadAttachmentRequest request,
         CancellationToken cancellationToken)
     {
-        if (_attachmentStorage is null)
-        {
-            AttachmentMetrics.UploadFailure.Add(1);
-            return AttachmentServiceUnavailable(
-                AttachmentStorageNotConfiguredCode,
-                "Attachment storage is not configured.",
-                "Set ConnectionStrings:BlobStorage and restart the backend.");
-        }
-
         if (request.File is null || request.File.Length == 0)
         {
             return BadRequest(new { error = "Attachment file is required." });
-        }
-
-        if (request.File.Length > MaxAttachmentSizeBytes)
-        {
-            return BadRequest(new { error = $"Attachment exceeds max size of {MaxAttachmentSizeBytes / (1024 * 1024)} MB." });
         }
 
         var session = await _sessionService.GetByUserAsync(id, ResolveCurrentUserId(), cancellationToken);
@@ -429,25 +428,81 @@ public class SessionsController : ControllerBase
         var contentType = string.IsNullOrWhiteSpace(request.File.ContentType)
             ? GuessContentType(safeFileName)
             : request.File.ContentType.Trim();
+        var normalizedContentType = NormalizeContentType(contentType);
+        var route = AttachmentRoutingPolicy.Resolve(safeFileName, normalizedContentType);
 
-        byte[] fileBytes;
-        await using (var source = request.File.OpenReadStream())
-        await using (var copy = new MemoryStream())
+        if (_attachmentUploadValidationOptions.RejectUnsupportedFormats &&
+            route == AttachmentRoutingRoute.Unsupported)
         {
-            await source.CopyToAsync(copy, cancellationToken);
-            fileBytes = copy.ToArray();
+            return StatusCode(StatusCodes.Status415UnsupportedMediaType, new
+            {
+                errorCode = AttachmentUnsupportedFormatCode,
+                error = "Attachment format is not supported.",
+                hint = "Supported route families are text, image, and document. Ensure MIME type and extension are recognized."
+            });
         }
 
+        if (request.File.Length > _attachmentUploadValidationOptions.MaxUploadBytes)
+        {
+            return StatusCode(StatusCodes.Status413PayloadTooLarge, new
+            {
+                errorCode = AttachmentSizeLimitExceededCode,
+                error = $"Attachment exceeds global max allowed size of {_attachmentUploadValidationOptions.MaxUploadBytes} bytes.",
+                route = route.ToString().ToLowerInvariant(),
+                maxAllowedBytes = _attachmentUploadValidationOptions.MaxUploadBytes
+            });
+        }
+
+        var maxAllowedBytes = ResolveMaxAllowedBytes(route);
+        if (request.File.Length > maxAllowedBytes)
+        {
+            return StatusCode(StatusCodes.Status413PayloadTooLarge, new
+            {
+                errorCode = AttachmentSizeLimitExceededCode,
+                error = $"Attachment exceeds max allowed size of {maxAllowedBytes} bytes for route '{route.ToString().ToLowerInvariant()}'.",
+                route = route.ToString().ToLowerInvariant(),
+                maxAllowedBytes
+            });
+        }
+
+        if (_attachmentStorage is null)
+        {
+            AttachmentMetrics.UploadFailure.Add(1);
+            return AttachmentServiceUnavailable(
+                AttachmentStorageNotConfiguredCode,
+                "Attachment storage is not configured.",
+                "Set ConnectionStrings:BlobStorage and restart the backend.");
+        }
+
+        byte[]? fileBytes = null;
         var blobName = $"{id:N}/{DateTimeOffset.UtcNow:yyyyMMddHHmmssfff}-{Guid.NewGuid():N}-{safeFileName}";
         AttachmentUploadResult uploaded;
+
         try
         {
-            await using var uploadStream = new MemoryStream(fileBytes, writable: false);
-            uploaded = await _attachmentStorage.UploadAsync(
-                blobName,
-                uploadStream,
-                contentType,
-                cancellationToken);
+            if (_asyncExtractionOptions.Enabled)
+            {
+                await using var uploadStream = request.File.OpenReadStream();
+                uploaded = await _attachmentStorage.UploadAsync(
+                    blobName,
+                    uploadStream,
+                    contentType,
+                    cancellationToken);
+            }
+            else
+            {
+                await using var source = request.File.OpenReadStream();
+                await using var copy = new MemoryStream();
+                await source.CopyToAsync(copy, cancellationToken);
+                fileBytes = copy.ToArray();
+
+                await using var uploadStream = new MemoryStream(fileBytes, writable: false);
+                uploaded = await _attachmentStorage.UploadAsync(
+                    blobName,
+                    uploadStream,
+                    contentType,
+                    cancellationToken);
+            }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -470,31 +525,6 @@ public class SessionsController : ControllerBase
                 "Verify blob storage connectivity and retry.");
         }
 
-        string? extractedText = null;
-        try
-        {
-            extractedText = await _attachmentTextExtractor.ExtractAsync(
-                fileBytes,
-                safeFileName,
-                contentType,
-                cancellationToken);
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            AttachmentMetrics.ExtractionFailure.Add(1);
-            _logger.LogWarning(
-                ex,
-                "Attachment text extraction failed for session {SessionId}. Category=AttachmentExtractionFailed, FileName={FileName}, ContentType={ContentType}, SizeBytes={SizeBytes}",
-                id,
-                safeFileName,
-                contentType,
-                request.File.Length);
-        }
-
         var attachmentId = Guid.NewGuid();
         var attachment = new SessionAttachment(
             AttachmentId: attachmentId,
@@ -506,8 +536,9 @@ public class SessionsController : ControllerBase
             BlobName: uploaded.BlobName,
             BlobUri: uploaded.BlobUri,
             AccessUrl: BuildAttachmentDownloadPath(id, attachmentId),
-            ExtractedText: extractedText,
-            UploadedAt: DateTimeOffset.UtcNow);
+            ExtractedText: null,
+            UploadedAt: DateTimeOffset.UtcNow,
+            ExtractionStatus: AttachmentExtractionStatus.Uploaded);
 
         SessionAttachment saved;
         try
@@ -546,20 +577,96 @@ public class SessionsController : ControllerBase
                 "Check database connectivity and retry.");
         }
 
+        SessionAttachment finalized = saved;
+        if (!_asyncExtractionOptions.Enabled)
+        {
+            try
+            {
+                finalized = await _sessionService.UpdateAttachmentExtractionStateAsync(
+                    saved.AttachmentId,
+                    AttachmentExtractionStatus.Extracting,
+                    extractedText: null,
+                    extractionFailureReason: null,
+                    cancellationToken);
+
+                var parseResult = await _documentParser.ParseAsync(
+                    new DocumentParseRequest(
+                        fileBytes ?? Array.Empty<byte>(),
+                        safeFileName,
+                        contentType,
+                        request.File.Length,
+                        maxAllowedBytes),
+                    cancellationToken);
+
+                if (parseResult.Success && !string.IsNullOrWhiteSpace(parseResult.ExtractedText))
+                {
+                    finalized = await _sessionService.UpdateAttachmentExtractionStateAsync(
+                        saved.AttachmentId,
+                        AttachmentExtractionStatus.Ready,
+                        parseResult.ExtractedText,
+                        extractionFailureReason: null,
+                        cancellationToken);
+                }
+                else
+                {
+                    finalized = await _sessionService.UpdateAttachmentExtractionStateAsync(
+                        saved.AttachmentId,
+                        AttachmentExtractionStatus.Failed,
+                        extractedText: null,
+                        parseResult.FailureReason ?? "Attachment extraction failed.",
+                        cancellationToken);
+                }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                AttachmentMetrics.ExtractionFailure.Add(1);
+                _logger.LogWarning(
+                    ex,
+                    "Attachment text extraction failed for session {SessionId}. Category=AttachmentExtractionFailed, FileName={FileName}, ContentType={ContentType}, SizeBytes={SizeBytes}",
+                    id,
+                    safeFileName,
+                    contentType,
+                    request.File.Length);
+
+                try
+                {
+                    finalized = await _sessionService.UpdateAttachmentExtractionStateAsync(
+                        saved.AttachmentId,
+                        AttachmentExtractionStatus.Failed,
+                        extractedText: null,
+                        extractionFailureReason: "Attachment extraction failed.",
+                        cancellationToken);
+                }
+                catch (Exception statusEx)
+                {
+                    _logger.LogWarning(
+                        statusEx,
+                        "Failed to persist attachment extraction failure status for AttachmentId={AttachmentId}.",
+                        saved.AttachmentId);
+                    finalized = saved;
+                }
+            }
+        }
+
         _logger.LogInformation(
-            "Uploaded attachment {AttachmentId} for session {SessionId} (FileName={FileName}, ContentType={ContentType}, SizeBytes={SizeBytes}, ExtractedText={HasExtractedText})",
-            saved.AttachmentId,
+            "Uploaded attachment {AttachmentId} for session {SessionId} (FileName={FileName}, ContentType={ContentType}, SizeBytes={SizeBytes}, ExtractedText={HasExtractedText}, ExtractionStatus={ExtractionStatus})",
+            finalized.AttachmentId,
             id,
-            saved.FileName,
-            saved.ContentType,
-            saved.SizeBytes,
-            !string.IsNullOrWhiteSpace(saved.ExtractedText));
+            finalized.FileName,
+            finalized.ContentType,
+            finalized.SizeBytes,
+            !string.IsNullOrWhiteSpace(finalized.ExtractedText),
+            finalized.ExtractionStatus);
         AttachmentMetrics.UploadSuccess.Add(1);
 
         return CreatedAtAction(
             nameof(ListAttachments),
             new { id },
-            MapAttachmentResponse(saved));
+            MapAttachmentResponse(finalized));
     }
 
     /// <summary>
@@ -819,7 +926,33 @@ public class SessionsController : ControllerBase
             BuildAttachmentDownloadPath(attachment.SessionId, attachment.AttachmentId),
             attachment.UploadedAt,
             !string.IsNullOrWhiteSpace(attachment.ExtractedText),
-            preview);
+            preview,
+            attachment.ExtractionStatus.ToString().ToLowerInvariant(),
+            attachment.ExtractionFailureReason);
+    }
+
+    private int ResolveMaxAllowedBytes(AttachmentRoutingRoute route)
+    {
+        var routeLimit = route switch
+        {
+            AttachmentRoutingRoute.Text => _attachmentUploadValidationOptions.MaxTextUploadBytes,
+            AttachmentRoutingRoute.Document => _attachmentUploadValidationOptions.MaxDocumentUploadBytes,
+            AttachmentRoutingRoute.Image => _attachmentUploadValidationOptions.MaxImageUploadBytes,
+            _ => _attachmentUploadValidationOptions.MaxUploadBytes
+        };
+
+        return Math.Min(_attachmentUploadValidationOptions.MaxUploadBytes, routeLimit);
+    }
+
+    private static string NormalizeContentType(string contentType)
+    {
+        if (string.IsNullOrWhiteSpace(contentType))
+        {
+            return string.Empty;
+        }
+
+        var semicolonIndex = contentType.IndexOf(';');
+        return (semicolonIndex >= 0 ? contentType[..semicolonIndex] : contentType).Trim().ToLowerInvariant();
     }
 
     private static string BuildAttachmentDownloadPath(Guid sessionId, Guid attachmentId) =>
@@ -1042,4 +1175,6 @@ public record SessionAttachmentResponse(
     string AccessUrl,
     DateTimeOffset UploadedAt,
     bool HasExtractedText,
-    string? ExtractedTextPreview);
+    string? ExtractedTextPreview,
+    string? ExtractionStatus = null,
+    string? ExtractionFailureReason = null);

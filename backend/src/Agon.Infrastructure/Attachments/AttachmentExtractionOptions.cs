@@ -5,9 +5,17 @@ namespace Agon.Infrastructure.Attachments;
 /// </summary>
 public sealed class AttachmentExtractionOptions
 {
-    public int MaxExtractedTextChars { get; set; } = 12000;
+    public int MaxExtractedTextChars { get; set; } = 200000;
     public DocumentIntelligenceExtractionOptions DocumentIntelligence { get; set; } = new();
     public OpenAiVisionExtractionOptions OpenAiVision { get; set; } = new();
+    public AttachmentTransientRetryOptions TransientRetry { get; set; } = new();
+}
+
+public sealed class AttachmentTransientRetryOptions
+{
+    public int MaxAttempts { get; set; } = 3;
+    public int BaseDelayMs { get; set; } = 250;
+    public int MaxDelayMs { get; set; } = 2000;
 }
 
 public sealed class DocumentIntelligenceExtractionOptions

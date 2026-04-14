@@ -1,0 +1,86 @@
+# Attachment Format Support Matrix
+
+This matrix defines deterministic attachment routing for extraction in Agon backend.
+
+## Routing precedence
+
+1. Use known `Content-Type` first (`text/*`, known text, known image, known document).
+2. If `Content-Type` is unknown or generic binary (`application/octet-stream`), fall back to file extension.
+3. If neither matches, route is `Unsupported` and extraction returns `null`.
+
+## Supported routes
+
+| Route | Content types | Extensions | Extraction path |
+|---|---|---|---|
+| Text | `text/*`, `application/json`, `application/xml`, `application/x-yaml`, `application/yaml`, `text/csv`, `application/csv`, `application/x-www-form-urlencoded`, `application/javascript`, `application/x-javascript`, `application/typescript`, `application/sql`, `application/rtf` | `.txt`, `.md`, `.markdown`, `.json`, `.yaml`, `.yml`, `.csv`, `.xml`, `.html`, `.htm`, `.log`, `.ini`, `.cfg`, `.conf`, `.toml`, `.sql`, `.ts`, `.js`, `.tsx`, `.jsx`, `.cs`, `.py`, `.java`, `.go`, `.rb`, `.php`, `.ps1`, `.sh`, `.bat`, `.env`, `.rtf` | UTF-8 text extraction + normalization |
+| Image | `image/png`, `image/jpeg`, `image/jpg`, `image/pjpeg`, `image/gif`, `image/bmp`, `image/webp`, `image/tiff`, `image/heic`, `image/heif` | `.png`, `.jpg`, `.jpeg`, `.gif`, `.bmp`, `.webp`, `.tif`, `.tiff`, `.heic`, `.heif`, `.jfif` | OpenAI Vision first, then Document Intelligence OCR fallback |
+| Document | `application/pdf`, `application/msword`, `application/vnd.openxmlformats-officedocument.wordprocessingml.document`, `application/vnd.ms-excel`, `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`, `application/vnd.ms-powerpoint`, `application/vnd.openxmlformats-officedocument.presentationml.presentation` | `.pdf`, `.doc`, `.docx`, `.xls`, `.xlsx`, `.ppt`, `.pptx` | Document Intelligence extraction |
+
+## Default size limits
+
+- Absolute upload max: `26214400` bytes (`25 MiB`)
+- Text-route max: `10485760` bytes (`10 MiB`)
+- Image-route max: `20971520` bytes (`20 MiB`)
+- Document-route max: `26214400` bytes (`25 MiB`)
+
+## Extraction lifecycle states
+
+- `uploaded`: metadata persisted and blob upload completed.
+- `extracting`: extraction is actively being processed by the async worker.
+- `ready`: extraction completed with usable extracted text.
+- `failed`: extraction completed without usable text or raised an extraction error.
+
+## Async extraction worker
+
+- Upload path persists metadata with `uploaded` state; extraction is claimed and processed by a durable DB-backed worker poll loop.
+- Multi-instance safe claiming uses atomic state transitions (`uploaded` -> `extracting` -> `ready|failed`).
+- Stale `extracting` rows are periodically requeued to `uploaded` for recovery.
+- Runtime knobs:
+  - `AttachmentProcessing:AsyncExtraction:Enabled` (default `true`)
+  - `AttachmentProcessing:AsyncExtraction:BatchSize` (default `20`)
+  - `AttachmentProcessing:AsyncExtraction:PollIntervalMs` (default `1000`)
+  - `AttachmentProcessing:AsyncExtraction:RequeueStaleExtractingEnabled` (default `true`)
+  - `AttachmentProcessing:AsyncExtraction:StaleExtractingAfterMinutes` (default `15`)
+  - `AttachmentProcessing:AsyncExtraction:ReconcileIntervalMs` (default `30000`)
+
+## Retry/backoff policy
+
+- Transient HTTP failures (`429`, `408`, `5xx`) use bounded exponential backoff.
+- Retry knobs:
+  - `AttachmentProcessing:TransientRetry:MaxAttempts` (default `3`)
+  - `AttachmentProcessing:TransientRetry:BaseDelayMs` (default `250`)
+  - `AttachmentProcessing:TransientRetry:MaxDelayMs` (default `2000`)
+- Fallback behavior remains deterministic:
+  - Image route tries OpenAI Vision first, then falls back to Document Intelligence OCR.
+  - If no usable text is produced, attachment status resolves to `failed`.
+
+## Canonical parser contract
+
+- Attachment workflows now consume a versioned canonical parser contract (`document.parse` v`1.1`).
+- Contract details, deterministic failure taxonomy, and caller behavior are defined in `backend/docs/document-parse-contract.md`.
+
+## Chunk-loop observability
+
+- Chunk-loop analysis prelude emits:
+  - `agon.attachment_chunk_loop.activations`
+  - `agon.attachment_chunk_loop.attachments`
+  - `agon.attachment_chunk_loop.passes`
+  - `agon.attachment_chunk_loop.responses`
+  - `agon.attachment_chunk_loop.notes_generated`
+  - `agon.attachment_chunk_loop.prelude.duration.ms`
+
+## Chunking policy (no RAG)
+
+- Primary pass: section-aware, token-budget-aware chunking.
+  - heading/section boundaries are preferred when splitting (`#`, `Section`, `Chapter`)
+  - token sizing uses configurable token-to-char estimation
+- Secondary pass: query-focused chunk loop over top keyword-matching chunks.
+  - no vector store or retrieval index is used
+
+## Notes
+
+- Mismatched metadata is resolved deterministically by precedence. Example: `text/plain` with `.pdf` routes as `Text`.
+- Generic binary uploads rely on extension fallback. Example: `application/octet-stream` with `.pptx` routes as `Document`.
+- Unsupported routes return `415 ATTACHMENT_UNSUPPORTED_FORMAT` when unsupported formats are blocked.
+- Route/global size breaches return `413 ATTACHMENT_SIZE_LIMIT_EXCEEDED`.
+- Rollout/migration/operations procedures are defined in `backend/docs/document-pipeline-v2-rollout-runbook.md`.
