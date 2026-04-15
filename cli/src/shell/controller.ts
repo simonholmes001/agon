@@ -131,7 +131,21 @@ export class ShellController {
       const previousAssistant = getLatestPostDeliveryAssistantMessage(beforeMessages);
       const previousResponseTimestamp = this.getLatestMessageCreatedAt(beforeMessages);
 
-      const updated = await this.apiClient.submitMessage(sessionId, content);
+      let updated: SessionResponse;
+      try {
+        updated = await this.apiClient.submitMessage(sessionId, content);
+      } catch (error) {
+        if (this.isRequestTimeoutError(error)) {
+          const recovered = await this.waitForNextResponse(sessionId, {
+            afterCreatedAt: previousResponseTimestamp,
+            previousPostDeliveryCreatedAt: previousAssistant?.createdAt
+          });
+          return recovered;
+        }
+
+        throw error;
+      }
+
       await this.sessionManager.saveSession(updated);
 
       this.shellSessionId = sessionId;
@@ -466,6 +480,14 @@ export class ShellController {
 
   private isSessionNotFoundError(error: unknown): boolean {
     return error instanceof AgonError && error.code === ErrorCode.SESSION_NOT_FOUND;
+  }
+
+  private isRequestTimeoutError(error: unknown): boolean {
+    if (!(error instanceof AgonError) || error.code !== ErrorCode.NETWORK_ERROR) {
+      return false;
+    }
+
+    return error.message.toLowerCase().includes('timeout');
   }
 
   private async clearStaleSessionState(sessionId: string): Promise<void> {

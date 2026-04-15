@@ -179,6 +179,38 @@ describe('shell controller', () => {
     expect(result.responseMessage?.message).toBe('Initial analysis from debate');
   });
 
+  it('continues polling when submit follow-up request times out client-side', async () => {
+    const oldAssistant: Message = {
+      agentId: 'post_delivery_assistant',
+      message: 'Old answer',
+      round: 2,
+      createdAt: '2026-03-10T10:00:00Z'
+    };
+    const newAssistant: Message = {
+      agentId: 'post_delivery_assistant',
+      message: 'Council completed answer',
+      round: 3,
+      createdAt: '2026-03-10T10:02:00Z'
+    };
+    const postDeliverySession: SessionResponse = { ...baseSession, phase: 'PostDelivery' };
+
+    sessionManager.getCurrentSessionId.mockResolvedValue('session-123');
+    apiClient.submitMessage.mockRejectedValue(
+      new AgonError(ErrorCode.NETWORK_ERROR, 'timeout of 120000ms exceeded')
+    );
+    apiClient.getSession.mockResolvedValue(postDeliverySession);
+    apiClient.getMessages
+      .mockResolvedValueOnce([oldAssistant]) // before submit
+      .mockResolvedValueOnce([oldAssistant, newAssistant]); // polled after timeout recovery
+
+    const result = await controller.submitFollowUp('invoke council');
+
+    expect(apiClient.submitMessage).toHaveBeenCalledWith('session-123', 'invoke council');
+    expect(apiClient.getSession).toHaveBeenCalledWith('session-123');
+    expect(result.session.phase).toBe('PostDelivery');
+    expect(result.responseMessage?.message).toBe('Council completed answer');
+  });
+
   it('recovers from stale session on follow-up by starting a fresh session', async () => {
     const freshSession: SessionResponse = {
       ...baseSession,

@@ -548,7 +548,7 @@ describe('AgonAPIClient', () => {
         `/sessions/${sessionId}/messages`,
         { content },
         expect.objectContaining({
-          timeout: 120000,
+          timeout: 300000,
           headers: {}
         })
       );

@@ -38,6 +38,7 @@ export interface AuthStatusResponse {
 export class AgonAPIClient {
   private readonly client: AxiosInstance;
   private readonly maxRetries = 2;
+  private readonly followUpTimeoutMs = 300000;
   private readonly logger: Logger;
   private readonly packageName: string;
   private readonly cliVersion: string;
@@ -242,7 +243,7 @@ export class AgonAPIClient {
       `/sessions/${sessionId}/messages`,
       request,
       {
-        timeout: 120000, // Follow-up responses can take longer than default request timeout.
+        timeout: this.followUpTimeoutMs,
         headers: this.getExecutionRequestHeaders(),
       }
     );
