@@ -43,6 +43,10 @@ public interface ISessionService
         Guid sessionId,
         CancellationToken cancellationToken = default);
 
+    Task<IReadOnlyList<SessionAttachment>> ListPendingAttachmentExtractionsAsync(
+        int limit,
+        CancellationToken cancellationToken = default);
+
     Task<SessionAttachment> SaveAttachmentAsync(
         SessionAttachment attachment,
         CancellationToken cancellationToken = default);

@@ -566,6 +566,137 @@ public class SessionServiceTests
             Arg.Any<CancellationToken>());
     }
 
+    [Fact]
+    public async Task UpdateAttachmentExtractionAsync_Should_Reject_Unknown_Status()
+    {
+        var attachmentRepo = Substitute.For<IAttachmentRepository>();
+        var svc = new SessionService(
+            StubSessionRepo(),
+            StubTruthMapRepo(),
+            StubSnapshotStore(),
+            attachmentRepo);
+
+        var act = async () => await svc.UpdateAttachmentExtractionAsync(
+            Guid.NewGuid(),
+            "unknown-status",
+            50,
+            null,
+            null,
+            CancellationToken.None);
+
+        await act.Should().ThrowAsync<ArgumentException>()
+            .WithMessage("*Unknown extraction status*");
+        await attachmentRepo.DidNotReceive().UpdateExtractionAsync(
+            Arg.Any<Guid>(),
+            Arg.Any<string>(),
+            Arg.Any<int>(),
+            Arg.Any<string?>(),
+            Arg.Any<string?>(),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task UpdateAttachmentExtractionAsync_Should_Normalize_Progress_By_Status()
+    {
+        var attachmentRepo = Substitute.For<IAttachmentRepository>();
+        var svc = new SessionService(
+            StubSessionRepo(),
+            StubTruthMapRepo(),
+            StubSnapshotStore(),
+            attachmentRepo);
+        var attachmentId = Guid.NewGuid();
+
+        await svc.UpdateAttachmentExtractionAsync(
+            attachmentId,
+            AttachmentExtractionStatus.Queued,
+            80,
+            null,
+            "ignored",
+            CancellationToken.None);
+        await svc.UpdateAttachmentExtractionAsync(
+            attachmentId,
+            AttachmentExtractionStatus.Extracting,
+            0,
+            null,
+            null,
+            CancellationToken.None);
+        await svc.UpdateAttachmentExtractionAsync(
+            attachmentId,
+            AttachmentExtractionStatus.Ready,
+            10,
+            "text",
+            "ignored",
+            CancellationToken.None);
+
+        await attachmentRepo.Received(1).UpdateExtractionAsync(
+            attachmentId,
+            AttachmentExtractionStatus.Queued,
+            0,
+            null,
+            null,
+            Arg.Any<CancellationToken>());
+        await attachmentRepo.Received(1).UpdateExtractionAsync(
+            attachmentId,
+            AttachmentExtractionStatus.Extracting,
+            1,
+            null,
+            null,
+            Arg.Any<CancellationToken>());
+        await attachmentRepo.Received(1).UpdateExtractionAsync(
+            attachmentId,
+            AttachmentExtractionStatus.Ready,
+            100,
+            "text",
+            null,
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task ListPendingAttachmentExtractionsAsync_Should_Return_Queued_And_Extracting()
+    {
+        var queued = BuildAttachment(AttachmentExtractionStatus.Queued);
+        var extracting = BuildAttachment(AttachmentExtractionStatus.Extracting);
+        var attachmentRepo = Substitute.For<IAttachmentRepository>();
+        attachmentRepo.ListByExtractionStatusesAsync(
+                Arg.Any<IReadOnlyCollection<string>>(),
+                25,
+                Arg.Any<CancellationToken>())
+            .Returns([queued, extracting]);
+        var svc = new SessionService(
+            StubSessionRepo(),
+            StubTruthMapRepo(),
+            StubSnapshotStore(),
+            attachmentRepo);
+
+        var result = await svc.ListPendingAttachmentExtractionsAsync(25, CancellationToken.None);
+
+        result.Should().HaveCount(2);
+        await attachmentRepo.Received(1).ListByExtractionStatusesAsync(
+            Arg.Is<IReadOnlyCollection<string>>(statuses =>
+                statuses.Contains(AttachmentExtractionStatus.Queued)
+                && statuses.Contains(AttachmentExtractionStatus.Extracting)),
+            25,
+            Arg.Any<CancellationToken>());
+    }
+
+    private static SessionAttachment BuildAttachment(string extractionStatus) =>
+        new(
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            "doc.md",
+            "text/markdown",
+            128,
+            "blob",
+            "https://blob",
+            "/sessions/test/attachments/att/content",
+            null,
+            DateTimeOffset.UtcNow,
+            extractionStatus,
+            extractionStatus == AttachmentExtractionStatus.Extracting ? 20 : 0,
+            null,
+            DateTimeOffset.UtcNow);
+
     // ── Helper for Orchestrator Injection ─────────────────────────────────────
 
     private static SessionService BuildServiceWithOrchestrator(

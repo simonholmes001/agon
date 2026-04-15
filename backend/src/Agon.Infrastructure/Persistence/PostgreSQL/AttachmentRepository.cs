@@ -33,7 +33,7 @@ public sealed class AttachmentRepository : IAttachmentRepository
             AccessUrl = attachment.AccessUrl,
             ExtractedText = attachment.ExtractedText,
             UploadedAt = attachment.UploadedAt.UtcDateTime,
-            ExtractionStatus = attachment.ExtractionStatus,
+            ExtractionStatus = NormalizeKnownStatus(attachment.ExtractionStatus),
             ExtractionProgressPercent = Math.Clamp(attachment.ExtractionProgressPercent, 0, 100),
             ExtractionError = attachment.ExtractionError,
             ExtractionUpdatedAt = (attachment.ExtractionUpdatedAt ?? attachment.UploadedAt).UtcDateTime
@@ -60,7 +60,7 @@ public sealed class AttachmentRepository : IAttachmentRepository
             return;
         }
 
-        var normalizedStatus = NormalizeStatus(extractionStatus);
+        var normalizedStatus = NormalizeKnownStatus(extractionStatus);
         entity.ExtractionStatus = normalizedStatus;
         entity.ExtractionProgressPercent = Math.Clamp(extractionProgressPercent, 0, 100);
         entity.ExtractionError = extractionError;
@@ -72,6 +72,36 @@ public sealed class AttachmentRepository : IAttachmentRepository
         }
 
         await _dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<SessionAttachment>> ListByExtractionStatusesAsync(
+        IReadOnlyCollection<string> extractionStatuses,
+        int limit,
+        CancellationToken cancellationToken = default)
+    {
+        if (limit <= 0 || extractionStatuses.Count == 0)
+        {
+            return Array.Empty<SessionAttachment>();
+        }
+
+        var normalizedStatuses = extractionStatuses
+            .Where(status => !string.IsNullOrWhiteSpace(status))
+            .Select(NormalizeKnownStatus)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        if (normalizedStatuses.Length == 0)
+        {
+            return Array.Empty<SessionAttachment>();
+        }
+
+        var entities = await _dbContext.SessionAttachments
+            .Where(a => normalizedStatuses.Contains(a.ExtractionStatus))
+            .OrderBy(a => a.UploadedAt)
+            .Take(limit)
+            .AsNoTracking()
+            .ToListAsync(cancellationToken);
+
+        return entities.Select(ToModel).ToList();
     }
 
     public async Task<IReadOnlyList<SessionAttachment>> ListBySessionAsync(
@@ -127,23 +157,39 @@ public sealed class AttachmentRepository : IAttachmentRepository
             entity.AccessUrl,
             entity.ExtractedText,
             DateTime.SpecifyKind(entity.UploadedAt, DateTimeKind.Utc),
-            NormalizeStatus(entity.ExtractionStatus),
+            NormalizeStatusForRead(entity.ExtractionStatus),
             Math.Clamp(entity.ExtractionProgressPercent, 0, 100),
             entity.ExtractionError,
             entity.ExtractionUpdatedAt is null
                 ? null
                 : DateTime.SpecifyKind(entity.ExtractionUpdatedAt.Value, DateTimeKind.Utc));
 
-    private static string NormalizeStatus(string? extractionStatus)
+    private static string NormalizeKnownStatus(string? extractionStatus)
     {
         if (string.IsNullOrWhiteSpace(extractionStatus))
         {
-            return AttachmentExtractionStatus.Ready;
+            throw new ArgumentException("Extraction status must be provided.", nameof(extractionStatus));
+        }
+
+        var normalized = extractionStatus.Trim().ToLowerInvariant();
+        if (!AttachmentExtractionStatus.IsKnown(normalized))
+        {
+            throw new ArgumentException($"Unknown extraction status '{extractionStatus}'.", nameof(extractionStatus));
+        }
+
+        return normalized;
+    }
+
+    private static string NormalizeStatusForRead(string? extractionStatus)
+    {
+        if (string.IsNullOrWhiteSpace(extractionStatus))
+        {
+            return AttachmentExtractionStatus.Failed;
         }
 
         var normalized = extractionStatus.Trim().ToLowerInvariant();
         return AttachmentExtractionStatus.IsKnown(normalized)
             ? normalized
-            : AttachmentExtractionStatus.Ready;
+            : AttachmentExtractionStatus.Failed;
     }
 }

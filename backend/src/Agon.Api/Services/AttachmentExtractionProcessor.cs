@@ -2,6 +2,7 @@ using Agon.Api.Observability;
 using Agon.Application.Interfaces;
 using Agon.Application.Models;
 using Agon.Application.Services;
+using Agon.Infrastructure.Attachments;
 
 namespace Agon.Api.Services;
 
@@ -11,21 +12,26 @@ namespace Agon.Api.Services;
 public sealed class AttachmentExtractionProcessor
 {
     private const int ExtractingProgressPercent = 20;
+    private const string GenericFailureMessage = "Extraction failed. Unsupported format or processing error.";
+    private const string MissingBlobFailureMessage = "Extraction failed because attachment content is unavailable.";
 
     private readonly ISessionService _sessionService;
     private readonly IAttachmentStorageService _storage;
     private readonly IAttachmentTextExtractor _extractor;
+    private readonly AttachmentExtractionOptions _options;
     private readonly ILogger<AttachmentExtractionProcessor> _logger;
 
     public AttachmentExtractionProcessor(
         ISessionService sessionService,
         IAttachmentStorageService storage,
         IAttachmentTextExtractor extractor,
+        AttachmentExtractionOptions options,
         ILogger<AttachmentExtractionProcessor> logger)
     {
         _sessionService = sessionService;
         _storage = storage;
         _extractor = extractor;
+        _options = options;
         _logger = logger;
     }
 
@@ -41,22 +47,24 @@ public sealed class AttachmentExtractionProcessor
 
         try
         {
-            await using var source = await _storage.OpenReadAsync(attachment.BlobName, cancellationToken);
-            if (source is null)
+            var maxBytes = Math.Max(1, _options.MaxExtractionFileBytes);
+            if (attachment.SizeBytes > maxBytes)
             {
                 await MarkFailedAsync(
                     attachment,
-                    $"Attachment blob '{attachment.BlobName}' could not be found.",
+                    $"Extraction skipped because file exceeds {maxBytes / (1024 * 1024)} MB extraction limit.",
                     cancellationToken);
                 return;
             }
 
-            byte[] fileBytes;
-            await using (var copy = new MemoryStream())
+            await using var source = await _storage.OpenReadAsync(attachment.BlobName, cancellationToken);
+            if (source is null)
             {
-                await source.CopyToAsync(copy, cancellationToken);
-                fileBytes = copy.ToArray();
+                await MarkFailedAsync(attachment, MissingBlobFailureMessage, cancellationToken);
+                return;
             }
+
+            var fileBytes = await ReadBytesWithLimitAsync(source, maxBytes, cancellationToken);
 
             var extractedText = await _extractor.ExtractAsync(
                 fileBytes,
@@ -76,9 +84,17 @@ public sealed class AttachmentExtractionProcessor
         {
             throw;
         }
+        catch (AttachmentTooLargeException)
+        {
+            var maxBytes = Math.Max(1, _options.MaxExtractionFileBytes);
+            await MarkFailedAsync(
+                attachment,
+                $"Extraction skipped because file exceeds {maxBytes / (1024 * 1024)} MB extraction limit.",
+                cancellationToken);
+        }
         catch (Exception ex)
         {
-            await MarkFailedAsync(attachment, ex.Message, cancellationToken);
+            await MarkFailedAsync(attachment, GenericFailureMessage, cancellationToken);
 
             AttachmentMetrics.ExtractionFailure.Add(1);
             _logger.LogWarning(
@@ -103,4 +119,35 @@ public sealed class AttachmentExtractionProcessor
             string.IsNullOrWhiteSpace(error) ? "Attachment extraction failed." : error,
             cancellationToken);
     }
+
+    private static async Task<byte[]> ReadBytesWithLimitAsync(
+        Stream source,
+        int maxBytes,
+        CancellationToken cancellationToken)
+    {
+        await using var copy = new MemoryStream();
+        var buffer = new byte[81920];
+        var totalRead = 0;
+
+        while (true)
+        {
+            var read = await source.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken);
+            if (read == 0)
+            {
+                break;
+            }
+
+            totalRead += read;
+            if (totalRead > maxBytes)
+            {
+                throw new AttachmentTooLargeException();
+            }
+
+            await copy.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
+        }
+
+        return copy.ToArray();
+    }
+
+    private sealed class AttachmentTooLargeException : Exception;
 }

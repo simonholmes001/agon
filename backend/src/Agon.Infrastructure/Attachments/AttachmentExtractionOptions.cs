@@ -6,6 +6,7 @@ namespace Agon.Infrastructure.Attachments;
 public sealed class AttachmentExtractionOptions
 {
     public int MaxExtractedTextChars { get; set; } = 12000;
+    public int MaxExtractionFileBytes { get; set; } = 10 * 1024 * 1024;
     public DocumentIntelligenceExtractionOptions DocumentIntelligence { get; set; } = new();
     public OpenAiVisionExtractionOptions OpenAiVision { get; set; } = new();
 }

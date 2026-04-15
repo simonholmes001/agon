@@ -743,7 +743,7 @@ public sealed class AgentRunner : IAgentRunner
         var totalUnits = contributionUnitsByAgent.Values.Sum();
         var (percentages, reasonCode) = totalUnits <= 0
             ? (BuildLowSignalFallbackPercentages(), "LOW_SIGNAL_FALLBACK")
-            : (CalculateRoundedPercentages(contributionUnitsByAgent, totalUnits), "TOKEN_WEIGHTED");
+            : (CalculateRoundedPercentages(contributionUnitsByAgent, totalUnits), "WORD_WEIGHTED");
         var ordered = CouncilContributionAgentIds.Select(agentId =>
             $"{agentId}: {percentages[agentId]}%");
 

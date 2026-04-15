@@ -19,6 +19,11 @@ public interface IAttachmentRepository
 
     Task<IReadOnlyList<SessionAttachment>> ListBySessionAsync(Guid sessionId, CancellationToken cancellationToken = default);
 
+    Task<IReadOnlyList<SessionAttachment>> ListByExtractionStatusesAsync(
+        IReadOnlyCollection<string> extractionStatuses,
+        int limit,
+        CancellationToken cancellationToken = default);
+
     Task<IReadOnlyList<SessionAttachment>> ListExpiredAsync(
         DateTimeOffset uploadedBefore,
         int limit,

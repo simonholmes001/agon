@@ -178,6 +178,7 @@ builder.Services.AddScoped<TrialAccessService>();
 builder.Services.AddSingleton(new AttachmentExtractionOptions
 {
     MaxExtractedTextChars = attachmentProcessingConfig.MaxExtractedTextChars,
+    MaxExtractionFileBytes = attachmentProcessingConfig.MaxExtractionFileBytes,
     DocumentIntelligence = new DocumentIntelligenceExtractionOptions
     {
         Enabled = attachmentProcessingConfig.DocumentIntelligence.Enabled,
@@ -202,6 +203,8 @@ builder.Services.AddSingleton(new AttachmentExtractionOptions
         MaxImageBytes = attachmentProcessingConfig.OpenAiVision.MaxImageBytes
     }
 });
+builder.Services.AddSingleton(new AttachmentExtractionQueueOptions());
+builder.Services.AddSingleton<IAttachmentExtractionQueue, AttachmentExtractionQueue>();
 builder.Services.AddHttpClient("attachment-extraction", client =>
 {
     client.Timeout = TimeSpan.FromMinutes(3);
@@ -412,6 +415,7 @@ builder.Services.AddScoped<ISessionService>(sp => new SessionService(
 builder.Services.AddScoped<ConversationHistoryService>();
 if (!builder.Environment.IsEnvironment("Testing"))
 {
+    builder.Services.AddHostedService<AttachmentExtractionWorker>();
     builder.Services.AddHostedService<AttachmentRetentionCleanupService>();
 }
 

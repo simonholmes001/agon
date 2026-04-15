@@ -35,9 +35,9 @@ interface ShellControllerLike {
       contentType: string;
       sizeBytes: number;
       hasExtractedText: boolean;
-      extractionStatus?: 'queued' | 'extracting' | 'ready' | 'failed';
-      extractionProgressPercent?: number;
-      extractionError?: string | null;
+      extractionStatus: 'queued' | 'extracting' | 'ready' | 'failed';
+      extractionProgressPercent: number;
+      extractionError: string | null;
       uploadedAt?: string;
     }>;
   }>;
@@ -57,9 +57,9 @@ interface ShellControllerLike {
       contentType: string;
       sizeBytes: number;
       hasExtractedText: boolean;
-      extractionStatus?: 'queued' | 'extracting' | 'ready' | 'failed';
-      extractionProgressPercent?: number;
-      extractionError?: string | null;
+      extractionStatus: 'queued' | 'extracting' | 'ready' | 'failed';
+      extractionProgressPercent: number;
+      extractionError: string | null;
     };
   }>;
   startIdea(idea: string): Promise<{
@@ -132,9 +132,9 @@ export type ShellEngineOutcome =
         contentType: string;
         sizeBytes: number;
         hasExtractedText: boolean;
-        extractionStatus?: 'queued' | 'extracting' | 'ready' | 'failed';
-        extractionProgressPercent?: number;
-        extractionError?: string | null;
+        extractionStatus: 'queued' | 'extracting' | 'ready' | 'failed';
+        extractionProgressPercent: number;
+        extractionError: string | null;
       }>;
     }
   | { kind: 'artifact'; content: string; raw: boolean; sessionId: string };
@@ -520,18 +520,18 @@ export class ShellEngine {
   private printAttachmentExtractionMessage(
     contentType: string,
     hasExtractedText: boolean,
-    extractionStatus?: 'queued' | 'extracting' | 'ready' | 'failed',
-    extractionProgressPercent?: number,
-    extractionError?: string | null
+    extractionStatus: 'queued' | 'extracting' | 'ready' | 'failed',
+    extractionProgressPercent: number,
+    extractionError: string | null
   ): void {
     if (hasExtractedText) {
       this.print('Attachment content extracted and added to agent context.');
       return;
     }
 
-    const normalizedStatus = extractionStatus?.toLowerCase();
+    const normalizedStatus = extractionStatus.toLowerCase();
     if (normalizedStatus === 'queued' || normalizedStatus === 'extracting') {
-      const pct = Number.isFinite(extractionProgressPercent) ? Math.max(0, Math.min(100, extractionProgressPercent ?? 0)) : 0;
+      const pct = Number.isFinite(extractionProgressPercent) ? Math.max(0, Math.min(100, extractionProgressPercent)) : 0;
       const statusLabel = normalizedStatus === 'extracting' ? 'Extracting' : 'Queued';
       this.print(`${statusLabel} attachment content in background (${pct}%).`);
       this.print('You can keep chatting. Run /attachments to check progress.');

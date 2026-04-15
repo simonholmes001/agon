@@ -6,7 +6,6 @@ using Agon.Application.Services;
 using Agon.Domain.Sessions;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
-using Microsoft.Extensions.DependencyInjection;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
@@ -33,14 +32,14 @@ public class SessionsController : ControllerBase
 
     private readonly ISessionService _sessionService;
     private readonly IAttachmentStorageService? _attachmentStorage;
-    private readonly IServiceScopeFactory _serviceScopeFactory;
+    private readonly IAttachmentExtractionQueue _attachmentExtractionQueue;
     private readonly ConversationHistoryService _conversationHistory;
     private readonly ILogger<SessionsController> _logger;
     private readonly TrialAccessService _trialAccessService;
 
     public SessionsController(
         ISessionService sessionService,
-        IServiceScopeFactory serviceScopeFactory,
+        IAttachmentExtractionQueue attachmentExtractionQueue,
         ConversationHistoryService conversationHistory,
         ILogger<SessionsController> logger,
         TrialAccessService trialAccessService,
@@ -48,7 +47,7 @@ public class SessionsController : ControllerBase
     {
         _sessionService = sessionService;
         _attachmentStorage = attachmentStorage;
-        _serviceScopeFactory = serviceScopeFactory;
+        _attachmentExtractionQueue = attachmentExtractionQueue;
         _conversationHistory = conversationHistory;
         _logger = logger;
         _trialAccessService = trialAccessService;
@@ -528,7 +527,13 @@ public class SessionsController : ControllerBase
             saved.SizeBytes,
             saved.ExtractionStatus);
         AttachmentMetrics.UploadSuccess.Add(1);
-        QueueAttachmentExtraction(saved);
+        if (!_attachmentExtractionQueue.TryQueue(saved))
+        {
+            _logger.LogWarning(
+                "Attachment extraction queue is full for AttachmentId={AttachmentId}, SessionId={SessionId}. Status remains queued for worker recovery.",
+                saved.AttachmentId,
+                saved.SessionId);
+        }
 
         return CreatedAtAction(
             nameof(ListAttachments),
@@ -753,28 +758,6 @@ public class SessionsController : ControllerBase
             sb.AppendLine($"  Status: {assumption.Status} | Validation: {assumption.ValidationStep}\n");
         }
         return sb.ToString();
-    }
-
-    private void QueueAttachmentExtraction(SessionAttachment attachment)
-    {
-        _ = Task.Run(async () =>
-        {
-            await using var scope = _serviceScopeFactory.CreateAsyncScope();
-            var processor = scope.ServiceProvider.GetRequiredService<AttachmentExtractionProcessor>();
-
-            try
-            {
-                await processor.ProcessAsync(attachment, CancellationToken.None);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(
-                    ex,
-                    "Background attachment extraction failed unexpectedly for AttachmentId={AttachmentId}, SessionId={SessionId}",
-                    attachment.AttachmentId,
-                    attachment.SessionId);
-            }
-        });
     }
 
     private ObjectResult AttachmentServiceUnavailable(string errorCode, string message, string hint)
