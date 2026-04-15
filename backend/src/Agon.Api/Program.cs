@@ -256,6 +256,7 @@ builder.Services.AddHttpClient("attachment-extraction", client =>
 });
 builder.Services.AddScoped<IAttachmentTextExtractor, AttachmentTextExtractor>();
 builder.Services.AddScoped<IDocumentParser, DocumentParseService>();
+// Canonical async extraction host. Legacy AttachmentExtractionWorker/queue types are intentionally not hosted.
 builder.Services.AddHostedService<AttachmentExtractionWorkerService>();
 
 if (authEnabled)

@@ -50,9 +50,29 @@ public class ProgramIntegrationTests : IClassFixture<AgonWebApplicationFactory>
         });
 
         using var client = factory.CreateClient();
-        var response = await client.GetAsync("/health");
+        var firstResponse = await client.GetAsync("/health");
+        await Task.Delay(TimeSpan.FromSeconds(2));
+        var secondResponse = await client.GetAsync("/health");
 
-        response.StatusCode.Should().Be(System.Net.HttpStatusCode.OK);
+        firstResponse.StatusCode.Should().Be(System.Net.HttpStatusCode.OK);
+        secondResponse.StatusCode.Should().Be(System.Net.HttpStatusCode.OK);
+    }
+
+    [Fact]
+    public void DevelopmentEnvironment_Should_Register_Canonical_Attachment_Extraction_Hosted_Services()
+    {
+        using var factory = _factory.WithWebHostBuilder(builder =>
+        {
+            builder.UseEnvironment("Development");
+        });
+        using var scope = factory.Services.CreateScope();
+        var hostedServiceTypeNames = scope.ServiceProvider.GetServices<IHostedService>()
+            .Select(service => service.GetType().Name)
+            .ToList();
+
+        hostedServiceTypeNames.Should().Contain(nameof(AttachmentExtractionWorkerService));
+        hostedServiceTypeNames.Should().Contain(nameof(AttachmentRetentionCleanupService));
+        hostedServiceTypeNames.Should().NotContain("AttachmentExtractionWorker");
     }
 
     [Fact]
