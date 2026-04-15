@@ -37,6 +37,7 @@ describe('Error Handler', () => {
   describe('ErrorCode', () => {
     it('should have all error codes defined', () => {
       expect(ErrorCode.NETWORK_ERROR).toBe('NETWORK_ERROR');
+      expect(ErrorCode.TIMEOUT).toBe('TIMEOUT');
       expect(ErrorCode.API_ERROR).toBe('API_ERROR');
       expect(ErrorCode.SESSION_NOT_FOUND).toBe('SESSION_NOT_FOUND');
       expect(ErrorCode.INVALID_INPUT).toBe('INVALID_INPUT');
@@ -89,6 +90,11 @@ describe('Error Handler', () => {
   describe('isNetworkError', () => {
     it('should return true for network errors', () => {
       const error = new AgonError(ErrorCode.NETWORK_ERROR, 'Network failed');
+      expect(isNetworkError(error)).toBe(true);
+    });
+
+    it('should return true for timeout errors', () => {
+      const error = new AgonError(ErrorCode.TIMEOUT, 'Request timed out');
       expect(isNetworkError(error)).toBe(true);
     });
 

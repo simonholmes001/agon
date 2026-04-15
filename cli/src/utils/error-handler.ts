@@ -9,6 +9,7 @@ import chalk from 'chalk';
 
 export enum ErrorCode {
   NETWORK_ERROR = 'NETWORK_ERROR',
+  TIMEOUT = 'TIMEOUT',
   API_ERROR = 'API_ERROR',
   SESSION_NOT_FOUND = 'SESSION_NOT_FOUND',
   INVALID_INPUT = 'INVALID_INPUT',
@@ -64,7 +65,7 @@ export function formatError(error: unknown): string {
  */
 export function isNetworkError(error: unknown): boolean {
   if (error instanceof AgonError) {
-    return error.code === ErrorCode.NETWORK_ERROR;
+    return error.code === ErrorCode.NETWORK_ERROR || error.code === ErrorCode.TIMEOUT;
   }
   
   if (error instanceof Error) {
