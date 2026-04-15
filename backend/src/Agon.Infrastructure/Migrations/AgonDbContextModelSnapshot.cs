@@ -275,26 +275,27 @@ namespace Agon.Infrastructure.Migrations
                         .HasColumnType("text")
                         .HasColumnName("extracted_text");
 
-                    b.Property<string>("ExtractionError")
+                    b.Property<string>("ExtractionFailureReason")
                         .HasColumnType("text")
-                        .HasColumnName("extraction_error");
+                        .HasColumnName("extraction_failure_reason");
 
                     b.Property<int>("ExtractionProgressPercent")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("integer")
-                        .HasDefaultValue(100)
+                        .HasDefaultValue(0)
                         .HasColumnName("extraction_progress_percent");
 
                     b.Property<string>("ExtractionStatus")
                         .IsRequired()
                         .ValueGeneratedOnAdd()
                         .HasColumnType("text")
-                        .HasDefaultValue("ready")
+                        .HasDefaultValue("uploaded")
                         .HasColumnName("extraction_status");
 
                     b.Property<DateTime?>("ExtractionUpdatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("extraction_updated_at");
+
 
                     b.Property<string>("FileName")
                         .IsRequired()

@@ -1,0 +1,26 @@
+[
+  {
+    "fileName": "enterprise-guidelines-large.md",
+    "contentType": "text/markdown",
+    "template": "# Governance Section\nThis section defines enterprise policy controls, approval workflows, and release criteria for platform changes.\n",
+    "repeat": 220
+  },
+  {
+    "fileName": "delivery-playbook-large.pdf",
+    "contentType": "application/pdf",
+    "template": "Delivery playbook details sprint planning cadence, dependency handling, and phased release execution checkpoints.\n",
+    "repeat": 220
+  },
+  {
+    "fileName": "operating-model-large.docx",
+    "contentType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "template": "Operating model documentation describes domain ownership, escalation paths, and objective-based roadmap alignment.\n",
+    "repeat": 220
+  },
+  {
+    "fileName": "risk-register-large.pptx",
+    "contentType": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "template": "Risk register update includes mitigation owners, confidence notes, and unresolved assumptions for executive review.\n",
+    "repeat": 220
+  }
+]

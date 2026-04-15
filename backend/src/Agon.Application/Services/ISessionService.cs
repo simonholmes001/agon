@@ -51,12 +51,11 @@ public interface ISessionService
         SessionAttachment attachment,
         CancellationToken cancellationToken = default);
 
-    Task UpdateAttachmentExtractionAsync(
+    Task<SessionAttachment> UpdateAttachmentExtractionStateAsync(
         Guid attachmentId,
-        string extractionStatus,
-        int extractionProgressPercent,
+        AttachmentExtractionStatus extractionStatus,
         string? extractedText,
-        string? extractionError,
+        string? extractionFailureReason,
         CancellationToken cancellationToken = default);
 
     /// <summary>

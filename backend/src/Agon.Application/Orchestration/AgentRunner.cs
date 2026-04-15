@@ -4,6 +4,8 @@ using Agon.Application.Services;
 using Agon.Domain.Sessions;
 using Agon.Domain.TruthMap;
 using Microsoft.Extensions.Logging;
+using System.Diagnostics;
+using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
@@ -79,6 +81,7 @@ public sealed class AgentRunner : IAgentRunner
     private readonly IEventBroadcaster _broadcaster;
     private readonly ConversationHistoryService _conversationHistory;
     private readonly int _agentTimeoutSeconds;
+    private readonly AttachmentChunkLoopOptions _chunkLoopOptions;
     private readonly ILogger<AgentRunner>? _logger;
 
     public AgentRunner(
@@ -88,6 +91,7 @@ public sealed class AgentRunner : IAgentRunner
         ConversationHistoryService conversationHistory,
         ITokenUsageRepository? tokenUsageRepository = null,
         int agentTimeoutSeconds = 90,
+        AttachmentChunkLoopOptions? chunkLoopOptions = null,
         ILogger<AgentRunner>? logger = null)
     {
         _agents = agents;
@@ -99,6 +103,7 @@ public sealed class AgentRunner : IAgentRunner
         _broadcaster = broadcaster;
         _conversationHistory = conversationHistory;
         _agentTimeoutSeconds = agentTimeoutSeconds;
+        _chunkLoopOptions = NormalizeChunkLoopOptions(chunkLoopOptions);
         _logger = logger;
     }
 
@@ -589,7 +594,7 @@ public sealed class AgentRunner : IAgentRunner
             .OrderBy(a => a.AgentId)
             .ToList();
 
-        var contexts = councilAgents.Select(_ =>
+        var baseContexts = councilAgents.Select(_ =>
             AgentContext.ForAnalysis(
                 state.SessionId,
                 state.TruthMap,
@@ -599,7 +604,39 @@ public sealed class AgentRunner : IAgentRunner
                 state.Attachments))
             .ToList();
 
-        var responses = await DispatchParallelAsync(councilAgents, contexts, cancellationToken);
+        List<AgentContext> finalContexts = baseContexts;
+        var chunkedAttachments = BuildChunkedAttachmentPlans(state.Attachments);
+        if (chunkedAttachments.Count > 0)
+        {
+            AttachmentChunkLoopMetrics.Activations.Add(1);
+            AttachmentChunkLoopMetrics.ChunkedAttachments.Add(chunkedAttachments.Count);
+
+            var chunkPreludeNotes = await RunAttachmentChunkPreludeAsync(
+                state,
+                councilAgents,
+                chunkedAttachments,
+                cancellationToken);
+            var chunkAttachmentIds = chunkedAttachments.Select(plan => plan.Attachment.AttachmentId).ToHashSet();
+            var finalAttachments = state.Attachments
+                .Select(attachment => chunkAttachmentIds.Contains(attachment.AttachmentId)
+                    ? attachment with { ExtractedText = null }
+                    : attachment)
+                .ToList();
+
+            finalContexts = councilAgents.Select((_, index) =>
+            {
+                var notes = chunkPreludeNotes.TryGetValue(councilAgents[index].AgentId, out var values)
+                    ? values
+                    : [];
+                return baseContexts[index] with
+                {
+                    Attachments = finalAttachments,
+                    MicroDirective = BuildFinalChunkSynthesisDirective(chunkedAttachments, notes)
+                };
+            }).ToList();
+        }
+
+        var responses = await DispatchParallelAsync(councilAgents, finalContexts, cancellationToken);
         await ApplyPatchesAsync(state, responses, cancellationToken);
         await AccumulateTokensAsync(state, responses, cancellationToken);
 
@@ -860,6 +897,464 @@ public sealed class AgentRunner : IAgentRunner
         await AccumulateTokensAsync(state, responses, cancellationToken);
         return responses;
     }
+
+    private async Task<Dictionary<string, List<string>>> RunAttachmentChunkPreludeAsync(
+        SessionState state,
+        IReadOnlyList<ICouncilAgent> councilAgents,
+        IReadOnlyList<ChunkedAttachmentPlan> chunkedAttachments,
+        CancellationToken cancellationToken)
+    {
+        var startedAt = Stopwatch.GetTimestamp();
+        var notesByAgent = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+        var totalPasses = chunkedAttachments.Max(plan => plan.Chunks.Count);
+        if (totalPasses <= 0)
+        {
+            return notesByAgent;
+        }
+
+        for (var passIndex = 0; passIndex < totalPasses; passIndex++)
+        {
+            var passAttachments = BuildChunkPassAttachments(state.Attachments, chunkedAttachments, passIndex);
+            if (passAttachments.Count == 0)
+            {
+                continue;
+            }
+
+            AttachmentChunkLoopMetrics.Passes.Add(1);
+
+            var directive = BuildChunkPassDirective(passIndex + 1, totalPasses, chunkedAttachments);
+            var contexts = councilAgents.Select(_ =>
+                AgentContext.ForAnalysis(
+                    state.SessionId,
+                    state.TruthMap,
+                    state.FrictionLevel,
+                    state.CurrentRound,
+                    state.ResearchToolsEnabled,
+                    passAttachments) with
+                {
+                    MicroDirective = directive
+                }).ToList();
+
+            var responses = await DispatchParallelAsync(councilAgents, contexts, cancellationToken);
+            await AccumulateTokensAsync(state, responses, cancellationToken);
+            AppendChunkPreludeNotes(notesByAgent, responses);
+        }
+
+        var latestUserQuery = state.UserMessages.Count == 0
+            ? string.Empty
+            : state.UserMessages[^1].Content;
+        var focusedPlans = BuildQueryFocusedChunkPlans(chunkedAttachments, latestUserQuery);
+        var focusedPasses = focusedPlans.Count == 0 ? 0 : focusedPlans.Max(plan => plan.Chunks.Count);
+        for (var focusedPassIndex = 0; focusedPassIndex < focusedPasses; focusedPassIndex++)
+        {
+            var passAttachments = BuildChunkPassAttachments(state.Attachments, focusedPlans, focusedPassIndex);
+            if (passAttachments.Count == 0)
+            {
+                continue;
+            }
+
+            AttachmentChunkLoopMetrics.Passes.Add(1);
+
+            var directive = BuildFocusedChunkPassDirective(
+                focusedPassIndex + 1,
+                focusedPasses,
+                focusedPlans,
+                latestUserQuery);
+            var contexts = councilAgents.Select(_ =>
+                AgentContext.ForAnalysis(
+                    state.SessionId,
+                    state.TruthMap,
+                    state.FrictionLevel,
+                    state.CurrentRound,
+                    state.ResearchToolsEnabled,
+                    passAttachments) with
+                {
+                    MicroDirective = directive
+                }).ToList();
+
+            var responses = await DispatchParallelAsync(councilAgents, contexts, cancellationToken);
+            await AccumulateTokensAsync(state, responses, cancellationToken);
+            AppendChunkPreludeNotes(notesByAgent, responses);
+        }
+
+        AttachmentChunkLoopMetrics.PreludeDurationMs.Record(Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds);
+        return notesByAgent;
+    }
+
+    private void AppendChunkPreludeNotes(
+        Dictionary<string, List<string>> notesByAgent,
+        IReadOnlyList<AgentResponse> responses)
+    {
+        foreach (var response in responses)
+        {
+            var responseTags = new System.Diagnostics.TagList
+            {
+                { "agent_id", response.AgentId },
+                { "timed_out", response.TimedOut }
+            };
+            AttachmentChunkLoopMetrics.Responses.Add(1, responseTags);
+
+            if (response.TimedOut || string.IsNullOrWhiteSpace(response.Message))
+            {
+                continue;
+            }
+
+            if (!notesByAgent.TryGetValue(response.AgentId, out var notes))
+            {
+                notes = [];
+                notesByAgent[response.AgentId] = notes;
+            }
+
+            notes.Add(TruncateAndNormalizeForPrompt(response.Message, _chunkLoopOptions.MaxChunkNoteChars));
+            var notesTags = new System.Diagnostics.TagList
+            {
+                { "agent_id", response.AgentId }
+            };
+            AttachmentChunkLoopMetrics.NotesGenerated.Add(1, notesTags);
+        }
+    }
+
+    private List<SessionAttachment> BuildChunkPassAttachments(
+        IReadOnlyList<SessionAttachment> attachments,
+        IReadOnlyList<ChunkedAttachmentPlan> chunkedAttachments,
+        int passIndex)
+    {
+        var chunksByAttachmentId = chunkedAttachments.ToDictionary(
+            plan => plan.Attachment.AttachmentId,
+            plan => plan,
+            comparer: EqualityComparer<Guid>.Default);
+        var passAttachments = new List<SessionAttachment>(attachments.Count);
+
+        foreach (var attachment in attachments)
+        {
+            if (!chunksByAttachmentId.TryGetValue(attachment.AttachmentId, out var chunkPlan))
+            {
+                passAttachments.Add(attachment);
+                continue;
+            }
+
+            if (passIndex >= chunkPlan.Chunks.Count)
+            {
+                continue;
+            }
+
+            passAttachments.Add(attachment with { ExtractedText = chunkPlan.Chunks[passIndex] });
+        }
+
+        return passAttachments;
+    }
+
+    private static string BuildChunkPassDirective(
+        int passNumber,
+        int totalPasses,
+        IReadOnlyList<ChunkedAttachmentPlan> chunkedAttachments)
+    {
+        var files = string.Join(", ", chunkedAttachments.Select(plan => plan.Attachment.FileName));
+        return $"""
+            Document chunk pass {passNumber}/{totalPasses}.
+            Files in this pass: {files}
+            Process only the extracted text shown in this pass and capture precise findings with section-level fidelity.
+            Chunking policy: section-aware boundaries and token-budget-aware sizing.
+            Do not claim inability to access secure URLs; this pass already contains the extracted text you should analyze.
+            Keep PATCH ops empty in this pass. This is pre-processing for later synthesis.
+            """;
+    }
+
+    private static string BuildFocusedChunkPassDirective(
+        int passNumber,
+        int totalPasses,
+        IReadOnlyList<ChunkedAttachmentPlan> focusedPlans,
+        string latestUserQuery)
+    {
+        var files = string.Join(", ", focusedPlans.Select(plan => plan.Attachment.FileName));
+        var query = string.IsNullOrWhiteSpace(latestUserQuery)
+            ? "<none>"
+            : TruncateAndNormalizeForPrompt(latestUserQuery, 250);
+        return $"""
+            Focused query chunk pass {passNumber}/{totalPasses}.
+            Files in this pass: {files}
+            User query focus: {query}
+            Prioritize evidence directly relevant to the user query keywords.
+            Do not claim inability to access secure URLs; this pass already contains extracted text to analyze.
+            Keep PATCH ops empty in this pass. This is focused pre-processing for later synthesis.
+            """;
+    }
+
+    private string BuildFinalChunkSynthesisDirective(
+        IReadOnlyList<ChunkedAttachmentPlan> chunkedAttachments,
+        IReadOnlyList<string> notes)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("Chunk-loop pre-processing completed for long attachments.");
+        sb.AppendLine("Do not claim inability to access secure URLs; rely on chunk-pass notes below.");
+        sb.AppendLine($"Processed files: {string.Join(", ", chunkedAttachments.Select(plan => plan.Attachment.FileName))}");
+        sb.AppendLine();
+        sb.AppendLine("Chunk-pass notes:");
+
+        var finalNotes = notes
+            .Where(note => !string.IsNullOrWhiteSpace(note))
+            .Take(_chunkLoopOptions.MaxFinalNotesPerAgent)
+            .ToList();
+
+        if (finalNotes.Count == 0)
+        {
+            sb.AppendLine("- No chunk-pass notes available. Use available context carefully.");
+        }
+        else
+        {
+            for (var index = 0; index < finalNotes.Count; index++)
+            {
+                sb.AppendLine($"{index + 1}. {finalNotes[index]}");
+            }
+        }
+
+        sb.AppendLine();
+        sb.AppendLine("Now produce your normal analysis response and PATCH for this round.");
+        return sb.ToString();
+    }
+
+    private List<ChunkedAttachmentPlan> BuildChunkedAttachmentPlans(IReadOnlyList<SessionAttachment> attachments)
+    {
+        if (!_chunkLoopOptions.Enabled)
+        {
+            return [];
+        }
+
+        var plans = new List<ChunkedAttachmentPlan>();
+        foreach (var attachment in attachments)
+        {
+            if (string.IsNullOrWhiteSpace(attachment.ExtractedText))
+            {
+                continue;
+            }
+
+            var extractedText = attachment.ExtractedText.Trim();
+            if (extractedText.Length < _chunkLoopOptions.ActivationThresholdChars)
+            {
+                continue;
+            }
+
+            var chunks = SplitIntoChunks(extractedText);
+            if (chunks.Count <= 1)
+            {
+                continue;
+            }
+
+            plans.Add(new ChunkedAttachmentPlan(attachment, chunks));
+        }
+
+        return plans;
+    }
+
+    private List<ChunkedAttachmentPlan> BuildQueryFocusedChunkPlans(
+        IReadOnlyList<ChunkedAttachmentPlan> chunkedAttachments,
+        string latestUserQuery)
+    {
+        if (!_chunkLoopOptions.EnableQueryFocusedSecondPass || chunkedAttachments.Count == 0)
+        {
+            return [];
+        }
+
+        var keywords = ExtractQueryKeywords(latestUserQuery);
+        if (keywords.Count == 0)
+        {
+            return [];
+        }
+
+        var focusedPlans = new List<ChunkedAttachmentPlan>();
+        foreach (var plan in chunkedAttachments)
+        {
+            var selected = plan.Chunks
+                .Select(chunk => new { Chunk = chunk, Score = ScoreChunkAgainstKeywords(chunk, keywords) })
+                .Where(result => result.Score > 0)
+                .OrderByDescending(result => result.Score)
+                .ThenByDescending(result => result.Chunk.Length)
+                .Take(_chunkLoopOptions.MaxFocusedChunksPerAttachment)
+                .Select(result => result.Chunk)
+                .ToList();
+
+            if (selected.Count > 0)
+            {
+                focusedPlans.Add(new ChunkedAttachmentPlan(plan.Attachment, selected));
+            }
+        }
+
+        return focusedPlans;
+    }
+
+    private List<string> SplitIntoChunks(string text)
+    {
+        var chunks = new List<string>();
+        var start = 0;
+        var chunkSize = ResolveEffectiveChunkSizeChars();
+        var overlap = Math.Clamp(_chunkLoopOptions.ChunkOverlapChars, 0, Math.Max(0, chunkSize - 1));
+        var maxChunks = _chunkLoopOptions.MaxChunksPerAttachment;
+
+        while (start < text.Length && chunks.Count < maxChunks)
+        {
+            var endExclusive = Math.Min(text.Length, start + chunkSize);
+            if (endExclusive < text.Length)
+            {
+                var minimumBoundary = start + Math.Max(1, chunkSize / 2);
+                var boundary = FindPreferredBoundary(text, start, endExclusive, minimumBoundary);
+                if (boundary >= minimumBoundary && boundary < endExclusive)
+                {
+                    endExclusive = boundary;
+                }
+            }
+
+            var chunk = text[start..endExclusive].Trim();
+            if (!string.IsNullOrWhiteSpace(chunk))
+            {
+                chunks.Add(chunk);
+            }
+
+            if (endExclusive >= text.Length)
+            {
+                break;
+            }
+
+            var nextStart = Math.Max(endExclusive - overlap, start + 1);
+            start = nextStart;
+        }
+
+        return chunks;
+    }
+
+    private int ResolveEffectiveChunkSizeChars()
+    {
+        if (!_chunkLoopOptions.UseTokenAwareSizing)
+        {
+            return _chunkLoopOptions.ChunkSizeChars;
+        }
+
+        var estimatedChars = _chunkLoopOptions.TargetChunkTokens * _chunkLoopOptions.EstimatedCharsPerToken;
+        return Math.Max(1, estimatedChars);
+    }
+
+    private static int FindPreferredBoundary(string text, int start, int endExclusive, int minimumBoundary)
+    {
+        for (var index = endExclusive - 1; index >= minimumBoundary; index--)
+        {
+            if (text[index] != '\n')
+            {
+                continue;
+            }
+
+            var lineStart = index + 1;
+            if (lineStart >= text.Length)
+            {
+                continue;
+            }
+
+            if (IsSectionHeadingAt(text, lineStart))
+            {
+                return lineStart;
+            }
+        }
+
+        for (var index = endExclusive - 1; index >= minimumBoundary + 1; index--)
+        {
+            if (text[index] == '\n' && text[index - 1] == '\n')
+            {
+                return index + 1;
+            }
+        }
+
+        var fallback = text.LastIndexOf('\n', endExclusive - 1, endExclusive - start);
+        if (fallback >= minimumBoundary)
+        {
+            return fallback + 1;
+        }
+
+        return endExclusive;
+    }
+
+    private static bool IsSectionHeadingAt(string text, int lineStart)
+    {
+        var remaining = text.AsSpan(lineStart);
+        return remaining.StartsWith("# ")
+            || remaining.StartsWith("## ")
+            || remaining.StartsWith("### ")
+            || remaining.StartsWith("Section ", StringComparison.OrdinalIgnoreCase)
+            || remaining.StartsWith("Chapter ", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private IReadOnlyList<string> ExtractQueryKeywords(string latestUserQuery)
+    {
+        if (string.IsNullOrWhiteSpace(latestUserQuery))
+        {
+            return [];
+        }
+
+        var minLength = Math.Max(1, _chunkLoopOptions.MinQueryKeywordLength);
+        var tokens = Regex.Matches(latestUserQuery, @"\b[a-zA-Z0-9_\-]+\b")
+            .Select(match => match.Value.Trim().ToLowerInvariant())
+            .Where(value => value.Length >= minLength)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
+        return tokens;
+    }
+
+    private static int ScoreChunkAgainstKeywords(string chunk, IReadOnlyList<string> keywords)
+    {
+        if (string.IsNullOrWhiteSpace(chunk) || keywords.Count == 0)
+        {
+            return 0;
+        }
+
+        var normalizedChunk = chunk.ToLowerInvariant();
+        var score = 0;
+        foreach (var keyword in keywords)
+        {
+            if (normalizedChunk.Contains(keyword, StringComparison.Ordinal))
+            {
+                score++;
+            }
+        }
+
+        return score;
+    }
+
+    private static string TruncateAndNormalizeForPrompt(string value, int maxChars)
+    {
+        var normalized = Regex.Replace(value, @"\s+", " ").Trim();
+        if (normalized.Length <= maxChars)
+        {
+            return normalized;
+        }
+
+        return normalized[..maxChars].TrimEnd() + "...";
+    }
+
+    private static AttachmentChunkLoopOptions NormalizeChunkLoopOptions(AttachmentChunkLoopOptions? options)
+    {
+        var source = options ?? new AttachmentChunkLoopOptions();
+        var chunkSize = Math.Max(1, source.ChunkSizeChars);
+        var overlap = Math.Clamp(source.ChunkOverlapChars, 0, Math.Max(0, chunkSize - 1));
+
+        return new AttachmentChunkLoopOptions
+        {
+            Enabled = source.Enabled,
+            ActivationThresholdChars = Math.Max(1, source.ActivationThresholdChars),
+            ChunkSizeChars = chunkSize,
+            ChunkOverlapChars = overlap,
+            UseTokenAwareSizing = source.UseTokenAwareSizing,
+            TargetChunkTokens = Math.Max(1, source.TargetChunkTokens),
+            EstimatedCharsPerToken = Math.Max(1, source.EstimatedCharsPerToken),
+            EnableQueryFocusedSecondPass = source.EnableQueryFocusedSecondPass,
+            MaxFocusedChunksPerAttachment = Math.Max(1, source.MaxFocusedChunksPerAttachment),
+            MinQueryKeywordLength = Math.Max(1, source.MinQueryKeywordLength),
+            MaxChunksPerAttachment = Math.Max(1, source.MaxChunksPerAttachment),
+            MaxChunkNoteChars = Math.Max(1, source.MaxChunkNoteChars),
+            MaxFinalNotesPerAgent = Math.Max(1, source.MaxFinalNotesPerAgent)
+        };
+    }
+
+    private sealed record ChunkedAttachmentPlan(
+        SessionAttachment Attachment,
+        IReadOnlyList<string> Chunks);
 
     // ── Internals ─────────────────────────────────────────────────────────────
 

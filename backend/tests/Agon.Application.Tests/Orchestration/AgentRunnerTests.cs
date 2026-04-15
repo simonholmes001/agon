@@ -100,7 +100,8 @@ public class AgentRunnerTests
         IEventBroadcaster? broadcaster = null,
         ConversationHistoryService? conversationHistory = null,
         ITokenUsageRepository? tokenUsageRepository = null,
-        int agentTimeoutSeconds = 5)
+        int agentTimeoutSeconds = 5,
+        AttachmentChunkLoopOptions? chunkLoopOptions = null)
     {
         return new AgentRunner(
             agents,
@@ -108,7 +109,8 @@ public class AgentRunnerTests
             broadcaster ?? NullBroadcaster(),
             conversationHistory ?? StubConversationHistory(),
             tokenUsageRepository,
-            agentTimeoutSeconds: agentTimeoutSeconds);
+            agentTimeoutSeconds: agentTimeoutSeconds,
+            chunkLoopOptions: chunkLoopOptions);
     }
 
     // ── Analysis Round — all agents called in parallel ────────────────────────
@@ -136,6 +138,7 @@ public class AgentRunnerTests
         var capturedContexts = new List<AgentContext>();
         var agent = Substitute.For<ICouncilAgent>();
         agent.AgentId.Returns(AgentId.GptAgent);
+        agent.ModelProvider.Returns("fake/model");
         agent.RunAsync(Arg.Do<AgentContext>(capturedContexts.Add), Arg.Any<CancellationToken>())
              .Returns(Task.FromResult(SuccessResponse(AgentId.GptAgent)));
 
@@ -149,6 +152,127 @@ public class AgentRunnerTests
         capturedContexts[0].FrictionLevel.Should().Be(40);
         capturedContexts[0].RoundNumber.Should().Be(1);
         capturedContexts[0].CritiqueTargetMessages.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task RunAnalysisRoundAsync_LongAttachment_UsesChunkPreludeAndFinalSynthesisPass()
+    {
+        var capturedContexts = new List<AgentContext>();
+        var agent = Substitute.For<ICouncilAgent>();
+        agent.AgentId.Returns(AgentId.GptAgent);
+        agent.ModelProvider.Returns("fake/model");
+        agent.RunAsync(Arg.Do<AgentContext>(capturedContexts.Add), Arg.Any<CancellationToken>())
+             .Returns(Task.FromResult(SuccessResponse(AgentId.GptAgent, patch: null)));
+
+        var runner = BuildRunner(
+            [agent],
+            chunkLoopOptions: new AttachmentChunkLoopOptions
+            {
+                Enabled = true,
+                ActivationThresholdChars = 10,
+                ChunkSizeChars = 10,
+                ChunkOverlapChars = 0,
+                UseTokenAwareSizing = false,
+                MaxChunksPerAttachment = 10,
+                MaxChunkNoteChars = 120,
+                MaxFinalNotesPerAgent = 10
+            });
+
+        var state = BuildSessionState();
+        state.Attachments.Add(BuildAttachmentWithExtractedText(
+            "large.md",
+            "text/markdown",
+            "ABCDEFGHIJ1234567890XYZ"));
+
+        await runner.RunAnalysisRoundAsync(state, CancellationToken.None);
+
+        capturedContexts.Should().HaveCount(4); // 3 chunk passes + 1 final pass
+        capturedContexts[0].MicroDirective.Should().Contain("chunk pass 1/3");
+        capturedContexts[1].MicroDirective.Should().Contain("chunk pass 2/3");
+        capturedContexts[2].MicroDirective.Should().Contain("chunk pass 3/3");
+        capturedContexts[3].MicroDirective.Should().Contain("Chunk-loop pre-processing completed");
+
+        capturedContexts[0].Attachments.Should().ContainSingle();
+        capturedContexts[0].Attachments[0].ExtractedText.Should().Be("ABCDEFGHIJ");
+        capturedContexts[1].Attachments[0].ExtractedText.Should().Be("1234567890");
+        capturedContexts[2].Attachments[0].ExtractedText.Should().Be("XYZ");
+        capturedContexts[3].Attachments[0].ExtractedText.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task RunAnalysisRoundAsync_WithQueryFocusedSecondPass_AddsFocusedPreludePasses()
+    {
+        var capturedContexts = new List<AgentContext>();
+        var agent = Substitute.For<ICouncilAgent>();
+        agent.AgentId.Returns(AgentId.GptAgent);
+        agent.ModelProvider.Returns("fake/model");
+        agent.RunAsync(Arg.Do<AgentContext>(capturedContexts.Add), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(SuccessResponse(AgentId.GptAgent, patch: null)));
+
+        var runner = BuildRunner(
+            [agent],
+            chunkLoopOptions: new AttachmentChunkLoopOptions
+            {
+                Enabled = true,
+                ActivationThresholdChars = 10,
+                ChunkSizeChars = 10,
+                ChunkOverlapChars = 0,
+                UseTokenAwareSizing = false,
+                EnableQueryFocusedSecondPass = true,
+                MaxFocusedChunksPerAttachment = 1,
+                MinQueryKeywordLength = 4,
+                MaxChunksPerAttachment = 10,
+                MaxChunkNoteChars = 120,
+                MaxFinalNotesPerAgent = 10
+            });
+
+        var state = BuildSessionState();
+        state.UserMessages.Add(new UserMessage("Please focus on keyword 1234567890", DateTimeOffset.UtcNow, 1));
+        state.Attachments.Add(BuildAttachmentWithExtractedText(
+            "large.md",
+            "text/markdown",
+            "ABCDEFGHIJ1234567890XYZ"));
+
+        await runner.RunAnalysisRoundAsync(state, CancellationToken.None);
+
+        capturedContexts.Should().HaveCount(5); // 3 base passes + 1 focused pass + 1 final pass
+        capturedContexts.Any(context => context.MicroDirective?.Contains("Focused query chunk pass 1/1", StringComparison.Ordinal) == true)
+            .Should().BeTrue();
+        capturedContexts.Any(context => context.MicroDirective?.Contains("User query focus: Please focus on keyword 1234567890", StringComparison.Ordinal) == true)
+            .Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task RunAnalysisRoundAsync_WhenChunkingDisabled_UsesLegacySinglePass()
+    {
+        var capturedContexts = new List<AgentContext>();
+        var agent = Substitute.For<ICouncilAgent>();
+        agent.AgentId.Returns(AgentId.GptAgent);
+        agent.ModelProvider.Returns("fake/model");
+        agent.RunAsync(Arg.Do<AgentContext>(capturedContexts.Add), Arg.Any<CancellationToken>())
+             .Returns(Task.FromResult(SuccessResponse(AgentId.GptAgent, patch: null)));
+
+        var runner = BuildRunner(
+            [agent],
+            chunkLoopOptions: new AttachmentChunkLoopOptions
+            {
+                Enabled = false,
+                ActivationThresholdChars = 10,
+                ChunkSizeChars = 10,
+                ChunkOverlapChars = 0,
+                UseTokenAwareSizing = false
+            });
+
+        var longText = "ABCDEFGHIJ1234567890XYZ";
+        var state = BuildSessionState();
+        state.Attachments.Add(BuildAttachmentWithExtractedText("large.md", "text/markdown", longText));
+
+        await runner.RunAnalysisRoundAsync(state, CancellationToken.None);
+
+        capturedContexts.Should().HaveCount(1);
+        capturedContexts[0].MicroDirective.Should().BeNull();
+        capturedContexts[0].Attachments.Should().ContainSingle();
+        capturedContexts[0].Attachments[0].ExtractedText.Should().Be(longText);
     }
 
     [Fact]
@@ -1310,6 +1434,11 @@ public class AgentRunnerTests
 
     private static string RepeatWord(string word, int count) =>
         string.Join(' ', Enumerable.Repeat(word, count));
+
+    private static SessionAttachment BuildAttachmentWithExtractedText(string fileName, string contentType, string extractedText)
+    {
+        return BuildAttachment(fileName, contentType) with { ExtractedText = extractedText };
+    }
 
     private static ICouncilAgent BuildCapturingAgent(
         string agentId,

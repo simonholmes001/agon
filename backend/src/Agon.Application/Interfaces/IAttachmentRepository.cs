@@ -9,19 +9,27 @@ public interface IAttachmentRepository
 {
     Task<SessionAttachment> CreateAsync(SessionAttachment attachment, CancellationToken cancellationToken = default);
 
-    Task UpdateExtractionAsync(
+    Task<SessionAttachment> UpdateExtractionStateAsync(
         Guid attachmentId,
-        string extractionStatus,
-        int extractionProgressPercent,
+        AttachmentExtractionStatus extractionStatus,
         string? extractedText,
-        string? extractionError,
+        string? extractionFailureReason,
+        CancellationToken cancellationToken = default);
+
+    Task<bool> TryTransitionExtractionStateAsync(
+        Guid attachmentId,
+        AttachmentExtractionStatus expectedCurrentStatus,
+        AttachmentExtractionStatus nextStatus,
+        string? extractedText,
+        string? extractionFailureReason,
         CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<SessionAttachment>> ListBySessionAsync(Guid sessionId, CancellationToken cancellationToken = default);
 
-    Task<IReadOnlyList<SessionAttachment>> ListByExtractionStatusesAsync(
-        IReadOnlyCollection<string> extractionStatuses,
+    Task<IReadOnlyList<SessionAttachment>> ListByExtractionStatusAsync(
+        AttachmentExtractionStatus status,
         int limit,
+        DateTimeOffset? uploadedBefore = null,
         CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<SessionAttachment>> ListExpiredAsync(

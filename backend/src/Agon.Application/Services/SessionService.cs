@@ -134,10 +134,10 @@ public sealed class SessionService : ISessionService
             return Array.Empty<SessionAttachment>();
         }
 
-        return await _attachmentRepo.ListByExtractionStatusesAsync(
-            [AttachmentExtractionStatus.Queued, AttachmentExtractionStatus.Extracting],
+        return await _attachmentRepo.ListByExtractionStatusAsync(
+            AttachmentExtractionStatus.Uploaded,
             limit,
-            cancellationToken);
+            cancellationToken: cancellationToken);
     }
 
     public async Task<SessionAttachment> SaveAttachmentAsync(
@@ -152,12 +152,11 @@ public sealed class SessionService : ISessionService
         return await _attachmentRepo.CreateAsync(attachment, cancellationToken);
     }
 
-    public async Task UpdateAttachmentExtractionAsync(
+    public async Task<SessionAttachment> UpdateAttachmentExtractionStateAsync(
         Guid attachmentId,
-        string extractionStatus,
-        int extractionProgressPercent,
+        AttachmentExtractionStatus extractionStatus,
         string? extractedText,
-        string? extractionError,
+        string? extractionFailureReason,
         CancellationToken cancellationToken = default)
     {
         if (_attachmentRepo is null)
@@ -165,16 +164,11 @@ public sealed class SessionService : ISessionService
             throw new InvalidOperationException("Attachment repository is not configured.");
         }
 
-        var normalizedStatus = NormalizeExtractionStatus(extractionStatus);
-        var normalizedProgress = NormalizeExtractionProgress(normalizedStatus, extractionProgressPercent);
-        var normalizedError = NormalizeExtractionError(normalizedStatus, extractionError);
-
-        await _attachmentRepo.UpdateExtractionAsync(
+        return await _attachmentRepo.UpdateExtractionStateAsync(
             attachmentId,
-            normalizedStatus,
-            normalizedProgress,
+            extractionStatus,
             extractedText,
-            normalizedError,
+            extractionFailureReason,
             cancellationToken);
     }
 
@@ -314,43 +308,5 @@ public sealed class SessionService : ISessionService
         state.Attachments.AddRange(attachments);
     }
 
-    private static string NormalizeExtractionStatus(string extractionStatus)
-    {
-        if (string.IsNullOrWhiteSpace(extractionStatus))
-        {
-            throw new ArgumentException("Extraction status must be provided.", nameof(extractionStatus));
-        }
-
-        var normalized = extractionStatus.Trim().ToLowerInvariant();
-        if (!AttachmentExtractionStatus.IsKnown(normalized))
-        {
-            throw new ArgumentException($"Unknown extraction status '{extractionStatus}'.", nameof(extractionStatus));
-        }
-
-        return normalized;
-    }
-
-    private static int NormalizeExtractionProgress(string extractionStatus, int extractionProgressPercent)
-    {
-        return extractionStatus switch
-        {
-            AttachmentExtractionStatus.Queued => 0,
-            AttachmentExtractionStatus.Extracting => Math.Clamp(extractionProgressPercent, 1, 99),
-            AttachmentExtractionStatus.Ready => 100,
-            AttachmentExtractionStatus.Failed => 100,
-            _ => throw new InvalidOperationException($"Unsupported extraction status '{extractionStatus}'.")
-        };
-    }
-
-    private static string? NormalizeExtractionError(string extractionStatus, string? extractionError)
-    {
-        if (extractionStatus == AttachmentExtractionStatus.Failed)
-        {
-            return string.IsNullOrWhiteSpace(extractionError)
-                ? "Attachment extraction failed."
-                : extractionError.Trim();
-        }
-
-        return null;
-    }
 }
+

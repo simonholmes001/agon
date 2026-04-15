@@ -74,7 +74,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
           cache-dependency-path: cli/package-lock.json
 
@@ -99,7 +99,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
           cache-dependency-path: cli/package-lock.json
 
@@ -148,3 +148,13 @@ jobs:
       - name: Run tests
         if: steps.check.outputs.exists == 'true'
         run: dotnet test --no-build --configuration Release --verbosity normal --collect:"XPlat Code Coverage"
+
+      - name: Run document intelligence regression gate
+        if: steps.check.outputs.exists == 'true'
+        run: >
+          dotnet test --no-build --configuration Release --verbosity normal
+          --filter "(FullyQualifiedName~AttachmentRoutingPolicyTests)
+          |(FullyQualifiedName~DocumentParseServiceTests)
+          |(FullyQualifiedName~AttachmentExtractionLifecycleIntegrationTests)
+          |(FullyQualifiedName~LargeDocumentRegressionCorpusIntegrationTests)
+          |(FullyQualifiedName~RunAnalysisRoundAsync_LongAttachment_UsesChunkPreludeAndFinalSynthesisPass)"

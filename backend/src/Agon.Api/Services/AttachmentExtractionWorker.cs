@@ -73,11 +73,10 @@ public sealed class AttachmentExtractionWorker : BackgroundService
                 {
                     await using var scope = _scopeFactory.CreateAsyncScope();
                     var sessionService = scope.ServiceProvider.GetRequiredService<ISessionService>();
-                    await sessionService.UpdateAttachmentExtractionAsync(
+                    await sessionService.UpdateAttachmentExtractionStateAsync(
                         attachment.AttachmentId,
                         AttachmentExtractionStatus.Failed,
-                        100,
-                        null,
+                        extractedText: null,
                         WorkerFailureMessage,
                         CancellationToken.None);
                 }

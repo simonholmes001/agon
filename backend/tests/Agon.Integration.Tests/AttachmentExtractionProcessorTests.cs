@@ -30,6 +30,13 @@ public class AttachmentExtractionProcessorTests
                 attachment.ContentType,
                 Arg.Any<CancellationToken>())
             .Returns("extracted text");
+        sessionService.UpdateAttachmentExtractionStateAsync(
+                Arg.Any<Guid>(),
+                Arg.Any<AttachmentExtractionStatus>(),
+                Arg.Any<string?>(),
+                Arg.Any<string?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(attachment);
 
         var sut = new AttachmentExtractionProcessor(sessionService, storage, extractor, options, logger);
 
@@ -37,18 +44,16 @@ public class AttachmentExtractionProcessorTests
         await sut.ProcessAsync(attachment, CancellationToken.None);
 
         // Assert
-        await sessionService.Received().UpdateAttachmentExtractionAsync(
+        await sessionService.Received().UpdateAttachmentExtractionStateAsync(
             attachment.AttachmentId,
             AttachmentExtractionStatus.Extracting,
-            20,
             null,
             null,
             Arg.Any<CancellationToken>());
 
-        await sessionService.Received().UpdateAttachmentExtractionAsync(
+        await sessionService.Received().UpdateAttachmentExtractionStateAsync(
             attachment.AttachmentId,
             AttachmentExtractionStatus.Ready,
-            100,
             "extracted text",
             null,
             Arg.Any<CancellationToken>());
@@ -67,6 +72,13 @@ public class AttachmentExtractionProcessorTests
 
         storage.OpenReadAsync(attachment.BlobName, Arg.Any<CancellationToken>())
             .Returns((Stream?)null);
+        sessionService.UpdateAttachmentExtractionStateAsync(
+                Arg.Any<Guid>(),
+                Arg.Any<AttachmentExtractionStatus>(),
+                Arg.Any<string?>(),
+                Arg.Any<string?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(attachment);
 
         var sut = new AttachmentExtractionProcessor(sessionService, storage, extractor, options, logger);
 
@@ -74,12 +86,11 @@ public class AttachmentExtractionProcessorTests
         await sut.ProcessAsync(attachment, CancellationToken.None);
 
         // Assert
-        await sessionService.Received().UpdateAttachmentExtractionAsync(
+        await sessionService.Received().UpdateAttachmentExtractionStateAsync(
             attachment.AttachmentId,
             AttachmentExtractionStatus.Failed,
-            100,
-            Arg.Any<string?>(),
-            Arg.Is<string>(error => !string.IsNullOrWhiteSpace(error)),
+            Arg.Is<string?>(v => v == null),
+            Arg.Is<string?>(error => !string.IsNullOrWhiteSpace(error)),
             Arg.Any<CancellationToken>());
     }
 
@@ -102,6 +113,13 @@ public class AttachmentExtractionProcessorTests
                 attachment.ContentType,
                 Arg.Any<CancellationToken>())
             .Returns<Task<string?>>(x => throw new InvalidOperationException("extract failure"));
+        sessionService.UpdateAttachmentExtractionStateAsync(
+                Arg.Any<Guid>(),
+                Arg.Any<AttachmentExtractionStatus>(),
+                Arg.Any<string?>(),
+                Arg.Any<string?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(attachment);
 
         var sut = new AttachmentExtractionProcessor(sessionService, storage, extractor, options, logger);
 
@@ -109,39 +127,11 @@ public class AttachmentExtractionProcessorTests
         await sut.ProcessAsync(attachment, CancellationToken.None);
 
         // Assert
-        await sessionService.Received().UpdateAttachmentExtractionAsync(
+        await sessionService.Received().UpdateAttachmentExtractionStateAsync(
             attachment.AttachmentId,
             AttachmentExtractionStatus.Failed,
-            100,
-            Arg.Is<string?>(value => value == null),
-            Arg.Is<string>(error => error.Contains("Extraction failed", StringComparison.Ordinal)),
-            Arg.Any<CancellationToken>());
-    }
-
-    [Fact]
-    public async Task ProcessAsync_Should_MarkFailed_When_File_Exceeds_Extraction_Size_Limit()
-    {
-        var attachment = BuildAttachment() with
-        {
-            SizeBytes = 5 * 1024 * 1024
-        };
-        var sessionService = Substitute.For<ISessionService>();
-        var storage = Substitute.For<IAttachmentStorageService>();
-        var extractor = Substitute.For<IAttachmentTextExtractor>();
-        var options = BuildOptions(maxExtractionFileBytes: 1024);
-        var logger = Substitute.For<ILogger<AttachmentExtractionProcessor>>();
-
-        var sut = new AttachmentExtractionProcessor(sessionService, storage, extractor, options, logger);
-
-        await sut.ProcessAsync(attachment, CancellationToken.None);
-
-        await storage.DidNotReceive().OpenReadAsync(Arg.Any<string>(), Arg.Any<CancellationToken>());
-        await sessionService.Received().UpdateAttachmentExtractionAsync(
-            attachment.AttachmentId,
-            AttachmentExtractionStatus.Failed,
-            100,
-            Arg.Is<string?>(value => value == null),
-            Arg.Is<string>(error => error.Contains("extraction limit", StringComparison.OrdinalIgnoreCase)),
+            Arg.Is<string?>(v => v == null),
+            Arg.Is<string?>(error => error != null && error.Contains("Extraction failed", StringComparison.Ordinal)),
             Arg.Any<CancellationToken>());
     }
 
@@ -163,17 +153,23 @@ public class AttachmentExtractionProcessorTests
                 attachment.ContentType,
                 Arg.Any<CancellationToken>())
             .Returns<Task<string?>>(x => throw new InvalidOperationException("sensitive internals"));
+        sessionService.UpdateAttachmentExtractionStateAsync(
+                Arg.Any<Guid>(),
+                Arg.Any<AttachmentExtractionStatus>(),
+                Arg.Any<string?>(),
+                Arg.Any<string?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(attachment);
 
         var sut = new AttachmentExtractionProcessor(sessionService, storage, extractor, options, logger);
 
         await sut.ProcessAsync(attachment, CancellationToken.None);
 
-        await sessionService.Received().UpdateAttachmentExtractionAsync(
+        await sessionService.Received().UpdateAttachmentExtractionStateAsync(
             attachment.AttachmentId,
             AttachmentExtractionStatus.Failed,
-            100,
-            Arg.Is<string?>(value => value == null),
-            Arg.Is<string>(error => error == "Extraction failed. Unsupported format or processing error."),
+            Arg.Is<string?>(v => v == null),
+            Arg.Is<string?>(error => error == "Extraction failed. Unsupported format or processing error."),
             Arg.Any<CancellationToken>());
     }
 
@@ -190,14 +186,11 @@ public class AttachmentExtractionProcessorTests
             AccessUrl: "/sessions/1/attachments/1/content",
             ExtractedText: null,
             UploadedAt: DateTimeOffset.UtcNow,
-            ExtractionStatus: AttachmentExtractionStatus.Queued,
-            ExtractionProgressPercent: 0,
-            ExtractionError: null,
-            ExtractionUpdatedAt: DateTimeOffset.UtcNow);
+            ExtractionStatus: AttachmentExtractionStatus.Uploaded);
 
-    private static AttachmentExtractionOptions BuildOptions(int maxExtractionFileBytes = 2 * 1024 * 1024) =>
+    private static AttachmentExtractionOptions BuildOptions(int maxExtractedTextChars = 200000) =>
         new()
         {
-            MaxExtractionFileBytes = maxExtractionFileBytes
+            MaxExtractedTextChars = maxExtractedTextChars
         };
 }

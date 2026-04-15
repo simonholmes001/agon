@@ -7,6 +7,7 @@ using FluentAssertions;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using NSubstitute;
+using System.Reflection;
 using AgonAgentResponse = Agon.Application.Models.AgentResponse;
 using MafAgentResponse = Microsoft.Agents.AI.AgentResponse;
 
@@ -170,6 +171,104 @@ public class MafCouncilAgentTests
     }
 
     [Fact]
+    public void BuildPrompt_WithLongAttachmentExtractedText_IncludesContentBeyondLegacyExcerptLimit()
+    {
+        // Arrange
+        var marker = "TAIL-MARKER-BEYOND-2000";
+        var extractedText = new string('A', 2100) + marker;
+        var attachment = new SessionAttachment(
+            AttachmentId: Guid.NewGuid(),
+            SessionId: Guid.NewGuid(),
+            UserId: Guid.NewGuid(),
+            FileName: "large.pdf",
+            ContentType: "application/pdf",
+            SizeBytes: 1024,
+            BlobName: "blob",
+            BlobUri: "https://example.blob.core.windows.net/session-attachments/blob",
+            AccessUrl: "/sessions/1/attachments/1/content",
+            ExtractedText: extractedText,
+            UploadedAt: DateTimeOffset.UtcNow);
+
+        var context = AgentContext.ForAnalysis(
+            sessionId: attachment.SessionId,
+            truthMap: new TruthMap(),
+            frictionLevel: 50,
+            roundNumber: 1,
+            attachments: [attachment]);
+
+        // Act
+        var prompt = BuildPromptForTest(context);
+
+        // Assert
+        prompt.Should().Contain(marker);
+    }
+
+    [Fact]
+    public void BuildPrompt_TargetedFailedAttachment_EnforcesDeterministicUnavailableMessage()
+    {
+        var attachment = new SessionAttachment(
+            AttachmentId: Guid.NewGuid(),
+            SessionId: Guid.NewGuid(),
+            UserId: Guid.NewGuid(),
+            FileName: "report.pdf",
+            ContentType: "application/pdf",
+            SizeBytes: 1024,
+            BlobName: "blob",
+            BlobUri: "https://example.blob.core.windows.net/session-attachments/blob",
+            AccessUrl: "/sessions/1/attachments/1/content",
+            ExtractedText: null,
+            UploadedAt: DateTimeOffset.UtcNow,
+            ExtractionStatus: AttachmentExtractionStatus.Failed,
+            ExtractionFailureReason: "Attachment extraction timed out.");
+        var context = AgentContext.ForClarification(
+            sessionId: attachment.SessionId,
+            truthMap: new TruthMap(),
+            frictionLevel: 50,
+            roundNumber: 1,
+            userMessages: [new UserMessage("[File #1] report.pdf", DateTimeOffset.UtcNow, 1)],
+            attachments: [attachment]);
+
+        var prompt = BuildPromptForTest(context);
+
+        prompt.Should().Contain("Extraction status: failed");
+        prompt.Should().Contain("Extraction note: Attachment extraction timed out.");
+        prompt.Should().Contain("Deterministic handling required: the targeted attachment report.pdf is not ready for analysis.");
+        prompt.Should().Contain("I can't analyze report.pdf yet because text extraction failed (Attachment extraction timed out)");
+        prompt.Should().Contain("Do not claim inability to access secure URLs.");
+    }
+
+    [Fact]
+    public void BuildPrompt_TargetedExtractingAttachment_UsesInProgressReasonTemplate()
+    {
+        var attachment = new SessionAttachment(
+            AttachmentId: Guid.NewGuid(),
+            SessionId: Guid.NewGuid(),
+            UserId: Guid.NewGuid(),
+            FileName: "brief.docx",
+            ContentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            SizeBytes: 1024,
+            BlobName: "blob",
+            BlobUri: "https://example.blob.core.windows.net/session-attachments/blob",
+            AccessUrl: "/sessions/1/attachments/1/content",
+            ExtractedText: null,
+            UploadedAt: DateTimeOffset.UtcNow,
+            ExtractionStatus: AttachmentExtractionStatus.Extracting);
+        var context = AgentContext.ForClarification(
+            sessionId: attachment.SessionId,
+            truthMap: new TruthMap(),
+            frictionLevel: 50,
+            roundNumber: 1,
+            userMessages: [new UserMessage("Please analyze this document", DateTimeOffset.UtcNow, 1)],
+            attachments: [attachment]);
+
+        var prompt = BuildPromptForTest(context);
+
+        prompt.Should().Contain("Extraction status: extracting");
+        prompt.Should().Contain("Extraction note: Extraction is currently in progress.");
+        prompt.Should().Contain("I can't analyze brief.docx yet because its extraction is still in progress.");
+    }
+
+    [Fact]
     public void MergeProviderUsage_WithUsageDetails_PrefersProviderCounts()
     {
         var parsed = new AgonAgentResponse(
@@ -236,5 +335,18 @@ public class MafCouncilAgentTests
         var merged = MafCouncilAgent.MergeProviderUsage(parsed, usage: null);
 
         merged.Should().BeEquivalentTo(parsed);
+    }
+
+    private string BuildPromptForTest(AgentContext context)
+    {
+        var method = typeof(MafCouncilAgent).GetMethod(
+            "BuildPrompt",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+
+        method.Should().NotBeNull("BuildPrompt is required for prompt assembly behavior tests.");
+        var result = method!.Invoke(_agent, [context]);
+
+        result.Should().BeOfType<string>();
+        return (string)result!;
     }
 }

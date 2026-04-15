@@ -33,10 +33,10 @@ public sealed class AttachmentRepository : IAttachmentRepository
             AccessUrl = attachment.AccessUrl,
             ExtractedText = attachment.ExtractedText,
             UploadedAt = attachment.UploadedAt.UtcDateTime,
-            ExtractionStatus = NormalizeKnownStatus(attachment.ExtractionStatus),
+            ExtractionStatus = ToStorageStatus(attachment.ExtractionStatus),
+            ExtractionFailureReason = attachment.ExtractionFailureReason,
             ExtractionProgressPercent = Math.Clamp(attachment.ExtractionProgressPercent, 0, 100),
-            ExtractionError = attachment.ExtractionError,
-            ExtractionUpdatedAt = (attachment.ExtractionUpdatedAt ?? attachment.UploadedAt).UtcDateTime
+            ExtractionUpdatedAt = attachment.ExtractionUpdatedAt?.UtcDateTime
         };
 
         _dbContext.SessionAttachments.Add(entity);
@@ -45,63 +45,92 @@ public sealed class AttachmentRepository : IAttachmentRepository
         return attachment;
     }
 
-    public async Task UpdateExtractionAsync(
+    public async Task<SessionAttachment> UpdateExtractionStateAsync(
         Guid attachmentId,
-        string extractionStatus,
-        int extractionProgressPercent,
+        AttachmentExtractionStatus extractionStatus,
         string? extractedText,
-        string? extractionError,
+        string? extractionFailureReason,
         CancellationToken cancellationToken = default)
     {
         var entity = await _dbContext.SessionAttachments
-            .FirstOrDefaultAsync(a => a.Id == attachmentId, cancellationToken);
+            .SingleOrDefaultAsync(a => a.Id == attachmentId, cancellationToken);
         if (entity is null)
         {
-            return;
+            throw new InvalidOperationException($"Attachment {attachmentId} not found.");
         }
 
-        var normalizedStatus = NormalizeKnownStatus(extractionStatus);
-        entity.ExtractionStatus = normalizedStatus;
-        entity.ExtractionProgressPercent = Math.Clamp(extractionProgressPercent, 0, 100);
-        entity.ExtractionError = extractionError;
+        var currentStatus = ParseStorageStatus(entity.ExtractionStatus);
+        if (!CanTransition(currentStatus, extractionStatus))
+        {
+            return ToModel(entity);
+        }
+
+        entity.ExtractionStatus = ToStorageStatus(extractionStatus);
+        entity.ExtractedText = extractedText;
+        entity.ExtractionFailureReason = extractionFailureReason;
+        entity.ExtractionProgressPercent = extractionStatus switch
+        {
+            AttachmentExtractionStatus.Extracting => Math.Clamp(entity.ExtractionProgressPercent, 1, 99),
+            AttachmentExtractionStatus.Ready => 100,
+            _ => 0
+        };
         entity.ExtractionUpdatedAt = DateTime.UtcNow;
 
-        if (extractedText is not null || normalizedStatus == AttachmentExtractionStatus.Ready)
-        {
-            entity.ExtractedText = extractedText;
-        }
-
         await _dbContext.SaveChangesAsync(cancellationToken);
+        return ToModel(entity);
     }
 
-    public async Task<IReadOnlyList<SessionAttachment>> ListByExtractionStatusesAsync(
-        IReadOnlyCollection<string> extractionStatuses,
-        int limit,
+    public async Task<bool> TryTransitionExtractionStateAsync(
+        Guid attachmentId,
+        AttachmentExtractionStatus expectedCurrentStatus,
+        AttachmentExtractionStatus nextStatus,
+        string? extractedText,
+        string? extractionFailureReason,
         CancellationToken cancellationToken = default)
     {
-        if (limit <= 0 || extractionStatuses.Count == 0)
+        if (!CanTransition(expectedCurrentStatus, nextStatus))
         {
-            return Array.Empty<SessionAttachment>();
+            return false;
         }
 
-        var normalizedStatuses = extractionStatuses
-            .Where(status => !string.IsNullOrWhiteSpace(status))
-            .Select(NormalizeKnownStatus)
-            .Distinct(StringComparer.Ordinal)
-            .ToArray();
-        if (normalizedStatuses.Length == 0)
+        if (!SupportsSetBasedUpdates())
         {
-            return Array.Empty<SessionAttachment>();
+            var entity = await _dbContext.SessionAttachments
+                .SingleOrDefaultAsync(a => a.Id == attachmentId, cancellationToken);
+            if (entity is null)
+            {
+                return false;
+            }
+
+            if (!string.Equals(
+                    entity.ExtractionStatus,
+                    ToStorageStatus(expectedCurrentStatus),
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            entity.ExtractionStatus = ToStorageStatus(nextStatus);
+            entity.ExtractedText = extractedText;
+            entity.ExtractionFailureReason = extractionFailureReason;
+            entity.ExtractionUpdatedAt = DateTime.UtcNow;
+            await _dbContext.SaveChangesAsync(cancellationToken);
+            return true;
         }
 
-        var entities = await _dbContext.SessionAttachments
-            .Where(a => normalizedStatuses.Contains(a.ExtractionStatus))
-            .OrderBy(a => a.UploadedAt)
-            .Take(limit)
-            .AsNoTracking()
-            .ToListAsync(cancellationToken);
+        var expectedStorageStatus = ToStorageStatus(expectedCurrentStatus);
+        var nextStorageStatus = ToStorageStatus(nextStatus);
 
-        return entities.Select(ToModel).ToList();
+        var affected = await _dbContext.SessionAttachments
+            .Where(a => a.Id == attachmentId && a.ExtractionStatus == expectedStorageStatus)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(a => a.ExtractionStatus, nextStorageStatus)
+                .SetProperty(a => a.ExtractedText, extractedText)
+                .SetProperty(a => a.ExtractionFailureReason, extractionFailureReason)
+                .SetProperty(a => a.ExtractionUpdatedAt, DateTime.UtcNow),
+                cancellationToken);
+
+        return affected == 1;
     }
 
     public async Task<IReadOnlyList<SessionAttachment>> ListBySessionAsync(
@@ -111,6 +140,35 @@ public sealed class AttachmentRepository : IAttachmentRepository
         var entities = await _dbContext.SessionAttachments
             .Where(a => a.SessionId == sessionId)
             .OrderBy(a => a.UploadedAt)
+            .AsNoTracking()
+            .ToListAsync(cancellationToken);
+
+        return entities.Select(ToModel).ToList();
+    }
+
+    public async Task<IReadOnlyList<SessionAttachment>> ListByExtractionStatusAsync(
+        AttachmentExtractionStatus status,
+        int limit,
+        DateTimeOffset? uploadedBefore = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (limit <= 0)
+        {
+            return Array.Empty<SessionAttachment>();
+        }
+
+        var statusValue = ToStorageStatus(status);
+        var query = _dbContext.SessionAttachments
+            .Where(a => a.ExtractionStatus == statusValue);
+
+        if (uploadedBefore is not null)
+        {
+            query = query.Where(a => a.UploadedAt <= uploadedBefore.Value.UtcDateTime);
+        }
+
+        var entities = await query
+            .OrderBy(a => a.UploadedAt)
+            .Take(limit)
             .AsNoTracking()
             .ToListAsync(cancellationToken);
 
@@ -157,39 +215,51 @@ public sealed class AttachmentRepository : IAttachmentRepository
             entity.AccessUrl,
             entity.ExtractedText,
             DateTime.SpecifyKind(entity.UploadedAt, DateTimeKind.Utc),
-            NormalizeStatusForRead(entity.ExtractionStatus),
+            ParseStorageStatus(entity.ExtractionStatus),
+            entity.ExtractionFailureReason,
             Math.Clamp(entity.ExtractionProgressPercent, 0, 100),
-            entity.ExtractionError,
             entity.ExtractionUpdatedAt is null
                 ? null
                 : DateTime.SpecifyKind(entity.ExtractionUpdatedAt.Value, DateTimeKind.Utc));
 
-    private static string NormalizeKnownStatus(string? extractionStatus)
+    private static string ToStorageStatus(AttachmentExtractionStatus status) =>
+        status.ToString().ToLowerInvariant();
+
+    private static AttachmentExtractionStatus ParseStorageStatus(string? value)
     {
-        if (string.IsNullOrWhiteSpace(extractionStatus))
+        if (string.IsNullOrWhiteSpace(value))
         {
-            throw new ArgumentException("Extraction status must be provided.", nameof(extractionStatus));
+            return AttachmentExtractionStatus.Uploaded;
         }
 
-        var normalized = extractionStatus.Trim().ToLowerInvariant();
-        if (!AttachmentExtractionStatus.IsKnown(normalized))
-        {
-            throw new ArgumentException($"Unknown extraction status '{extractionStatus}'.", nameof(extractionStatus));
-        }
-
-        return normalized;
+        return Enum.TryParse<AttachmentExtractionStatus>(value, ignoreCase: true, out var parsed)
+            ? parsed
+            : AttachmentExtractionStatus.Uploaded;
     }
 
-    private static string NormalizeStatusForRead(string? extractionStatus)
+    private static bool CanTransition(AttachmentExtractionStatus current, AttachmentExtractionStatus next)
     {
-        if (string.IsNullOrWhiteSpace(extractionStatus))
+        if (current == next)
         {
-            return AttachmentExtractionStatus.Failed;
+            return true;
         }
 
-        var normalized = extractionStatus.Trim().ToLowerInvariant();
-        return AttachmentExtractionStatus.IsKnown(normalized)
-            ? normalized
-            : AttachmentExtractionStatus.Failed;
+        return current switch
+        {
+            AttachmentExtractionStatus.Uploaded =>
+                next is AttachmentExtractionStatus.Extracting or AttachmentExtractionStatus.Failed,
+            AttachmentExtractionStatus.Extracting =>
+                next is AttachmentExtractionStatus.Uploaded or AttachmentExtractionStatus.Ready or AttachmentExtractionStatus.Failed,
+            AttachmentExtractionStatus.Ready => false,
+            AttachmentExtractionStatus.Failed => false,
+            _ => false
+        };
+    }
+
+    private bool SupportsSetBasedUpdates()
+    {
+        var providerName = _dbContext.Database.ProviderName;
+        return !string.IsNullOrWhiteSpace(providerName)
+            && !providerName.Contains("InMemory", StringComparison.OrdinalIgnoreCase);
     }
 }

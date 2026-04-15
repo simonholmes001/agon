@@ -25,6 +25,78 @@ public class AttachmentTextExtractorTests
     }
 
     [Fact]
+    public async Task ExtractAsync_TextFile_TruncatesToConfiguredMaxExtractedTextChars()
+    {
+        var extractor = CreateExtractor(new AttachmentExtractionOptions
+        {
+            MaxExtractedTextChars = 50
+        });
+
+        var input = new string('x', 120);
+        var bytes = Encoding.UTF8.GetBytes(input);
+
+        var result = await extractor.ExtractAsync(bytes, "notes.txt", "text/plain");
+
+        result.Should().NotBeNull();
+        result!.Length.Should().Be(50);
+        result.Should().Be(new string('x', 50));
+    }
+
+    [Fact]
+    public async Task ExtractAsync_TextContentType_WithDocumentExtension_DoesNotInvokeDocumentIntelligence()
+    {
+        var handler = new SequenceHandler([]);
+        var extractor = CreateExtractor(new AttachmentExtractionOptions
+        {
+            DocumentIntelligence = new DocumentIntelligenceExtractionOptions
+            {
+                Enabled = true,
+                Endpoint = "https://example.cognitiveservices.azure.com",
+                UseManagedIdentity = false,
+                ApiKey = "test-doc-key",
+                PollIntervalMs = 1,
+                MaxPollAttempts = 2
+            }
+        }, handler);
+
+        var bytes = Encoding.UTF8.GetBytes("plain text content");
+        var result = await extractor.ExtractAsync(bytes, "notes.pdf", "text/plain");
+
+        result.Should().Be("plain text content");
+        handler.CallCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task ExtractAsync_TextContentType_WithImageExtension_DoesNotInvokeVisionOrDocumentIntelligence()
+    {
+        var handler = new SequenceHandler([]);
+        var extractor = CreateExtractor(new AttachmentExtractionOptions
+        {
+            DocumentIntelligence = new DocumentIntelligenceExtractionOptions
+            {
+                Enabled = true,
+                Endpoint = "https://example.cognitiveservices.azure.com",
+                UseManagedIdentity = false,
+                ApiKey = "test-doc-key",
+                PollIntervalMs = 1,
+                MaxPollAttempts = 2
+            },
+            OpenAiVision = new OpenAiVisionExtractionOptions
+            {
+                Enabled = true,
+                ApiKey = "test-key",
+                Model = "gpt-4o-mini"
+            }
+        }, handler);
+
+        var bytes = Encoding.UTF8.GetBytes("{\"ok\":true}");
+        var result = await extractor.ExtractAsync(bytes, "payload.png", "application/json");
+
+        result.Should().Be("{\"ok\":true}");
+        handler.CallCount.Should().Be(0);
+    }
+
+    [Fact]
     public async Task ExtractAsync_DocumentWithoutEndpoint_ReturnsNull()
     {
         var extractor = CreateExtractor(new AttachmentExtractionOptions
@@ -113,6 +185,53 @@ public class AttachmentTextExtractorTests
     }
 
     [Fact]
+    public async Task ExtractAsync_ImageVisionTransient429_RetriesAndSucceeds()
+    {
+        var handler = new SequenceHandler([
+            _ => new HttpResponseMessage((HttpStatusCode)429)
+            {
+                Content = new StringContent("{\"error\":{\"message\":\"rate limited\"}}", Encoding.UTF8, "application/json")
+            },
+            _ => new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("""
+                {
+                  "choices": [
+                    {
+                      "message": {
+                        "content": "Detected: Quarterly KPI chart"
+                      }
+                    }
+                  ]
+                }
+                """, Encoding.UTF8, "application/json")
+            }
+        ]);
+
+        var extractor = CreateExtractor(new AttachmentExtractionOptions
+        {
+            OpenAiVision = new OpenAiVisionExtractionOptions
+            {
+                Enabled = true,
+                ApiKey = "test-key",
+                Model = "gpt-4o-mini"
+            },
+            TransientRetry = new AttachmentTransientRetryOptions
+            {
+                MaxAttempts = 2,
+                BaseDelayMs = 1,
+                MaxDelayMs = 1
+            }
+        }, handler);
+
+        var bytes = new byte[] { 1, 2, 3, 4, 5 };
+        var result = await extractor.ExtractAsync(bytes, "chart.png", "image/png");
+
+        result.Should().Contain("Quarterly KPI chart");
+        handler.CallCount.Should().Be(2);
+    }
+
+    [Fact]
     public async Task ExtractAsync_ImageWithoutVisionKey_FallsBackToDocumentIntelligence()
     {
         var handler = new SequenceHandler([
@@ -162,6 +281,116 @@ public class AttachmentTextExtractorTests
 
         result.Should().Contain("Q1 Revenue");
         handler.CallCount.Should().Be(2);
+    }
+
+    [Fact]
+    public async Task ExtractAsync_DocumentIntelligenceStartTransient503_RetriesAndSucceeds()
+    {
+        var handler = new SequenceHandler([
+            _ => new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)
+            {
+                Content = new StringContent("{\"error\":\"unavailable\"}", Encoding.UTF8, "application/json")
+            },
+            _ => new HttpResponseMessage(HttpStatusCode.Accepted)
+            {
+                Headers =
+                {
+                    Location = new Uri("https://example.cognitiveservices.azure.com/ops/987")
+                },
+                Content = new StringContent("{}", Encoding.UTF8, "application/json")
+            },
+            _ => new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("""
+                {
+                  "status": "succeeded",
+                  "analyzeResult": {
+                    "content": "Recovered extraction text"
+                  }
+                }
+                """, Encoding.UTF8, "application/json")
+            }
+        ]);
+
+        var extractor = CreateExtractor(new AttachmentExtractionOptions
+        {
+            DocumentIntelligence = new DocumentIntelligenceExtractionOptions
+            {
+                Enabled = true,
+                Endpoint = "https://example.cognitiveservices.azure.com",
+                UseManagedIdentity = false,
+                ApiKey = "test-doc-key",
+                PollIntervalMs = 1,
+                MaxPollAttempts = 2
+            },
+            TransientRetry = new AttachmentTransientRetryOptions
+            {
+                MaxAttempts = 2,
+                BaseDelayMs = 1,
+                MaxDelayMs = 1
+            }
+        }, handler);
+
+        var bytes = Encoding.UTF8.GetBytes("%PDF-1.7");
+        var result = await extractor.ExtractAsync(bytes, "retry.pdf", "application/pdf");
+
+        result.Should().Contain("Recovered extraction text");
+        handler.CallCount.Should().Be(3);
+    }
+
+    [Fact]
+    public async Task ExtractAsync_DocumentIntelligencePollTransient503_RetriesAndSucceeds()
+    {
+        var handler = new SequenceHandler([
+            _ => new HttpResponseMessage(HttpStatusCode.Accepted)
+            {
+                Headers =
+                {
+                    Location = new Uri("https://example.cognitiveservices.azure.com/ops/654")
+                },
+                Content = new StringContent("{}", Encoding.UTF8, "application/json")
+            },
+            _ => new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)
+            {
+                Content = new StringContent("{\"error\":\"temporary\"}", Encoding.UTF8, "application/json")
+            },
+            _ => new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("""
+                {
+                  "status": "succeeded",
+                  "analyzeResult": {
+                    "content": "Poll retry succeeded"
+                  }
+                }
+                """, Encoding.UTF8, "application/json")
+            }
+        ]);
+
+        var extractor = CreateExtractor(new AttachmentExtractionOptions
+        {
+            DocumentIntelligence = new DocumentIntelligenceExtractionOptions
+            {
+                Enabled = true,
+                Endpoint = "https://example.cognitiveservices.azure.com",
+                UseManagedIdentity = false,
+                ApiKey = "test-doc-key",
+                PollIntervalMs = 1,
+                MaxPollAttempts = 1
+            },
+            TransientRetry = new AttachmentTransientRetryOptions
+            {
+                MaxAttempts = 2,
+                BaseDelayMs = 1,
+                MaxDelayMs = 1
+            }
+        }, handler);
+
+        var bytes = Encoding.UTF8.GetBytes("%PDF-1.7");
+        var result = await extractor.ExtractAsync(bytes, "poll-retry.pdf", "application/pdf");
+
+        result.Should().Contain("Poll retry succeeded");
+        handler.CallCount.Should().Be(3);
     }
 
     [Fact]

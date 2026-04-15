@@ -45,6 +45,7 @@ Naming follows Azure CAF guidance:
 - `appGatewaySkuTier`: `Basic` (default in this branch)
 - `appGatewayPublicHostName`: optional but recommended (for HTTPS listener + host validation)
 - `appGatewaySslPolicyName`: `AppGwSslPolicy20220101S` (default)
+- `documentPipelineAlertsEnabled`: `true` (custom parser/chunk-loop alerts enabled)
 
 ## One-Time Azure Identity Setup (OIDC)
 
@@ -244,6 +245,34 @@ Azure App Service deployments use managed identity mode by default via app setti
 - `Storage__UseManagedIdentity=true`
 - `Storage__AttachmentBlobServiceUri=<attachmentStorageBlobEndpoint>`
 - `Storage__AttachmentContainer=<attachmentContainerName>`
+- `AttachmentProcessing__MaxExtractedTextChars=<attachmentProcessingMaxExtractedTextChars>` (default `200000`)
+- `AttachmentProcessing__Validation__RejectUnsupportedFormats=<attachmentProcessingValidationRejectUnsupportedFormats>` (default `true`)
+- `AttachmentProcessing__Validation__MaxUploadBytes=<attachmentProcessingValidationMaxUploadBytes>` (default `26214400`)
+- `AttachmentProcessing__Validation__MaxTextUploadBytes=<attachmentProcessingValidationMaxTextUploadBytes>` (default `10485760`)
+- `AttachmentProcessing__Validation__MaxDocumentUploadBytes=<attachmentProcessingValidationMaxDocumentUploadBytes>` (default `26214400`)
+- `AttachmentProcessing__Validation__MaxImageUploadBytes=<attachmentProcessingValidationMaxImageUploadBytes>` (default `20971520`)
+- `AttachmentProcessing__AsyncExtraction__Enabled=<attachmentProcessingAsyncExtractionEnabled>` (default `true`)
+- `AttachmentProcessing__AsyncExtraction__BatchSize=<attachmentProcessingAsyncExtractionQueueCapacity>` (default `200`)
+- `AttachmentProcessing__AsyncExtraction__PollIntervalMs=<from appsettings default or explicit app setting override>` (default `1000`)
+- `AttachmentProcessing__AsyncExtraction__RequeueStaleExtractingEnabled=<from appsettings default or explicit app setting override>` (default `true`)
+- `AttachmentProcessing__AsyncExtraction__StaleExtractingAfterMinutes=<from appsettings default or explicit app setting override>` (default `15`)
+- `AttachmentProcessing__AsyncExtraction__ReconcileIntervalMs=<from appsettings default or explicit app setting override>` (default `30000`)
+- `AttachmentProcessing__TransientRetry__MaxAttempts=<attachmentProcessingTransientRetryMaxAttempts>` (default `3`)
+- `AttachmentProcessing__TransientRetry__BaseDelayMs=<attachmentProcessingTransientRetryBaseDelayMs>` (default `250`)
+- `AttachmentProcessing__TransientRetry__MaxDelayMs=<attachmentProcessingTransientRetryMaxDelayMs>` (default `2000`)
+- `AttachmentProcessing__ChunkLoop__Enabled=<attachmentProcessingChunkLoopEnabled>` (default `true`)
+- `AttachmentProcessing__ChunkLoop__ActivationThresholdChars=<attachmentProcessingChunkLoopActivationThresholdChars>` (default `14000`)
+- `AttachmentProcessing__ChunkLoop__ChunkSizeChars=<attachmentProcessingChunkLoopChunkSizeChars>` (default `12000`)
+- `AttachmentProcessing__ChunkLoop__ChunkOverlapChars=<attachmentProcessingChunkLoopChunkOverlapChars>` (default `1000`)
+- `AttachmentProcessing__ChunkLoop__UseTokenAwareSizing=<attachmentProcessingChunkLoopUseTokenAwareSizing>` (default `true`)
+- `AttachmentProcessing__ChunkLoop__TargetChunkTokens=<attachmentProcessingChunkLoopTargetChunkTokens>` (default `3000`)
+- `AttachmentProcessing__ChunkLoop__EstimatedCharsPerToken=<attachmentProcessingChunkLoopEstimatedCharsPerToken>` (default `4`)
+- `AttachmentProcessing__ChunkLoop__EnableQueryFocusedSecondPass=<attachmentProcessingChunkLoopEnableQueryFocusedSecondPass>` (default `true`)
+- `AttachmentProcessing__ChunkLoop__MaxFocusedChunksPerAttachment=<attachmentProcessingChunkLoopMaxFocusedChunksPerAttachment>` (default `3`)
+- `AttachmentProcessing__ChunkLoop__MinQueryKeywordLength=<attachmentProcessingChunkLoopMinQueryKeywordLength>` (default `4`)
+- `AttachmentProcessing__ChunkLoop__MaxChunksPerAttachment=<attachmentProcessingChunkLoopMaxChunksPerAttachment>` (default `20`)
+- `AttachmentProcessing__ChunkLoop__MaxChunkNoteChars=<attachmentProcessingChunkLoopMaxChunkNoteChars>` (default `1200`)
+- `AttachmentProcessing__ChunkLoop__MaxFinalNotesPerAgent=<attachmentProcessingChunkLoopMaxFinalNotesPerAgent>` (default `8`)
 
 Local development can still use connection-string mode:
 - `ConnectionStrings__BlobStorage` (or `BLOB_STORAGE_CONNECTION_STRING` placeholder source)
@@ -297,6 +326,8 @@ Both infra workflows now include a preflight warning step to detect this conditi
   - `infrastructure/runbooks/app-gateway-https-cutover.md`
 - Observability and release-gate queries:
   - `infrastructure/runbooks/app-gateway-https-observability.md`
+- Document pipeline v2 rollout, migration, and operator diagnostics:
+  - `backend/docs/document-pipeline-v2-rollout-runbook.md`
 
 ## Security Posture (Dev Baseline)
 

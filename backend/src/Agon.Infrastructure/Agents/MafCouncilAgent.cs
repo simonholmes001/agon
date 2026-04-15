@@ -194,15 +194,18 @@ public sealed class MafCouncilAgent : ICouncilAgent
                     sb.AppendLine("   Targeted by latest user request: yes");
                 }
                 sb.AppendLine($"   Secure URL: {attachment.AccessUrl}");
-                if (!string.IsNullOrWhiteSpace(attachment.ExtractedText))
+                sb.AppendLine($"   Extraction status: {ToPromptExtractionStatus(attachment.ExtractionStatus)}");
+                if (HasUsableExtractedText(attachment))
                 {
-                    var snippet = attachment.ExtractedText.Length > 2000
-                        ? attachment.ExtractedText[..2000] + "..."
-                        : attachment.ExtractedText;
-                    sb.AppendLine("   Extracted text excerpt:");
+                    sb.AppendLine("   Extracted text:");
                     sb.AppendLine("   ```text");
-                    sb.AppendLine(snippet);
+                    sb.AppendLine(attachment.ExtractedText);
                     sb.AppendLine("   ```");
+                }
+                else
+                {
+                    var unavailableReason = BuildPromptExtractionUnavailableReason(attachment);
+                    sb.AppendLine($"   Extraction note: {unavailableReason}");
                 }
                 sb.AppendLine();
             }
@@ -210,6 +213,12 @@ public sealed class MafCouncilAgent : ICouncilAgent
             if (targetedAttachment is not null)
             {
                 sb.AppendLine($"Prioritize {targetedAttachment.FileName} unless the user explicitly asks for multiple attachments.");
+                if (!HasUsableExtractedText(targetedAttachment))
+                {
+                    sb.AppendLine($"Deterministic handling required: the targeted attachment {targetedAttachment.FileName} is not ready for analysis.");
+                    sb.AppendLine($"First sentence requirement: \"I can't analyze {targetedAttachment.FileName} yet because {BuildUserFacingUnavailableReason(targetedAttachment)}.\"");
+                    sb.AppendLine("Do not claim inability to access secure URLs.");
+                }
             }
             sb.AppendLine();
         }
@@ -316,5 +325,41 @@ public sealed class MafCouncilAgent : ICouncilAgent
         }
 
         return context.Attachments[^1];
+    }
+
+    private static bool HasUsableExtractedText(SessionAttachment attachment)
+    {
+        return !string.IsNullOrWhiteSpace(attachment.ExtractedText);
+    }
+
+    private static string ToPromptExtractionStatus(AttachmentExtractionStatus status)
+    {
+        return status.ToString().ToLowerInvariant();
+    }
+
+    private static string BuildPromptExtractionUnavailableReason(SessionAttachment attachment)
+    {
+        return attachment.ExtractionStatus switch
+        {
+            AttachmentExtractionStatus.Uploaded => "Extraction has not started yet.",
+            AttachmentExtractionStatus.Extracting => "Extraction is currently in progress.",
+            AttachmentExtractionStatus.Failed => string.IsNullOrWhiteSpace(attachment.ExtractionFailureReason)
+                ? "Extraction failed."
+                : attachment.ExtractionFailureReason!,
+            _ => "No extracted text is currently available."
+        };
+    }
+
+    private static string BuildUserFacingUnavailableReason(SessionAttachment attachment)
+    {
+        return attachment.ExtractionStatus switch
+        {
+            AttachmentExtractionStatus.Uploaded => "its extraction has not started yet",
+            AttachmentExtractionStatus.Extracting => "its extraction is still in progress",
+            AttachmentExtractionStatus.Failed => string.IsNullOrWhiteSpace(attachment.ExtractionFailureReason)
+                ? "text extraction failed"
+                : $"text extraction failed ({attachment.ExtractionFailureReason.Trim().TrimEnd('.')})",
+            _ => "extracted text is unavailable"
+        };
     }
 }

@@ -4,6 +4,7 @@ using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Agon.Application.Attachments;
 using Agon.Application.Interfaces;
 using Azure.Core;
 using Azure.Identity;
@@ -15,63 +16,6 @@ public sealed class AttachmentTextExtractor : IAttachmentTextExtractor
 {
     private const string CognitiveServicesScope = "https://cognitiveservices.azure.com/.default";
 
-    private static readonly HashSet<string> TextContentTypes = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "application/json",
-        "application/xml",
-        "application/x-yaml",
-        "application/yaml",
-        "text/csv",
-        "application/csv",
-        "application/x-www-form-urlencoded",
-        "application/javascript",
-        "application/x-javascript",
-        "application/typescript",
-        "application/sql",
-        "application/rtf"
-    };
-
-    private static readonly HashSet<string> TextExtensions = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ".txt", ".md", ".markdown", ".json", ".yaml", ".yml", ".csv", ".xml", ".html", ".htm",
-        ".log", ".ini", ".cfg", ".conf", ".toml", ".sql", ".ts", ".js", ".tsx", ".jsx",
-        ".cs", ".py", ".java", ".go", ".rb", ".php", ".ps1", ".sh", ".bat", ".env", ".rtf"
-    };
-
-    private static readonly HashSet<string> DocumentExtensions = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx"
-    };
-
-    private static readonly HashSet<string> DocumentContentTypes = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "application/pdf",
-        "application/msword",
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        "application/vnd.ms-excel",
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        "application/vnd.ms-powerpoint",
-        "application/vnd.openxmlformats-officedocument.presentationml.presentation"
-    };
-
-    private static readonly HashSet<string> ImageExtensions = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".tif", ".tiff", ".heic", ".heif", ".jfif"
-    };
-
-    private static readonly HashSet<string> ImageContentTypes = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "image/png",
-        "image/jpeg",
-        "image/jpg",
-        "image/pjpeg",
-        "image/gif",
-        "image/bmp",
-        "image/webp",
-        "image/tiff",
-        "image/heic",
-        "image/heif"
-    };
     private static readonly Regex ModelRefusalRegex = new(
         @"\b(i\s*(?:am|'m)\s*unable\s*to\s*(?:assist|help)|i\s*cannot\s*(?:assist|help)|i\s*can'?t\s*(?:assist|help)|can'?t\s*access\s*(?:the\s*)?(?:attached\s*)?(?:image|file)|unable\s*to\s*access\s*(?:the\s*)?(?:image|attachment))\b",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
@@ -107,8 +51,8 @@ public sealed class AttachmentTextExtractor : IAttachmentTextExtractor
         }
 
         var normalizedContentType = NormalizeContentType(contentType);
-
-        if (IsImage(fileName, normalizedContentType))
+        var route = AttachmentRoutingPolicy.Resolve(fileName, normalizedContentType);
+        if (route == AttachmentRoutingRoute.Image)
         {
             var visionResult = await ExtractWithOpenAiVisionAsync(content, normalizedContentType, cancellationToken);
             var normalizedVision = NormalizeText(visionResult);
@@ -121,7 +65,7 @@ public sealed class AttachmentTextExtractor : IAttachmentTextExtractor
             return NormalizeText(imageOcrResult);
         }
 
-        if (IsDocument(fileName, normalizedContentType))
+        if (route == AttachmentRoutingRoute.Document)
         {
             var documentResult = await ExtractWithDocumentIntelligenceAsync(content, cancellationToken);
             if (!string.IsNullOrWhiteSpace(documentResult))
@@ -130,7 +74,7 @@ public sealed class AttachmentTextExtractor : IAttachmentTextExtractor
             }
         }
 
-        if (IsTextLike(fileName, normalizedContentType))
+        if (route == AttachmentRoutingRoute.Text)
         {
             return NormalizeText(TryExtractUtf8(content));
         }
@@ -156,15 +100,36 @@ public sealed class AttachmentTextExtractor : IAttachmentTextExtractor
         var analyzeUrl = $"{endpoint}/documentintelligence/documentModels/{Uri.EscapeDataString(modelId)}:analyze?api-version={Uri.EscapeDataString(apiVersion)}";
         var requestBody = new { base64Source = Convert.ToBase64String(content) };
 
-        using var startRequest = new HttpRequestMessage(HttpMethod.Post, analyzeUrl)
-        {
-            Content = JsonContent.Create(requestBody)
-        };
-
-        await ApplyDocumentIntelligenceAuthAsync(startRequest, cancellationToken);
-
         var client = _httpClientFactory.CreateClient("attachment-extraction");
-        using var startResponse = await client.SendAsync(startRequest, cancellationToken);
+        var startSend = await SendWithTransientRetryAsync(
+            client,
+            async ct =>
+            {
+                var request = new HttpRequestMessage(HttpMethod.Post, analyzeUrl)
+                {
+                    Content = JsonContent.Create(requestBody)
+                };
+                await ApplyDocumentIntelligenceAuthAsync(request, ct);
+                return request;
+            },
+            "document-intelligence-analyze-start",
+            cancellationToken);
+
+        using var startResponse = startSend.Response;
+        if (startResponse is null)
+        {
+            if (startSend.FailureKind == RetryFailureKind.Timeout)
+            {
+                throw new TaskCanceledException("Document Intelligence analyze request timed out after retries.");
+            }
+
+            if (startSend.FailureKind == RetryFailureKind.HttpException)
+            {
+                throw new HttpRequestException("Document Intelligence analyze request failed after retries.");
+            }
+
+            return null;
+        }
 
         if (startResponse.StatusCode is HttpStatusCode.OK or HttpStatusCode.Created)
         {
@@ -175,6 +140,11 @@ public sealed class AttachmentTextExtractor : IAttachmentTextExtractor
         if (startResponse.StatusCode != HttpStatusCode.Accepted)
         {
             var errorPayload = await startResponse.Content.ReadAsStringAsync(cancellationToken);
+            if (IsTransientStatusCode(startResponse.StatusCode))
+            {
+                throw new HttpRequestException($"Document Intelligence analyze request failed with transient status {(int)startResponse.StatusCode}.");
+            }
+
             _logger.LogWarning(
                 "Document Intelligence analyze request failed. Status={StatusCode}, Payload={Payload}",
                 (int)startResponse.StatusCode,
@@ -199,14 +169,42 @@ public sealed class AttachmentTextExtractor : IAttachmentTextExtractor
         {
             await Task.Delay(Math.Max(250, _options.DocumentIntelligence.PollIntervalMs), cancellationToken);
 
-            using var pollRequest = new HttpRequestMessage(HttpMethod.Get, operationLocation);
-            await ApplyDocumentIntelligenceAuthAsync(pollRequest, cancellationToken);
+            var pollSend = await SendWithTransientRetryAsync(
+                client,
+                async ct =>
+                {
+                    var request = new HttpRequestMessage(HttpMethod.Get, operationLocation);
+                    await ApplyDocumentIntelligenceAuthAsync(request, ct);
+                    return request;
+                },
+                "document-intelligence-analyze-poll",
+                cancellationToken);
 
-            using var pollResponse = await client.SendAsync(pollRequest, cancellationToken);
+            using var pollResponse = pollSend.Response;
+            if (pollResponse is null)
+            {
+                if (pollSend.FailureKind == RetryFailureKind.Timeout)
+                {
+                    throw new TaskCanceledException("Document Intelligence polling timed out after retries.");
+                }
+
+                if (pollSend.FailureKind == RetryFailureKind.HttpException)
+                {
+                    throw new HttpRequestException("Document Intelligence polling failed after retries.");
+                }
+
+                return null;
+            }
+
             var pollPayload = await pollResponse.Content.ReadAsStringAsync(cancellationToken);
 
             if (!pollResponse.IsSuccessStatusCode)
             {
+                if (IsTransientStatusCode(pollResponse.StatusCode))
+                {
+                    throw new HttpRequestException($"Document Intelligence poll failed with transient status {(int)pollResponse.StatusCode}.");
+                }
+
                 _logger.LogWarning(
                     "Document Intelligence poll request failed. Status={StatusCode}, Payload={Payload}",
                     (int)pollResponse.StatusCode,
@@ -228,7 +226,7 @@ public sealed class AttachmentTextExtractor : IAttachmentTextExtractor
         }
 
         _logger.LogWarning("Document Intelligence analysis timed out after {Attempts} polling attempts.", _options.DocumentIntelligence.MaxPollAttempts);
-        return null;
+        throw new TaskCanceledException("Document Intelligence analysis timed out while polling.");
     }
 
     private async Task ApplyDocumentIntelligenceAuthAsync(HttpRequestMessage request, CancellationToken cancellationToken)
@@ -352,14 +350,27 @@ public sealed class AttachmentTextExtractor : IAttachmentTextExtractor
             }
         };
 
-        using var request = new HttpRequestMessage(HttpMethod.Post, "https://api.openai.com/v1/chat/completions")
-        {
-            Content = JsonContent.Create(requestPayload)
-        };
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _options.OpenAiVision.ApiKey);
-
         var client = _httpClientFactory.CreateClient("attachment-extraction");
-        using var response = await client.SendAsync(request, cancellationToken);
+        var sendResult = await SendWithTransientRetryAsync(
+            client,
+            _ =>
+            {
+                var request = new HttpRequestMessage(HttpMethod.Post, "https://api.openai.com/v1/chat/completions")
+                {
+                    Content = JsonContent.Create(requestPayload)
+                };
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _options.OpenAiVision.ApiKey);
+                return Task.FromResult(request);
+            },
+            $"openai-vision-{model}",
+            cancellationToken);
+
+        using var response = sendResult.Response;
+        if (response is null)
+        {
+            return new OpenAiVisionAttemptResult(null, null);
+        }
+
         var payload = await response.Content.ReadAsStringAsync(cancellationToken);
 
         if (!response.IsSuccessStatusCode)
@@ -396,45 +407,6 @@ public sealed class AttachmentTextExtractor : IAttachmentTextExtractor
         return !(trimmed.StartsWith("${", StringComparison.Ordinal) && trimmed.EndsWith("}", StringComparison.Ordinal));
     }
 
-    private static bool IsImage(string fileName, string contentType)
-    {
-        if (!string.IsNullOrWhiteSpace(contentType) &&
-            ImageContentTypes.Contains(contentType))
-        {
-            return true;
-        }
-
-        var extension = Path.GetExtension(fileName);
-        return !string.IsNullOrWhiteSpace(extension) && ImageExtensions.Contains(extension);
-    }
-
-    private static bool IsDocument(string fileName, string contentType)
-    {
-        if (!string.IsNullOrWhiteSpace(contentType) &&
-            DocumentContentTypes.Contains(contentType))
-        {
-            return true;
-        }
-
-        var extension = Path.GetExtension(fileName);
-        return !string.IsNullOrWhiteSpace(extension) && DocumentExtensions.Contains(extension);
-    }
-
-    private static bool IsTextLike(string fileName, string contentType)
-    {
-        if (!string.IsNullOrWhiteSpace(contentType))
-        {
-            if (contentType.StartsWith("text/", StringComparison.OrdinalIgnoreCase) ||
-                TextContentTypes.Contains(contentType))
-            {
-                return true;
-            }
-        }
-
-        var extension = Path.GetExtension(fileName);
-        return !string.IsNullOrWhiteSpace(extension) && TextExtensions.Contains(extension);
-    }
-
     private static string? TryExtractUtf8(byte[] content)
     {
         try
@@ -467,10 +439,9 @@ public sealed class AttachmentTextExtractor : IAttachmentTextExtractor
             return null;
         }
 
-        var maxLength = Math.Max(1000, _options.MaxExtractedTextChars);
-        if (normalized.Length > maxLength)
+        if (_options.MaxExtractedTextChars > 0 && normalized.Length > _options.MaxExtractedTextChars)
         {
-            normalized = normalized[..maxLength];
+            normalized = normalized[.._options.MaxExtractedTextChars];
         }
 
         return normalized;
@@ -642,6 +613,110 @@ public sealed class AttachmentTextExtractor : IAttachmentTextExtractor
             ? value
             : value[..maxLength] + "...";
     }
+
+    private async Task<HttpRetrySendResult> SendWithTransientRetryAsync(
+        HttpClient client,
+        Func<CancellationToken, Task<HttpRequestMessage>> requestFactory,
+        string operationName,
+        CancellationToken cancellationToken)
+    {
+        var maxAttempts = Math.Max(1, _options.TransientRetry.MaxAttempts);
+        var baseDelayMs = Math.Max(1, _options.TransientRetry.BaseDelayMs);
+        var maxDelayMs = Math.Max(baseDelayMs, _options.TransientRetry.MaxDelayMs);
+
+        for (var attempt = 1; attempt <= maxAttempts; attempt++)
+        {
+            using var request = await requestFactory(cancellationToken);
+            try
+            {
+                var response = await client.SendAsync(request, cancellationToken);
+                if (IsTransientStatusCode(response.StatusCode) && attempt < maxAttempts)
+                {
+                    _logger.LogInformation(
+                        "Transient status during {Operation}. Status={StatusCode}, Attempt={Attempt}/{MaxAttempts}. Retrying.",
+                        operationName,
+                        (int)response.StatusCode,
+                        attempt,
+                        maxAttempts);
+                    response.Dispose();
+                    await Task.Delay(ComputeBackoffDelay(attempt, baseDelayMs, maxDelayMs), cancellationToken);
+                    continue;
+                }
+
+                return new HttpRetrySendResult(response, RetryFailureKind.None);
+            }
+            catch (HttpRequestException ex)
+            {
+                if (attempt < maxAttempts)
+                {
+                    _logger.LogInformation(
+                        ex,
+                        "Transient HTTP exception during {Operation}. Attempt={Attempt}/{MaxAttempts}. Retrying.",
+                        operationName,
+                        attempt,
+                        maxAttempts);
+                    await Task.Delay(ComputeBackoffDelay(attempt, baseDelayMs, maxDelayMs), cancellationToken);
+                    continue;
+                }
+
+                _logger.LogWarning(
+                    ex,
+                    "HTTP exception during {Operation} after {Attempts} attempts.",
+                    operationName,
+                    maxAttempts);
+                return new HttpRetrySendResult(null, RetryFailureKind.HttpException);
+            }
+            catch (TaskCanceledException ex) when (!cancellationToken.IsCancellationRequested)
+            {
+                if (attempt < maxAttempts)
+                {
+                    _logger.LogInformation(
+                        ex,
+                        "Transient timeout during {Operation}. Attempt={Attempt}/{MaxAttempts}. Retrying.",
+                        operationName,
+                        attempt,
+                        maxAttempts);
+                    await Task.Delay(ComputeBackoffDelay(attempt, baseDelayMs, maxDelayMs), cancellationToken);
+                    continue;
+                }
+
+                _logger.LogWarning(
+                    ex,
+                    "Timeout during {Operation} after {Attempts} attempts.",
+                    operationName,
+                    maxAttempts);
+                return new HttpRetrySendResult(null, RetryFailureKind.Timeout);
+            }
+        }
+
+        return new HttpRetrySendResult(null, RetryFailureKind.None);
+    }
+
+    private static bool IsTransientStatusCode(HttpStatusCode statusCode)
+    {
+        var statusCodeInt = (int)statusCode;
+        return statusCode == HttpStatusCode.RequestTimeout
+            || statusCodeInt == 429
+            || statusCodeInt >= 500;
+    }
+
+    private static TimeSpan ComputeBackoffDelay(int attempt, int baseDelayMs, int maxDelayMs)
+    {
+        var exponent = Math.Max(0, attempt - 1);
+        var delayMs = (int)Math.Min(maxDelayMs, baseDelayMs * Math.Pow(2, exponent));
+        return TimeSpan.FromMilliseconds(Math.Max(1, delayMs));
+    }
+
+    private enum RetryFailureKind
+    {
+        None = 0,
+        HttpException = 1,
+        Timeout = 2
+    }
+
+    private readonly record struct HttpRetrySendResult(
+        HttpResponseMessage? Response,
+        RetryFailureKind FailureKind);
 
     private readonly record struct OpenAiVisionAttemptResult(
         string? Text,

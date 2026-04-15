@@ -117,15 +117,14 @@ public class AgonDbContext : DbContext
             entity.Property(e => e.BlobUri).HasColumnName("blob_uri").IsRequired();
             entity.Property(e => e.AccessUrl).HasColumnName("access_url").IsRequired();
             entity.Property(e => e.ExtractedText).HasColumnName("extracted_text");
-            entity.Property(e => e.UploadedAt).HasColumnName("uploaded_at");
             entity.Property(e => e.ExtractionStatus)
                 .HasColumnName("extraction_status")
-                .HasDefaultValue("ready")
+                .HasDefaultValue("uploaded")
                 .IsRequired();
+            entity.Property(e => e.ExtractionFailureReason).HasColumnName("extraction_failure_reason");
             entity.Property(e => e.ExtractionProgressPercent)
                 .HasColumnName("extraction_progress_percent")
-                .HasDefaultValue(100);
-            entity.Property(e => e.ExtractionError).HasColumnName("extraction_error");
+                .HasDefaultValue(0);
             entity.Property(e => e.ExtractionUpdatedAt).HasColumnName("extraction_updated_at");
 
             entity.HasIndex(e => e.SessionId);
@@ -265,9 +264,9 @@ public class SessionAttachmentEntity
     public string BlobUri { get; set; } = string.Empty;
     public string AccessUrl { get; set; } = string.Empty;
     public string? ExtractedText { get; set; }
+    public string ExtractionStatus { get; set; } = "uploaded";
+    public string? ExtractionFailureReason { get; set; }
     public DateTime UploadedAt { get; set; }
-    public string ExtractionStatus { get; set; } = "ready";
-    public int ExtractionProgressPercent { get; set; } = 100;
-    public string? ExtractionError { get; set; }
+    public int ExtractionProgressPercent { get; set; } = 0;
     public DateTime? ExtractionUpdatedAt { get; set; }
 }

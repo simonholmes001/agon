@@ -1,5 +1,13 @@
 namespace Agon.Application.Models;
 
+public enum AttachmentExtractionStatus
+{
+    Uploaded = 0,
+    Extracting = 1,
+    Ready = 2,
+    Failed = 3
+}
+
 /// <summary>
 /// Metadata for an uploaded session attachment (document/image) stored in blob storage.
 /// </summary>
@@ -15,7 +23,7 @@ public sealed record SessionAttachment(
     string AccessUrl,
     string? ExtractedText,
     DateTimeOffset UploadedAt,
-    string ExtractionStatus = AttachmentExtractionStatus.Ready,
-    int ExtractionProgressPercent = 100,
-    string? ExtractionError = null,
+    AttachmentExtractionStatus ExtractionStatus = AttachmentExtractionStatus.Uploaded,
+    string? ExtractionFailureReason = null,
+    int ExtractionProgressPercent = 0,
     DateTimeOffset? ExtractionUpdatedAt = null);

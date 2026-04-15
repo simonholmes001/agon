@@ -18,6 +18,9 @@ param namePrefix string = 'agon-dev-swc'
 @description('Alert email receiver for action groups.')
 param alertEmail string = 'simonholmesabc@gmail.com'
 
+@description('Enable document pipeline custom telemetry alerts (parser failures and chunk-loop latency).')
+param documentPipelineAlertsEnabled bool = true
+
 @description('PostgreSQL admin username used for bootstrap operations.')
 param postgresAdminLogin string = 'agonadmin'
 
@@ -117,6 +120,97 @@ param appGatewayRequestTimeoutSeconds int = 120
 
 @description('Document Intelligence model used for attachment extraction.')
 param documentIntelligenceModelId string = 'prebuilt-layout'
+
+@description('Maximum extracted attachment text chars passed to backend processing.')
+@minValue(1)
+param attachmentProcessingMaxExtractedTextChars int = 200000
+
+@description('Reject attachments whose route cannot be resolved to a supported text/image/document family.')
+param attachmentProcessingValidationRejectUnsupportedFormats bool = true
+
+@description('Absolute maximum attachment upload size in bytes.')
+@minValue(1024)
+param attachmentProcessingValidationMaxUploadBytes int = 26214400
+
+@description('Maximum text-route attachment size in bytes.')
+@minValue(1024)
+param attachmentProcessingValidationMaxTextUploadBytes int = 10485760
+
+@description('Maximum document-route attachment size in bytes.')
+@minValue(1024)
+param attachmentProcessingValidationMaxDocumentUploadBytes int = 26214400
+
+@description('Maximum image-route attachment size in bytes.')
+@minValue(1024)
+param attachmentProcessingValidationMaxImageUploadBytes int = 20971520
+
+@description('Enable async attachment extraction worker pipeline.')
+param attachmentProcessingAsyncExtractionEnabled bool = true
+
+@description('Batch size per poll for async attachment extraction worker claiming.')
+@minValue(1)
+param attachmentProcessingAsyncExtractionQueueCapacity int = 200
+
+@description('Maximum transient retry attempts for attachment extraction HTTP operations.')
+@minValue(1)
+param attachmentProcessingTransientRetryMaxAttempts int = 3
+
+@description('Base retry delay in milliseconds for transient attachment extraction failures.')
+@minValue(1)
+param attachmentProcessingTransientRetryBaseDelayMs int = 250
+
+@description('Maximum retry delay in milliseconds for transient attachment extraction failures.')
+@minValue(1)
+param attachmentProcessingTransientRetryMaxDelayMs int = 2000
+
+@description('Enable long-document context-window chunk-loop processing.')
+param attachmentProcessingChunkLoopEnabled bool = true
+
+@description('Extracted text length threshold that activates chunk-loop processing.')
+@minValue(1)
+param attachmentProcessingChunkLoopActivationThresholdChars int = 14000
+
+@description('Target chunk size in characters for chunk-loop processing.')
+@minValue(1)
+param attachmentProcessingChunkLoopChunkSizeChars int = 12000
+
+@description('Chunk overlap in characters between adjacent chunk-loop passes.')
+@minValue(0)
+param attachmentProcessingChunkLoopChunkOverlapChars int = 1000
+
+@description('Enable token-aware chunk sizing for chunk-loop processing.')
+param attachmentProcessingChunkLoopUseTokenAwareSizing bool = true
+
+@description('Target token budget per chunk when token-aware chunk sizing is enabled.')
+@minValue(1)
+param attachmentProcessingChunkLoopTargetChunkTokens int = 3000
+
+@description('Estimated chars-per-token factor used for token-aware chunk sizing.')
+@minValue(1)
+param attachmentProcessingChunkLoopEstimatedCharsPerToken int = 4
+
+@description('Enable query-focused second-pass chunk-loop processing.')
+param attachmentProcessingChunkLoopEnableQueryFocusedSecondPass bool = true
+
+@description('Maximum focused chunks retained per attachment for second-pass query analysis.')
+@minValue(1)
+param attachmentProcessingChunkLoopMaxFocusedChunksPerAttachment int = 3
+
+@description('Minimum keyword length for query-focused chunk matching.')
+@minValue(1)
+param attachmentProcessingChunkLoopMinQueryKeywordLength int = 4
+
+@description('Maximum chunk count processed per attachment during chunk-loop prelude.')
+@minValue(1)
+param attachmentProcessingChunkLoopMaxChunksPerAttachment int = 20
+
+@description('Maximum chars retained from each chunk-pass note before final synthesis.')
+@minValue(1)
+param attachmentProcessingChunkLoopMaxChunkNoteChars int = 1200
+
+@description('Maximum chunk-pass notes retained per agent before final synthesis.')
+@minValue(1)
+param attachmentProcessingChunkLoopMaxFinalNotesPerAgent int = 8
 
 @description('Enable JWT bearer authentication in the backend API.')
 param authEnabled bool = false
@@ -270,6 +364,7 @@ module appEdge './modules/app-edge-dev.bicep' = {
     workloadName: workloadName
     namePrefix: namePrefix
     alertEmail: alertEmail
+    documentPipelineAlertsEnabled: documentPipelineAlertsEnabled
     appGatewayResourceSuffix: appGatewayResourceSuffix
     appGatewaySkuName: appGatewaySkuName
     appGatewaySkuTier: appGatewaySkuTier
@@ -311,6 +406,30 @@ module appEdge './modules/app-edge-dev.bicep' = {
     blobStorageConnectionStringSecretUri: data.outputs.blobStorageConnectionStringSecretUri
     attachmentContainerName: attachmentContainerName
     attachmentRetentionDays: attachmentRetentionDays
+    attachmentProcessingMaxExtractedTextChars: attachmentProcessingMaxExtractedTextChars
+    attachmentProcessingValidationRejectUnsupportedFormats: attachmentProcessingValidationRejectUnsupportedFormats
+    attachmentProcessingValidationMaxUploadBytes: attachmentProcessingValidationMaxUploadBytes
+    attachmentProcessingValidationMaxTextUploadBytes: attachmentProcessingValidationMaxTextUploadBytes
+    attachmentProcessingValidationMaxDocumentUploadBytes: attachmentProcessingValidationMaxDocumentUploadBytes
+    attachmentProcessingValidationMaxImageUploadBytes: attachmentProcessingValidationMaxImageUploadBytes
+    attachmentProcessingAsyncExtractionEnabled: attachmentProcessingAsyncExtractionEnabled
+    attachmentProcessingAsyncExtractionQueueCapacity: attachmentProcessingAsyncExtractionQueueCapacity
+    attachmentProcessingTransientRetryMaxAttempts: attachmentProcessingTransientRetryMaxAttempts
+    attachmentProcessingTransientRetryBaseDelayMs: attachmentProcessingTransientRetryBaseDelayMs
+    attachmentProcessingTransientRetryMaxDelayMs: attachmentProcessingTransientRetryMaxDelayMs
+    attachmentProcessingChunkLoopEnabled: attachmentProcessingChunkLoopEnabled
+    attachmentProcessingChunkLoopActivationThresholdChars: attachmentProcessingChunkLoopActivationThresholdChars
+    attachmentProcessingChunkLoopChunkSizeChars: attachmentProcessingChunkLoopChunkSizeChars
+    attachmentProcessingChunkLoopChunkOverlapChars: attachmentProcessingChunkLoopChunkOverlapChars
+    attachmentProcessingChunkLoopUseTokenAwareSizing: attachmentProcessingChunkLoopUseTokenAwareSizing
+    attachmentProcessingChunkLoopTargetChunkTokens: attachmentProcessingChunkLoopTargetChunkTokens
+    attachmentProcessingChunkLoopEstimatedCharsPerToken: attachmentProcessingChunkLoopEstimatedCharsPerToken
+    attachmentProcessingChunkLoopEnableQueryFocusedSecondPass: attachmentProcessingChunkLoopEnableQueryFocusedSecondPass
+    attachmentProcessingChunkLoopMaxFocusedChunksPerAttachment: attachmentProcessingChunkLoopMaxFocusedChunksPerAttachment
+    attachmentProcessingChunkLoopMinQueryKeywordLength: attachmentProcessingChunkLoopMinQueryKeywordLength
+    attachmentProcessingChunkLoopMaxChunksPerAttachment: attachmentProcessingChunkLoopMaxChunksPerAttachment
+    attachmentProcessingChunkLoopMaxChunkNoteChars: attachmentProcessingChunkLoopMaxChunkNoteChars
+    attachmentProcessingChunkLoopMaxFinalNotesPerAgent: attachmentProcessingChunkLoopMaxFinalNotesPerAgent
     documentIntelligenceEndpoint: data.outputs.documentIntelligenceEndpoint
     documentIntelligenceModelId: documentIntelligenceModelId
     attachmentStorageBlobEndpoint: data.outputs.attachmentStorageBlobEndpoint

@@ -11,7 +11,6 @@ namespace Agon.Api.Services;
 /// </summary>
 public sealed class AttachmentExtractionProcessor
 {
-    private const int ExtractingProgressPercent = 20;
     private const string GenericFailureMessage = "Extraction failed. Unsupported format or processing error.";
     private const string MissingBlobFailureMessage = "Extraction failed because attachment content is unavailable.";
 
@@ -37,26 +36,15 @@ public sealed class AttachmentExtractionProcessor
 
     public async Task ProcessAsync(SessionAttachment attachment, CancellationToken cancellationToken)
     {
-        await _sessionService.UpdateAttachmentExtractionAsync(
+        await _sessionService.UpdateAttachmentExtractionStateAsync(
             attachment.AttachmentId,
             AttachmentExtractionStatus.Extracting,
-            ExtractingProgressPercent,
-            null,
-            null,
+            extractedText: null,
+            extractionFailureReason: null,
             cancellationToken);
 
         try
         {
-            var maxBytes = Math.Max(1, _options.MaxExtractionFileBytes);
-            if (attachment.SizeBytes > maxBytes)
-            {
-                await MarkFailedAsync(
-                    attachment,
-                    $"Extraction skipped because file exceeds {maxBytes / (1024 * 1024)} MB extraction limit.",
-                    cancellationToken);
-                return;
-            }
-
             await using var source = await _storage.OpenReadAsync(attachment.BlobName, cancellationToken);
             if (source is null)
             {
@@ -64,6 +52,7 @@ public sealed class AttachmentExtractionProcessor
                 return;
             }
 
+            var maxBytes = Math.Max(1, _options.MaxExtractedTextChars * 4);
             var fileBytes = await ReadBytesWithLimitAsync(source, maxBytes, cancellationToken);
 
             var extractedText = await _extractor.ExtractAsync(
@@ -72,12 +61,11 @@ public sealed class AttachmentExtractionProcessor
                 attachment.ContentType,
                 cancellationToken);
 
-            await _sessionService.UpdateAttachmentExtractionAsync(
+            await _sessionService.UpdateAttachmentExtractionStateAsync(
                 attachment.AttachmentId,
                 AttachmentExtractionStatus.Ready,
-                100,
                 extractedText,
-                null,
+                extractionFailureReason: null,
                 cancellationToken);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -86,10 +74,9 @@ public sealed class AttachmentExtractionProcessor
         }
         catch (AttachmentTooLargeException)
         {
-            var maxBytes = Math.Max(1, _options.MaxExtractionFileBytes);
             await MarkFailedAsync(
                 attachment,
-                $"Extraction skipped because file exceeds {maxBytes / (1024 * 1024)} MB extraction limit.",
+                $"Extraction skipped because file exceeds extraction size limit.",
                 cancellationToken);
         }
         catch (Exception ex)
@@ -111,11 +98,10 @@ public sealed class AttachmentExtractionProcessor
         string error,
         CancellationToken cancellationToken)
     {
-        await _sessionService.UpdateAttachmentExtractionAsync(
+        await _sessionService.UpdateAttachmentExtractionStateAsync(
             attachment.AttachmentId,
             AttachmentExtractionStatus.Failed,
-            100,
-            null,
+            extractedText: null,
             string.IsNullOrWhiteSpace(error) ? "Attachment extraction failed." : error,
             cancellationToken);
     }
