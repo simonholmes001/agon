@@ -22,6 +22,7 @@ interface ApiClientLike {
   submitMessage(sessionId: string, content: string): Promise<SessionResponse>;
   getArtifact(sessionId: string, type: ArtifactType): Promise<{ content: string }>;
   uploadAttachment(sessionId: string, filePath: string): Promise<SessionAttachment>;
+  listAttachments(sessionId: string): Promise<SessionAttachment[]>;
 }
 
 interface SessionManagerLike {
@@ -239,6 +240,16 @@ export class ShellController {
     const session = await this.apiClient.getSession(targetSessionId);
     await this.sessionManager.saveSession(session);
     return session;
+  }
+
+  async listAttachments(explicitSessionId?: string): Promise<{ sessionId: string; attachments: SessionAttachment[] }> {
+    const sessionId = await this.resolveSessionId(explicitSessionId);
+    if (!sessionId) {
+      throw new Error('No active session found.');
+    }
+
+    const attachments = await this.apiClient.listAttachments(sessionId);
+    return { sessionId, attachments };
   }
 
   async getArtifact(

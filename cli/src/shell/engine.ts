@@ -27,6 +27,20 @@ interface ShellControllerLike {
   resumeSession(sessionId?: string): Promise<SessionResponse>;
   listSessions(): Promise<SessionResponse[]>;
   getStatus(sessionId?: string): Promise<SessionResponse>;
+  listAttachments(sessionId?: string): Promise<{
+    sessionId: string;
+    attachments: Array<{
+      id: string;
+      fileName: string;
+      contentType: string;
+      sizeBytes: number;
+      hasExtractedText: boolean;
+      extractionStatus?: 'queued' | 'extracting' | 'ready' | 'failed';
+      extractionProgressPercent?: number;
+      extractionError?: string | null;
+      uploadedAt?: string;
+    }>;
+  }>;
   getArtifact(
     type: 'verdict' | 'plan' | 'prd' | 'risks' | 'assumptions' | 'architecture' | 'copilot',
     options: { refresh: boolean; raw: boolean; sessionId?: string }
@@ -38,10 +52,14 @@ interface ShellControllerLike {
   attachDocument(path: string, explicitSessionId?: string): Promise<{
     sessionId: string;
     attachment: {
+      id: string;
       fileName: string;
       contentType: string;
       sizeBytes: number;
       hasExtractedText: boolean;
+      extractionStatus?: 'queued' | 'extracting' | 'ready' | 'failed';
+      extractionProgressPercent?: number;
+      extractionError?: string | null;
     };
   }>;
   startIdea(idea: string): Promise<{
@@ -105,6 +123,20 @@ export type ShellEngineOutcome =
       sizeBytes: number;
       hasExtractedText: boolean;
     }
+  | {
+      kind: 'attachments';
+      sessionId: string;
+      attachments: Array<{
+        id: string;
+        fileName: string;
+        contentType: string;
+        sizeBytes: number;
+        hasExtractedText: boolean;
+        extractionStatus?: 'queued' | 'extracting' | 'ready' | 'failed';
+        extractionProgressPercent?: number;
+        extractionError?: string | null;
+      }>;
+    }
   | { kind: 'artifact'; content: string; raw: boolean; sessionId: string };
 
 export class ShellEngine {
@@ -163,7 +195,13 @@ export class ShellEngine {
         `Attached ${styleAttachmentToken(referenceLabel)} (${styleAttachmentToken(result.attachment.fileName)}) to session ${result.sessionId}.`
         + ` Type: ${result.attachment.contentType} | Size: ${result.attachment.sizeBytes} B`
       );
-      this.printAttachmentExtractionMessage(result.attachment.contentType, result.attachment.hasExtractedText);
+      this.printAttachmentExtractionMessage(
+        result.attachment.contentType,
+        result.attachment.hasExtractedText,
+        result.attachment.extractionStatus,
+        result.attachment.extractionProgressPercent,
+        result.attachment.extractionError
+      );
 
       plainText = composeAttachmentScopedFollowUp(
         inlineAttach.remainingText,
@@ -195,7 +233,13 @@ export class ShellEngine {
             `Attached ${styleAttachmentToken(referenceLabel)} (${styleAttachmentToken(result.attachment.fileName)}) to session ${result.sessionId}.`
             + ` Type: ${result.attachment.contentType} | Size: ${result.attachment.sizeBytes} B`
           );
-          this.printAttachmentExtractionMessage(result.attachment.contentType, result.attachment.hasExtractedText);
+          this.printAttachmentExtractionMessage(
+            result.attachment.contentType,
+            result.attachment.hasExtractedText,
+            result.attachment.extractionStatus,
+            result.attachment.extractionProgressPercent,
+            result.attachment.extractionError
+          );
 
           plainText = composeAttachmentScopedFollowUp(
             implicitAttach.remainingText,
@@ -253,6 +297,7 @@ export class ShellEngine {
       case 'help': {
         const commands: Array<{ token: string; description: string }> = [
           { token: '/attach <file-path>',           description: 'Attach a document/image to the active session' },
+          { token: '/attachments',                  description: 'List attachments and extraction progress' },
           { token: '/exit',                          description: 'Exit shell (also: /quit)' },
           { token: '/follow-up <message>',           description: 'Send explicit follow-up message' },
           { token: '/help',                          description: 'Show this command reference' },
@@ -379,6 +424,23 @@ export class ShellEngine {
         this.print('Use /resume <session-id> to switch session.');
         return { kind: 'noop' };
       }
+      case 'attachments': {
+        const listing = await this.controller.listAttachments();
+        return {
+          kind: 'attachments',
+          sessionId: listing.sessionId,
+          attachments: listing.attachments.map(attachment => ({
+            id: attachment.id,
+            fileName: attachment.fileName,
+            contentType: attachment.contentType,
+            sizeBytes: attachment.sizeBytes,
+            hasExtractedText: attachment.hasExtractedText,
+            extractionStatus: attachment.extractionStatus,
+            extractionProgressPercent: attachment.extractionProgressPercent,
+            extractionError: attachment.extractionError
+          }))
+        };
+      }
       case 'resume': {
         const session = await this.controller.resumeSession(parsed.sessionId);
         this.print(`Using session ${session.id}.`);
@@ -455,9 +517,32 @@ export class ShellEngine {
     }
   }
 
-  private printAttachmentExtractionMessage(contentType: string, hasExtractedText: boolean): void {
+  private printAttachmentExtractionMessage(
+    contentType: string,
+    hasExtractedText: boolean,
+    extractionStatus?: 'queued' | 'extracting' | 'ready' | 'failed',
+    extractionProgressPercent?: number,
+    extractionError?: string | null
+  ): void {
     if (hasExtractedText) {
       this.print('Attachment content extracted and added to agent context.');
+      return;
+    }
+
+    const normalizedStatus = extractionStatus?.toLowerCase();
+    if (normalizedStatus === 'queued' || normalizedStatus === 'extracting') {
+      const pct = Number.isFinite(extractionProgressPercent) ? Math.max(0, Math.min(100, extractionProgressPercent ?? 0)) : 0;
+      const statusLabel = normalizedStatus === 'extracting' ? 'Extracting' : 'Queued';
+      this.print(`${statusLabel} attachment content in background (${pct}%).`);
+      this.print('You can keep chatting. Run /attachments to check progress.');
+      return;
+    }
+
+    if (normalizedStatus === 'failed') {
+      this.print(
+        `Attachment extraction failed${extractionError ? `: ${extractionError}` : '.'} `
+        + 'File metadata/link is still available to the session.'
+      );
       return;
     }
 

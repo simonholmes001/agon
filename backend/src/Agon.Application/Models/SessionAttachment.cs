@@ -14,4 +14,8 @@ public sealed record SessionAttachment(
     string BlobUri,
     string AccessUrl,
     string? ExtractedText,
-    DateTimeOffset UploadedAt);
+    DateTimeOffset UploadedAt,
+    string ExtractionStatus = AttachmentExtractionStatus.Ready,
+    int ExtractionProgressPercent = 100,
+    string? ExtractionError = null,
+    DateTimeOffset? ExtractionUpdatedAt = null);

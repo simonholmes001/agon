@@ -9,6 +9,14 @@ public interface IAttachmentRepository
 {
     Task<SessionAttachment> CreateAsync(SessionAttachment attachment, CancellationToken cancellationToken = default);
 
+    Task UpdateExtractionAsync(
+        Guid attachmentId,
+        string extractionStatus,
+        int extractionProgressPercent,
+        string? extractedText,
+        string? extractionError,
+        CancellationToken cancellationToken = default);
+
     Task<IReadOnlyList<SessionAttachment>> ListBySessionAsync(Guid sessionId, CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<SessionAttachment>> ListExpiredAsync(

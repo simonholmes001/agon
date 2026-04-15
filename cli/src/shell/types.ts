@@ -17,7 +17,7 @@ export type ParsedShellInput =
     }
   | {
       type: 'slash';
-      command: 'help' | 'params' | 'new' | 'show-sessions';
+      command: 'help' | 'params' | 'new' | 'show-sessions' | 'attachments';
     }
   | {
       type: 'slash';

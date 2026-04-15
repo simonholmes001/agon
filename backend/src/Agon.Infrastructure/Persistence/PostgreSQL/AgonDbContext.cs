@@ -118,6 +118,15 @@ public class AgonDbContext : DbContext
             entity.Property(e => e.AccessUrl).HasColumnName("access_url").IsRequired();
             entity.Property(e => e.ExtractedText).HasColumnName("extracted_text");
             entity.Property(e => e.UploadedAt).HasColumnName("uploaded_at");
+            entity.Property(e => e.ExtractionStatus)
+                .HasColumnName("extraction_status")
+                .HasDefaultValue("ready")
+                .IsRequired();
+            entity.Property(e => e.ExtractionProgressPercent)
+                .HasColumnName("extraction_progress_percent")
+                .HasDefaultValue(100);
+            entity.Property(e => e.ExtractionError).HasColumnName("extraction_error");
+            entity.Property(e => e.ExtractionUpdatedAt).HasColumnName("extraction_updated_at");
 
             entity.HasIndex(e => e.SessionId);
             entity.HasIndex(e => new { e.SessionId, e.UploadedAt });
@@ -257,4 +266,8 @@ public class SessionAttachmentEntity
     public string AccessUrl { get; set; } = string.Empty;
     public string? ExtractedText { get; set; }
     public DateTime UploadedAt { get; set; }
+    public string ExtractionStatus { get; set; } = "ready";
+    public int ExtractionProgressPercent { get; set; } = 100;
+    public string? ExtractionError { get; set; }
+    public DateTime? ExtractionUpdatedAt { get; set; }
 }

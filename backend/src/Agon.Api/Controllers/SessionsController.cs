@@ -6,6 +6,7 @@ using Agon.Application.Services;
 using Agon.Domain.Sessions;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.Extensions.DependencyInjection;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
@@ -32,14 +33,14 @@ public class SessionsController : ControllerBase
 
     private readonly ISessionService _sessionService;
     private readonly IAttachmentStorageService? _attachmentStorage;
-    private readonly IAttachmentTextExtractor _attachmentTextExtractor;
+    private readonly IServiceScopeFactory _serviceScopeFactory;
     private readonly ConversationHistoryService _conversationHistory;
     private readonly ILogger<SessionsController> _logger;
     private readonly TrialAccessService _trialAccessService;
 
     public SessionsController(
         ISessionService sessionService,
-        IAttachmentTextExtractor attachmentTextExtractor,
+        IServiceScopeFactory serviceScopeFactory,
         ConversationHistoryService conversationHistory,
         ILogger<SessionsController> logger,
         TrialAccessService trialAccessService,
@@ -47,7 +48,7 @@ public class SessionsController : ControllerBase
     {
         _sessionService = sessionService;
         _attachmentStorage = attachmentStorage;
-        _attachmentTextExtractor = attachmentTextExtractor;
+        _serviceScopeFactory = serviceScopeFactory;
         _conversationHistory = conversationHistory;
         _logger = logger;
         _trialAccessService = trialAccessService;
@@ -430,19 +431,11 @@ public class SessionsController : ControllerBase
             ? GuessContentType(safeFileName)
             : request.File.ContentType.Trim();
 
-        byte[] fileBytes;
-        await using (var source = request.File.OpenReadStream())
-        await using (var copy = new MemoryStream())
-        {
-            await source.CopyToAsync(copy, cancellationToken);
-            fileBytes = copy.ToArray();
-        }
-
         var blobName = $"{id:N}/{DateTimeOffset.UtcNow:yyyyMMddHHmmssfff}-{Guid.NewGuid():N}-{safeFileName}";
         AttachmentUploadResult uploaded;
         try
         {
-            await using var uploadStream = new MemoryStream(fileBytes, writable: false);
+            await using var uploadStream = request.File.OpenReadStream();
             uploaded = await _attachmentStorage.UploadAsync(
                 blobName,
                 uploadStream,
@@ -470,31 +463,7 @@ public class SessionsController : ControllerBase
                 "Verify blob storage connectivity and retry.");
         }
 
-        string? extractedText = null;
-        try
-        {
-            extractedText = await _attachmentTextExtractor.ExtractAsync(
-                fileBytes,
-                safeFileName,
-                contentType,
-                cancellationToken);
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            AttachmentMetrics.ExtractionFailure.Add(1);
-            _logger.LogWarning(
-                ex,
-                "Attachment text extraction failed for session {SessionId}. Category=AttachmentExtractionFailed, FileName={FileName}, ContentType={ContentType}, SizeBytes={SizeBytes}",
-                id,
-                safeFileName,
-                contentType,
-                request.File.Length);
-        }
-
+        var now = DateTimeOffset.UtcNow;
         var attachmentId = Guid.NewGuid();
         var attachment = new SessionAttachment(
             AttachmentId: attachmentId,
@@ -506,8 +475,12 @@ public class SessionsController : ControllerBase
             BlobName: uploaded.BlobName,
             BlobUri: uploaded.BlobUri,
             AccessUrl: BuildAttachmentDownloadPath(id, attachmentId),
-            ExtractedText: extractedText,
-            UploadedAt: DateTimeOffset.UtcNow);
+            ExtractedText: null,
+            UploadedAt: now,
+            ExtractionStatus: AttachmentExtractionStatus.Queued,
+            ExtractionProgressPercent: 0,
+            ExtractionError: null,
+            ExtractionUpdatedAt: now);
 
         SessionAttachment saved;
         try
@@ -547,14 +520,15 @@ public class SessionsController : ControllerBase
         }
 
         _logger.LogInformation(
-            "Uploaded attachment {AttachmentId} for session {SessionId} (FileName={FileName}, ContentType={ContentType}, SizeBytes={SizeBytes}, ExtractedText={HasExtractedText})",
+            "Uploaded attachment {AttachmentId} for session {SessionId} (FileName={FileName}, ContentType={ContentType}, SizeBytes={SizeBytes}, ExtractionStatus={ExtractionStatus})",
             saved.AttachmentId,
             id,
             saved.FileName,
             saved.ContentType,
             saved.SizeBytes,
-            !string.IsNullOrWhiteSpace(saved.ExtractedText));
+            saved.ExtractionStatus);
         AttachmentMetrics.UploadSuccess.Add(1);
+        QueueAttachmentExtraction(saved);
 
         return CreatedAtAction(
             nameof(ListAttachments),
@@ -781,6 +755,28 @@ public class SessionsController : ControllerBase
         return sb.ToString();
     }
 
+    private void QueueAttachmentExtraction(SessionAttachment attachment)
+    {
+        _ = Task.Run(async () =>
+        {
+            await using var scope = _serviceScopeFactory.CreateAsyncScope();
+            var processor = scope.ServiceProvider.GetRequiredService<AttachmentExtractionProcessor>();
+
+            try
+            {
+                await processor.ProcessAsync(attachment, CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(
+                    ex,
+                    "Background attachment extraction failed unexpectedly for AttachmentId={AttachmentId}, SessionId={SessionId}",
+                    attachment.AttachmentId,
+                    attachment.SessionId);
+            }
+        });
+    }
+
     private ObjectResult AttachmentServiceUnavailable(string errorCode, string message, string hint)
     {
         return StatusCode(StatusCodes.Status503ServiceUnavailable, new
@@ -818,6 +814,10 @@ public class SessionsController : ControllerBase
             attachment.SizeBytes,
             BuildAttachmentDownloadPath(attachment.SessionId, attachment.AttachmentId),
             attachment.UploadedAt,
+            attachment.ExtractionStatus,
+            attachment.ExtractionProgressPercent,
+            attachment.ExtractionError,
+            attachment.ExtractionUpdatedAt,
             !string.IsNullOrWhiteSpace(attachment.ExtractedText),
             preview);
     }
@@ -1041,5 +1041,9 @@ public record SessionAttachmentResponse(
     long SizeBytes,
     string AccessUrl,
     DateTimeOffset UploadedAt,
+    string ExtractionStatus,
+    int ExtractionProgressPercent,
+    string? ExtractionError,
+    DateTimeOffset? ExtractionUpdatedAt,
     bool HasExtractedText,
     string? ExtractedTextPreview);

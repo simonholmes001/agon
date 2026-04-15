@@ -32,13 +32,46 @@ public sealed class AttachmentRepository : IAttachmentRepository
             BlobUri = attachment.BlobUri,
             AccessUrl = attachment.AccessUrl,
             ExtractedText = attachment.ExtractedText,
-            UploadedAt = attachment.UploadedAt.UtcDateTime
+            UploadedAt = attachment.UploadedAt.UtcDateTime,
+            ExtractionStatus = attachment.ExtractionStatus,
+            ExtractionProgressPercent = Math.Clamp(attachment.ExtractionProgressPercent, 0, 100),
+            ExtractionError = attachment.ExtractionError,
+            ExtractionUpdatedAt = (attachment.ExtractionUpdatedAt ?? attachment.UploadedAt).UtcDateTime
         };
 
         _dbContext.SessionAttachments.Add(entity);
         await _dbContext.SaveChangesAsync(cancellationToken);
 
         return attachment;
+    }
+
+    public async Task UpdateExtractionAsync(
+        Guid attachmentId,
+        string extractionStatus,
+        int extractionProgressPercent,
+        string? extractedText,
+        string? extractionError,
+        CancellationToken cancellationToken = default)
+    {
+        var entity = await _dbContext.SessionAttachments
+            .FirstOrDefaultAsync(a => a.Id == attachmentId, cancellationToken);
+        if (entity is null)
+        {
+            return;
+        }
+
+        var normalizedStatus = NormalizeStatus(extractionStatus);
+        entity.ExtractionStatus = normalizedStatus;
+        entity.ExtractionProgressPercent = Math.Clamp(extractionProgressPercent, 0, 100);
+        entity.ExtractionError = extractionError;
+        entity.ExtractionUpdatedAt = DateTime.UtcNow;
+
+        if (extractedText is not null || normalizedStatus == AttachmentExtractionStatus.Ready)
+        {
+            entity.ExtractedText = extractedText;
+        }
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
     }
 
     public async Task<IReadOnlyList<SessionAttachment>> ListBySessionAsync(
@@ -93,5 +126,24 @@ public sealed class AttachmentRepository : IAttachmentRepository
             entity.BlobUri,
             entity.AccessUrl,
             entity.ExtractedText,
-            DateTime.SpecifyKind(entity.UploadedAt, DateTimeKind.Utc));
+            DateTime.SpecifyKind(entity.UploadedAt, DateTimeKind.Utc),
+            NormalizeStatus(entity.ExtractionStatus),
+            Math.Clamp(entity.ExtractionProgressPercent, 0, 100),
+            entity.ExtractionError,
+            entity.ExtractionUpdatedAt is null
+                ? null
+                : DateTime.SpecifyKind(entity.ExtractionUpdatedAt.Value, DateTimeKind.Utc));
+
+    private static string NormalizeStatus(string? extractionStatus)
+    {
+        if (string.IsNullOrWhiteSpace(extractionStatus))
+        {
+            return AttachmentExtractionStatus.Ready;
+        }
+
+        var normalized = extractionStatus.Trim().ToLowerInvariant();
+        return AttachmentExtractionStatus.IsKnown(normalized)
+            ? normalized
+            : AttachmentExtractionStatus.Ready;
+    }
 }

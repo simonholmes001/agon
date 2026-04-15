@@ -880,6 +880,44 @@ public class OrchestratorTests
     }
 
     [Fact]
+    public async Task RunModeratorAsync_WithReadyAndInvokeCouncilRequest_ShouldAdvanceToAnalysisRound()
+    {
+        var runner = Substitute.For<IAgentRunner>();
+        var moderatorResponse = new AgentResponse(
+            AgentId.Moderator,
+            "STATUS: READY\nUnderstood. I can route this through the council.",
+            null,
+            80,
+            false,
+            null);
+
+        runner.RunModeratorAsync(Arg.Any<SessionState>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(moderatorResponse));
+
+        var sessionService = StubSessionService();
+        var orchestrator = BuildOrchestrator(
+            runner: runner,
+            sessionService: sessionService);
+
+        var state = BuildState(SessionPhase.Clarification);
+        state.ClarificationRoundCount = 1;
+        state.UserMessages.Add(new UserMessage(
+            "invoke council",
+            DateTimeOffset.UtcNow,
+            1));
+
+        await orchestrator.RunModeratorAsync(state, CancellationToken.None);
+
+        await sessionService.Received(1).AdvancePhaseAsync(
+            state,
+            SessionPhase.AnalysisRound,
+            Arg.Any<CancellationToken>());
+        await sessionService.DidNotReceive().RecordRoundSnapshotAsync(
+            state,
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task RunModeratorAsync_WithReadyAndUtilityImperativeWithoutQuestionMark_ShouldSuppressDebateChain()
     {
         var runner = Substitute.For<IAgentRunner>();

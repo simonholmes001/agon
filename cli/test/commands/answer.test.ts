@@ -217,7 +217,8 @@ describe('agon answer', () => {
 
       const selected = getLatestResponseMessage('PostDelivery', messages);
 
-      expect(selected).toBeUndefined();
+      expect(selected?.agentId).toBe('synthesizer');
+      expect(selected?.message).toBe('Final verdict');
     });
 
     it('should ignore user-authored messages when selecting latest debate response', () => {
@@ -241,6 +242,18 @@ describe('agon answer', () => {
       const selected = getLatestPostDeliveryAssistantMessage(messages, '2026-03-09T10:13:00Z');
 
       expect(selected?.message).toBe('New reply');
+    });
+
+    it('should return synthesizer message in post-delivery when no newer assistant message exists', () => {
+      const messages: Message[] = [
+        { agentId: 'post_delivery_assistant', message: 'Older reply', round: 2, createdAt: '2026-03-09T10:12:00Z' },
+        { agentId: 'synthesizer', message: 'Council output', round: 3, createdAt: '2026-03-09T10:16:00Z' }
+      ];
+
+      const selected = getLatestPostDeliveryAssistantMessage(messages, '2026-03-09T10:13:00Z');
+
+      expect(selected?.agentId).toBe('synthesizer');
+      expect(selected?.message).toBe('Council output');
     });
   });
 });
