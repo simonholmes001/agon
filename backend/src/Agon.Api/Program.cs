@@ -256,6 +256,7 @@ builder.Services.AddHttpClient("attachment-extraction", client =>
 });
 builder.Services.AddScoped<IAttachmentTextExtractor, AttachmentTextExtractor>();
 builder.Services.AddScoped<IDocumentParser, DocumentParseService>();
+// Canonical async extraction host. Legacy AttachmentExtractionWorker/queue types are intentionally not hosted.
 builder.Services.AddHostedService<AttachmentExtractionWorkerService>();
 
 if (authEnabled)
@@ -461,7 +462,6 @@ builder.Services.AddScoped<ISessionService>(sp => new SessionService(
 builder.Services.AddScoped<ConversationHistoryService>();
 if (!builder.Environment.IsEnvironment("Testing"))
 {
-    builder.Services.AddHostedService<AttachmentExtractionWorker>();
     builder.Services.AddHostedService<AttachmentRetentionCleanupService>();
 }
 

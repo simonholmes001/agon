@@ -6,6 +6,7 @@ using Agon.Api.Configuration;
 using Agon.Api.Services;
 using Agon.Infrastructure.Attachments;
 using FluentAssertions;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using System.Reflection;
@@ -38,6 +39,40 @@ public class ProgramIntegrationTests : IClassFixture<AgonWebApplicationFactory>
 
         // Assert
         client.Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task Application_Should_Start_In_Development_Environment()
+    {
+        using var factory = _factory.WithWebHostBuilder(builder =>
+        {
+            builder.UseEnvironment("Development");
+        });
+
+        using var client = factory.CreateClient();
+        var firstResponse = await client.GetAsync("/health");
+        await Task.Delay(TimeSpan.FromSeconds(2));
+        var secondResponse = await client.GetAsync("/health");
+
+        firstResponse.StatusCode.Should().Be(System.Net.HttpStatusCode.OK);
+        secondResponse.StatusCode.Should().Be(System.Net.HttpStatusCode.OK);
+    }
+
+    [Fact]
+    public void DevelopmentEnvironment_Should_Register_Canonical_Attachment_Extraction_Hosted_Services()
+    {
+        using var factory = _factory.WithWebHostBuilder(builder =>
+        {
+            builder.UseEnvironment("Development");
+        });
+        using var scope = factory.Services.CreateScope();
+        var hostedServiceTypeNames = scope.ServiceProvider.GetServices<IHostedService>()
+            .Select(service => service.GetType().Name)
+            .ToList();
+
+        hostedServiceTypeNames.Should().Contain(nameof(AttachmentExtractionWorkerService));
+        hostedServiceTypeNames.Should().Contain(nameof(AttachmentRetentionCleanupService));
+        hostedServiceTypeNames.Should().NotContain("AttachmentExtractionWorker");
     }
 
     [Fact]
