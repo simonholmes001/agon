@@ -196,7 +196,7 @@ describe('shell controller', () => {
 
     sessionManager.getCurrentSessionId.mockResolvedValue('session-123');
     apiClient.submitMessage.mockRejectedValue(
-      new AgonError(ErrorCode.NETWORK_ERROR, 'timeout of 120000ms exceeded')
+      new AgonError(ErrorCode.TIMEOUT, 'request timed out')
     );
     apiClient.getSession.mockResolvedValue(postDeliverySession);
     apiClient.getMessages
@@ -207,8 +207,22 @@ describe('shell controller', () => {
 
     expect(apiClient.submitMessage).toHaveBeenCalledWith('session-123', 'invoke council');
     expect(apiClient.getSession).toHaveBeenCalledWith('session-123');
+    expect(sessionManager.saveSession).toHaveBeenCalledWith(postDeliverySession);
     expect(result.session.phase).toBe('PostDelivery');
     expect(result.responseMessage?.message).toBe('Council completed answer');
+  });
+
+  it('does not trigger timeout recovery for non-timeout network errors', async () => {
+    sessionManager.getCurrentSessionId.mockResolvedValue('session-123');
+    apiClient.getMessages.mockResolvedValue([]);
+    apiClient.submitMessage.mockRejectedValue(
+      new AgonError(ErrorCode.NETWORK_ERROR, 'socket hang up')
+    );
+
+    await expect(controller.submitFollowUp('invoke council')).rejects.toMatchObject({
+      code: ErrorCode.NETWORK_ERROR
+    });
+    expect(apiClient.getSession).not.toHaveBeenCalled();
   });
 
   it('recovers from stale session on follow-up by starting a fresh session', async () => {

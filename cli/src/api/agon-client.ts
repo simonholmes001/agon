@@ -38,7 +38,7 @@ export interface AuthStatusResponse {
 export class AgonAPIClient {
   private readonly client: AxiosInstance;
   private readonly maxRetries = 2;
-  private readonly followUpTimeoutMs = 300000;
+  private readonly followUpTimeoutMs: number;
   private readonly logger: Logger;
   private readonly packageName: string;
   private readonly cliVersion: string;
@@ -55,6 +55,7 @@ export class AgonAPIClient {
     this.packageName = packageName;
     this.cliVersion = cliVersion;
     this.runtimeProfile = runtimeProfile;
+    this.followUpTimeoutMs = resolveFollowUpTimeoutMs(process.env.AGON_FOLLOWUP_TIMEOUT_MS);
     // Resolve auth token: explicit parameter > AGON_AUTH_TOKEN env > AGON_BEARER_TOKEN env
     const resolvedAuthToken =
       authToken?.trim() ||
@@ -491,7 +492,7 @@ export class AgonAPIClient {
     // Network error
     this.logger.error('Network error', { message: error.message });
 
-    const timeoutMessage = (error.message || '').toLowerCase().includes('timeout');
+    const timeoutError = error.code === 'ECONNABORTED';
     const timeoutSuggestions = [
       'The backend may still be processing your request',
       'Run `/refresh verdict` in shell to check for new assistant output',
@@ -499,9 +500,9 @@ export class AgonAPIClient {
     ];
 
     return new AgonError(
-      ErrorCode.NETWORK_ERROR,
+      timeoutError ? ErrorCode.TIMEOUT : ErrorCode.NETWORK_ERROR,
       error.message || 'Network error',
-      timeoutMessage
+      timeoutError
         ? timeoutSuggestions
         : ['Check your internet connection', 'Verify the API URL is correct']
     );
@@ -659,6 +660,20 @@ export class AgonAPIClient {
 
     return headers;
   }
+}
+
+function resolveFollowUpTimeoutMs(rawValue: string | undefined): number {
+  const defaultTimeoutMs = 300000;
+  if (!rawValue || !rawValue.trim()) {
+    return defaultTimeoutMs;
+  }
+
+  const parsed = Number(rawValue);
+  if (!Number.isFinite(parsed) || parsed < 1000) {
+    return defaultTimeoutMs;
+  }
+
+  return Math.floor(parsed);
 }
 
 function guessContentType(fileName: string): string {

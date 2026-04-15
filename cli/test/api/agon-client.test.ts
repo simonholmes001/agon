@@ -29,6 +29,7 @@ describe('AgonAPIClient', () => {
     vi.resetAllMocks();
     delete process.env.AGON_AUTH_TOKEN;
     delete process.env.AGON_BEARER_TOKEN;
+    delete process.env.AGON_FOLLOWUP_TIMEOUT_MS;
 
     mockAxios = {
       get: vi.fn(),
@@ -245,6 +246,17 @@ describe('AgonAPIClient', () => {
       expect(mapped).toBeInstanceOf(AgonError);
       const agonError = mapped as AgonError;
       expect(agonError.code).toBe(ErrorCode.BACKEND_UNAVAILABLE);
+    });
+
+    it('should map axios timeout errors to TIMEOUT', () => {
+      const error: any = new Error('timeout');
+      error.code = 'ECONNABORTED';
+
+      const mapped = (client as any).mapError(error);
+      expect(mapped).toBeInstanceOf(AgonError);
+      const agonError = mapped as AgonError;
+      expect(agonError.code).toBe(ErrorCode.TIMEOUT);
+      expect(agonError.suggestions).toContain('The backend may still be processing your request');
     });
 
     it('should map attachment storage-not-configured 503 to actionable backend unavailable message', () => {
@@ -555,6 +567,26 @@ describe('AgonAPIClient', () => {
       expect(result).toEqual(mockResponse);
     });
 
+    it('uses AGON_FOLLOWUP_TIMEOUT_MS when configured', async () => {
+      process.env.AGON_FOLLOWUP_TIMEOUT_MS = '180000';
+      const envClient = new AgonAPIClient('http://localhost:5000', '@agon_agents/cli', '0.1.3');
+      const sessionId = 'test-session-123';
+      const content = 'Follow-up';
+
+      (mockAxios.post as any).mockResolvedValue({ data: baseResponse(sessionId) });
+
+      await envClient.submitMessage(sessionId, content);
+
+      expect(mockAxios.post).toHaveBeenCalledWith(
+        `/sessions/${sessionId}/messages`,
+        { content },
+        expect.objectContaining({
+          timeout: 180000,
+          headers: {}
+        })
+      );
+    });
+
     it('should reject empty content', async () => {
       // Arrange
       const sessionId = 'test-session-123';
@@ -762,3 +794,14 @@ describe('AgonAPIClient', () => {
     });
   });
 });
+
+function baseResponse(sessionId: string): SessionResponse {
+  return {
+    id: sessionId,
+    status: 'active',
+    phase: 'CLARIFICATION',
+    createdAt: '2026-03-08T12:00:00Z',
+    updatedAt: '2026-03-08T12:10:00Z',
+    currentRound: 1
+  };
+}

@@ -140,6 +140,9 @@ export class ShellController {
             afterCreatedAt: previousResponseTimestamp,
             previousPostDeliveryCreatedAt: previousAssistant?.createdAt
           });
+          await this.sessionManager.saveSession(recovered.session);
+          this.shellSessionId = sessionId;
+          this.awaitingNewIdea = false;
           return recovered;
         }
 
@@ -483,11 +486,11 @@ export class ShellController {
   }
 
   private isRequestTimeoutError(error: unknown): boolean {
-    if (!(error instanceof AgonError) || error.code !== ErrorCode.NETWORK_ERROR) {
+    if (!(error instanceof AgonError)) {
       return false;
     }
 
-    return error.message.toLowerCase().includes('timeout');
+    return error.code === ErrorCode.TIMEOUT;
   }
 
   private async clearStaleSessionState(sessionId: string): Promise<void> {
