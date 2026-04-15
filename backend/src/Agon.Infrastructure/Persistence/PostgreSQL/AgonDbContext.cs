@@ -126,6 +126,7 @@ public class AgonDbContext : DbContext
                 .HasColumnName("extraction_progress_percent")
                 .HasDefaultValue(0);
             entity.Property(e => e.ExtractionUpdatedAt).HasColumnName("extraction_updated_at");
+            entity.Property(e => e.UploadedAt).HasColumnName("uploaded_at");
 
             entity.HasIndex(e => e.SessionId);
             entity.HasIndex(e => new { e.SessionId, e.UploadedAt });

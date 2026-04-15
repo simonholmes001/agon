@@ -525,7 +525,6 @@ public class SessionsController : ControllerBase
                 "Verify blob storage connectivity and retry.");
         }
 
-        
         var attachmentId = Guid.NewGuid();
         var attachment = new SessionAttachment(
             AttachmentId: attachmentId,
