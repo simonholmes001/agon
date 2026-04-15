@@ -6,6 +6,7 @@ using Agon.Api.Configuration;
 using Agon.Api.Services;
 using Agon.Infrastructure.Attachments;
 using FluentAssertions;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using System.Reflection;
@@ -38,6 +39,20 @@ public class ProgramIntegrationTests : IClassFixture<AgonWebApplicationFactory>
 
         // Assert
         client.Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task Application_Should_Start_In_Development_Environment()
+    {
+        using var factory = _factory.WithWebHostBuilder(builder =>
+        {
+            builder.UseEnvironment("Development");
+        });
+
+        using var client = factory.CreateClient();
+        var response = await client.GetAsync("/health");
+
+        response.StatusCode.Should().Be(System.Net.HttpStatusCode.OK);
     }
 
     [Fact]

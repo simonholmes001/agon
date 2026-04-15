@@ -461,7 +461,6 @@ builder.Services.AddScoped<ISessionService>(sp => new SessionService(
 builder.Services.AddScoped<ConversationHistoryService>();
 if (!builder.Environment.IsEnvironment("Testing"))
 {
-    builder.Services.AddHostedService<AttachmentExtractionWorker>();
     builder.Services.AddHostedService<AttachmentRetentionCleanupService>();
 }
 
