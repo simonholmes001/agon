@@ -1057,6 +1057,40 @@ public class AgentRunnerTests
     }
 
     [Fact]
+    public async Task RunModeratorAsync_AttachmentSummaryRequest_ShouldNotForceDeterministicDirectAnswerPath()
+    {
+        // Arrange
+        var repo = StubRepo();
+        var capturedContexts = new List<AgentContext>();
+
+        var moderator = Substitute.For<ICouncilAgent>();
+        moderator.AgentId.Returns(AgentId.Moderator);
+        moderator.ModelProvider.Returns("fake/model");
+        moderator.RunAsync(Arg.Do<AgentContext>(ctx => capturedContexts.Add(ctx)), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new AgentResponse(
+                AgentId.Moderator,
+                "STATUS: READY\nProceeding with full debate chain.",
+                null,
+                55,
+                false,
+                null)));
+
+        var runner = BuildRunner([moderator], repo: repo);
+        var state = BuildSessionState(idea: "Summarize the attached document and suggest improvements.");
+        state.Phase = SessionPhase.Clarification;
+        state.Attachments.Add(BuildAttachment("strategy.pdf", "application/pdf"));
+
+        // Act
+        var response = await runner.RunModeratorAsync(state, CancellationToken.None);
+
+        // Assert
+        await moderator.Received(1).RunAsync(Arg.Any<AgentContext>(), Arg.Any<CancellationToken>());
+        capturedContexts.Should().HaveCount(1);
+        capturedContexts[0].MicroDirective.Should().BeNull();
+        response.Message.Should().Contain("STATUS: READY");
+    }
+
+    [Fact]
     public async Task RunModeratorAsync_AttachmentImperativePromptWithoutAttachment_ShouldStillUseDeterministicDirectAnswerPath()
     {
         // Arrange
@@ -1134,6 +1168,87 @@ public class AgentRunnerTests
         response.Patch.Meta.Round.Should().Be(state.ClarificationRoundCount);
     }
 
+    [Fact]
+    public async Task RunSynthesisAsync_ShouldAppendCouncilContributionPercentages()
+    {
+        // Arrange
+        var synthesizer = StubAgent(
+            AgentId.Synthesizer,
+            new AgentResponse(
+                AgentId.Synthesizer,
+                "Final synthesized answer.",
+                null,
+                120,
+                false,
+                null));
+
+        var historyRepo = Substitute.For<IAgentMessageRepository>();
+        historyRepo.GetBySessionIdAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<AgentMessageRecord>>(
+            [
+                new AgentMessageRecord(Guid.NewGuid(), SessionId, AgentId.GptAgent, RepeatWord("gpt", 60), 2, DateTimeOffset.UtcNow),
+                new AgentMessageRecord(Guid.NewGuid(), SessionId, AgentId.GptAgent + "_critique", RepeatWord("gptc", 40), 2, DateTimeOffset.UtcNow),
+                new AgentMessageRecord(Guid.NewGuid(), SessionId, AgentId.GeminiAgent, RepeatWord("gem", 60), 2, DateTimeOffset.UtcNow),
+                new AgentMessageRecord(Guid.NewGuid(), SessionId, AgentId.ClaudeAgent, RepeatWord("claude", 40), 2, DateTimeOffset.UtcNow)
+            ]));
+        historyRepo.AddAsync(Arg.Any<AgentMessageRecord>(), Arg.Any<CancellationToken>())
+            .Returns(Task.CompletedTask);
+
+        var conversationHistory = new ConversationHistoryService(historyRepo);
+        var runner = BuildRunner([synthesizer], conversationHistory: conversationHistory);
+        var state = BuildSessionState(round: 2);
+
+        // Act
+        var response = await runner.RunSynthesisAsync(state, CancellationToken.None);
+
+        // Assert
+        response.Message.Should().Contain("## Council Contributions");
+        response.Message.Should().Contain("- gpt_agent: 50%");
+        response.Message.Should().Contain("- gemini_agent: 30%");
+        response.Message.Should().Contain("- claude_agent: 20%");
+
+        await historyRepo.Received(1).AddAsync(
+            Arg.Is<AgentMessageRecord>(m =>
+                m.SessionId == SessionId &&
+                m.AgentId == AgentId.Synthesizer &&
+                m.Round == 2 &&
+                m.Message.Contains("## Council Contributions")),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task RunSynthesisAsync_LowSignal_ShouldUseDeterministicFallbackPercentages()
+    {
+        // Arrange
+        var synthesizer = StubAgent(
+            AgentId.Synthesizer,
+            new AgentResponse(
+                AgentId.Synthesizer,
+                "Final synthesized answer.",
+                null,
+                80,
+                false,
+                null));
+
+        var historyRepo = Substitute.For<IAgentMessageRepository>();
+        historyRepo.GetBySessionIdAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<AgentMessageRecord>>(Array.Empty<AgentMessageRecord>()));
+        historyRepo.AddAsync(Arg.Any<AgentMessageRecord>(), Arg.Any<CancellationToken>())
+            .Returns(Task.CompletedTask);
+
+        var conversationHistory = new ConversationHistoryService(historyRepo);
+        var runner = BuildRunner([synthesizer], conversationHistory: conversationHistory);
+        var state = BuildSessionState(round: 5);
+
+        // Act
+        var response = await runner.RunSynthesisAsync(state, CancellationToken.None);
+
+        // Assert
+        response.Message.Should().Contain("- gpt_agent: 34%");
+        response.Message.Should().Contain("- gemini_agent: 33%");
+        response.Message.Should().Contain("- claude_agent: 33%");
+    }
+
     // ── Post-delivery follow-up tests ────────────────────────────────────────
 
     [Fact]
@@ -1184,6 +1299,96 @@ public class AgentRunnerTests
     }
 
     [Fact]
+    public async Task RunPostDeliveryFollowUpAsync_ComplexAttachmentRequest_ShouldInjectCouncilProposalDirective()
+    {
+        // Arrange
+        AgentContext? capturedContext = null;
+        var assistant = Substitute.For<ICouncilAgent>();
+        assistant.AgentId.Returns(AgentId.PostDeliveryAssistant);
+        assistant.ModelProvider.Returns("OpenAI gpt-5.2");
+        assistant.RunAsync(Arg.Do<AgentContext>(ctx => capturedContext = ctx), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new AgentResponse(
+                AgentId.PostDeliveryAssistant,
+                "I can invoke the full agent council for a deeper cross-agent answer. Reply with 'invoke council' if you want me to run it.",
+                null,
+                120,
+                false,
+                null)));
+
+        var history = StubConversationHistoryWithRepo();
+        var runner = BuildRunner([assistant], conversationHistory: history.Service);
+        var state = BuildSessionState(round: 4);
+        state.Phase = SessionPhase.PostDelivery;
+        state.Attachments.Add(BuildAttachment("brief.pdf", "application/pdf"));
+        state.UserMessages.Add(new UserMessage(
+            "Please summarize the attached brief and improve the recommendations.",
+            DateTimeOffset.UtcNow,
+            4));
+
+        // Act
+        await runner.RunPostDeliveryFollowUpAsync(
+            state,
+            "Please summarize the attached brief and improve the recommendations.",
+            CancellationToken.None);
+
+        // Assert
+        capturedContext.Should().NotBeNull();
+        capturedContext!.MicroDirective.Should().NotBeNullOrWhiteSpace();
+        capturedContext.MicroDirective.Should().Contain("I can invoke the full agent council for a deeper cross-agent answer.");
+    }
+
+    [Fact]
+    public async Task RunPostDeliveryFollowUpAsync_InvokeCouncilRequest_ShouldRunCouncilAndReturnSynthesis()
+    {
+        // Arrange
+        var assistant = Substitute.For<ICouncilAgent>();
+        assistant.AgentId.Returns(AgentId.PostDeliveryAssistant);
+        assistant.ModelProvider.Returns("OpenAI gpt-5.2");
+        assistant.RunAsync(Arg.Any<AgentContext>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new AgentResponse(
+                AgentId.PostDeliveryAssistant,
+                "Fallback assistant response.",
+                null,
+                10,
+                false,
+                null)));
+
+        var gpt = StubAgent(AgentId.GptAgent, SuccessResponse(AgentId.GptAgent));
+        var gemini = StubAgent(AgentId.GeminiAgent, SuccessResponse(AgentId.GeminiAgent));
+        var claude = StubAgent(AgentId.ClaudeAgent, SuccessResponse(AgentId.ClaudeAgent));
+        var synthesizer = StubAgent(
+            AgentId.Synthesizer,
+            new AgentResponse(
+                AgentId.Synthesizer,
+                "Council final answer.",
+                null,
+                70,
+                false,
+                null));
+
+        var runner = BuildRunner([assistant, gpt, gemini, claude, synthesizer]);
+        var state = BuildSessionState(round: 4);
+        state.Phase = SessionPhase.PostDelivery;
+        state.UserMessages.Add(new UserMessage("invoke council", DateTimeOffset.UtcNow, 4));
+
+        // Act
+        var response = await runner.RunPostDeliveryFollowUpAsync(
+            state,
+            "invoke council",
+            CancellationToken.None);
+
+        // Assert
+        response.AgentId.Should().Be(AgentId.Synthesizer);
+        response.Message.Should().Contain("Council final answer.");
+        response.Message.Should().Contain("## Council Contributions");
+
+        await assistant.DidNotReceive().RunAsync(Arg.Any<AgentContext>(), Arg.Any<CancellationToken>());
+        await gpt.Received(2).RunAsync(Arg.Any<AgentContext>(), Arg.Any<CancellationToken>());
+        await gemini.Received(2).RunAsync(Arg.Any<AgentContext>(), Arg.Any<CancellationToken>());
+        await claude.Received(2).RunAsync(Arg.Any<AgentContext>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task RunPostDeliveryFollowUpAsync_Should_ThrowWhenAssistantNotConfigured()
     {
         // Arrange
@@ -1226,6 +1431,9 @@ public class AgentRunnerTests
             ExtractedText: null,
             UploadedAt: DateTimeOffset.UtcNow);
     }
+
+    private static string RepeatWord(string word, int count) =>
+        string.Join(' ', Enumerable.Repeat(word, count));
 
     private static SessionAttachment BuildAttachmentWithExtractedText(string fileName, string contentType, string extractedText)
     {

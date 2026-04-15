@@ -28,7 +28,13 @@ internal static class ModeratorRoutingClassifier
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex WordRegex = new(@"\b[\w'-]+\b", RegexOptions.Compiled);
     private static readonly Regex AttachmentDirectActionRegex = new(
-        @"\b(describe|summari[sz]e|caption|transcribe|read|extract|analy[sz]e)\b.*\b(image|photo|picture|screenshot|scan|document|file|pdf|attachment)\b|\b(this|attached)\s+(image|document|file|pdf|attachment)\b",
+        @"\b(describe|caption|transcribe|read|extract)\b.*\b(image|photo|picture|screenshot|scan|document|file|pdf|attachment)\b|\b(this|attached)\s+(image|document|file|pdf|attachment)\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex CouncilTriggerRegex = new(
+        @"\b(invoke(?:\s+the)?\s+council|run(?:\s+the)?\s+council|agent\s+council|multi-agent|full\s+debate|all\s+agents)\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex CouncilIntentRegex = new(
+        @"\b(summari[sz]e|improv(?:e|ement)|revise|rewrite|analy[sz]e|review|assess|evaluate|compare|synthesi[sz]e|expand|deep\s+dive|trade[- ]?off|tradeoff|recommend(?:ation)?|critique)\b",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     public static bool ShouldRunIntentRouter(SessionState state)
@@ -41,6 +47,11 @@ internal static class ModeratorRoutingClassifier
 
         var trimmed = latestInput.Trim();
         if (trimmed.Length is < 4 or > 600)
+        {
+            return false;
+        }
+
+        if (ShouldForceCouncilPath(state))
         {
             return false;
         }
@@ -61,7 +72,39 @@ internal static class ModeratorRoutingClassifier
             return false;
         }
 
+        if (ShouldForceCouncilPath(state))
+        {
+            return false;
+        }
+
         return LooksLikeSimpleDirectQuery(latestInput);
+    }
+
+    public static bool ShouldForceCouncilPath(SessionState state)
+    {
+        var latestInput = GetLatestUserInput(state);
+        if (string.IsNullOrWhiteSpace(latestInput))
+        {
+            return false;
+        }
+
+        var trimmed = latestInput.Trim();
+        if (trimmed.Length < 4)
+        {
+            return false;
+        }
+
+        if (CouncilTriggerRegex.IsMatch(trimmed))
+        {
+            return true;
+        }
+
+        if (state.Attachments.Count == 0)
+        {
+            return false;
+        }
+
+        return CouncilIntentRegex.IsMatch(trimmed);
     }
 
     private static string GetLatestUserInput(SessionState state)

@@ -52,12 +52,27 @@ public sealed class AgentRunner : IAgentRunner
         Then provide one short reason line.
         Do not ask clarifying questions.
         """;
+    private const string PostDeliveryCouncilProposalDirective = """
+        This follow-up request is likely better served by full council analysis.
+        In your reply, explicitly offer council invocation.
+        Include this exact sentence once:
+        "I can invoke the full agent council for a deeper cross-agent answer. Reply with 'invoke council' if you want me to run it."
+        Then provide a short provisional answer based on current context.
+        Keep the response concise and practical.
+        """;
     private static readonly Regex ModeratorStatusRegex = new(
         @"^\s*(?:status|clarification_status)\s*[:=]\s*(DIRECT_ANSWER|READY|NEEDS_INFO)\b",
         RegexOptions.Multiline | RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex ModeratorRouteRegex = new(
         @"^\s*route\s*[:=]\s*(DIRECT_ANSWER|FULL_DEBATE)\b",
         RegexOptions.Multiline | RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly string[] CouncilContributionAgentIds =
+    [
+        Domain.Agents.AgentId.GptAgent,
+        Domain.Agents.AgentId.GeminiAgent,
+        Domain.Agents.AgentId.ClaudeAgent
+    ];
+    private const string CritiqueAgentSuffix = "_critique";
 
     private readonly IReadOnlyList<ICouncilAgent> _agents;
     private readonly Dictionary<string, string> _modelProviderByAgentId;
@@ -219,6 +234,14 @@ public sealed class AgentRunner : IAgentRunner
         bool shouldRunIntentRouter,
         CancellationToken cancellationToken)
     {
+        if (ModeratorRoutingClassifier.ShouldForceCouncilPath(state))
+        {
+            _logger?.LogInformation(
+                "Deterministic moderator classifier selected FULL_DEBATE for session {SessionId}.",
+                state.SessionId);
+            return new ModeratorRouteDecision(false, "deterministic_council");
+        }
+
         if (ModeratorRoutingClassifier.ShouldForceDirectAnswer(state))
         {
             _logger?.LogInformation(
@@ -240,6 +263,14 @@ public sealed class AgentRunner : IAgentRunner
 
             if (route == ModeratorRoute.DirectAnswer)
             {
+                if (ModeratorRoutingClassifier.ShouldForceCouncilPath(state))
+                {
+                    _logger?.LogInformation(
+                        "Moderator intent router suggested DIRECT_ANSWER, but council-path override applied for session {SessionId}.",
+                        state.SessionId);
+                    return new ModeratorRouteDecision(false, "llm_router_overridden_to_council");
+                }
+
                 _logger?.LogInformation(
                     "Moderator intent router selected DIRECT_ANSWER for session {SessionId}.",
                     state.SessionId);
@@ -463,6 +494,12 @@ public sealed class AgentRunner : IAgentRunner
         string userMessage,
         CancellationToken cancellationToken)
     {
+        var councilDecision = PostDeliveryCouncilClassifier.Classify(state, userMessage);
+        if (councilDecision == PostDeliveryCouncilDecision.Invoke)
+        {
+            return await RunPostDeliveryCouncilAsync(state, userMessage, cancellationToken);
+        }
+
         var assistant = _agents.FirstOrDefault(a => a.AgentId == Domain.Agents.AgentId.PostDeliveryAssistant);
         if (assistant is null)
         {
@@ -478,7 +515,9 @@ public sealed class AgentRunner : IAgentRunner
             state.FrictionLevel,
             state.CurrentRound,
             state.UserMessages,
-            priorContext,
+            councilDecision == PostDeliveryCouncilDecision.Propose
+                ? $"{priorContext}\n\n{PostDeliveryCouncilProposalDirective}"
+                : priorContext,
             state.ResearchToolsEnabled,
             state.Attachments);
 
@@ -502,6 +541,43 @@ public sealed class AgentRunner : IAgentRunner
             response.TokensUsed);
 
         return response;
+    }
+
+    private async Task<AgentResponse> RunPostDeliveryCouncilAsync(
+        SessionState state,
+        string userMessage,
+        CancellationToken cancellationToken)
+    {
+        if (state.Attachments.Count > 0 && !state.Attachments.Any(a => !string.IsNullOrWhiteSpace(a.ExtractedText)))
+        {
+            _logger?.LogWarning(
+                "Post-delivery council invocation for session {SessionId} has no extracted attachment text yet. ReasonCode={ReasonCode}",
+                state.SessionId,
+                "ATTACHMENT_CONTEXT_PENDING");
+        }
+
+        _logger?.LogInformation(
+            "Post-delivery council invocation accepted for session {SessionId}. ReasonCode={ReasonCode}",
+            state.SessionId,
+            "COUNCIL_INVOKED_BY_USER");
+
+        var analysisResponses = await RunAnalysisRoundAsync(state, cancellationToken);
+        state.LastRoundMessages.Clear();
+        foreach (var response in analysisResponses.Where(r => !r.TimedOut && !string.IsNullOrWhiteSpace(r.Message)))
+        {
+            state.LastRoundMessages[response.AgentId] = response.Message;
+        }
+
+        await RunCritiqueRoundAsync(state, cancellationToken);
+        var synthesisResponse = await RunSynthesisAsync(state, cancellationToken);
+
+        _logger?.LogInformation(
+            "Post-delivery council invocation completed for session {SessionId}. User message length: {Length}, Tokens: {Tokens}",
+            state.SessionId,
+            userMessage.Length,
+            synthesisResponse.TokensUsed);
+
+        return synthesisResponse;
     }
 
     /// <summary>
@@ -654,6 +730,18 @@ public sealed class AgentRunner : IAgentRunner
 
         await AccumulateTokensAsync(state, [response], cancellationToken);
 
+        if (!response.TimedOut && !string.IsNullOrWhiteSpace(response.Message))
+        {
+            var contributionBlock = await BuildCouncilContributionBlockAsync(state, cancellationToken);
+            if (!string.IsNullOrWhiteSpace(contributionBlock))
+            {
+                response = response with
+                {
+                    Message = $"{response.Message.TrimEnd()}\n\n{contributionBlock}"
+                };
+            }
+        }
+
         // Store synthesizer message so the CLI can fetch it
         if (!response.TimedOut && !string.IsNullOrWhiteSpace(response.Message))
         {
@@ -666,6 +754,118 @@ public sealed class AgentRunner : IAgentRunner
         }
 
         return response;
+    }
+
+    private async Task<string?> BuildCouncilContributionBlockAsync(
+        SessionState state,
+        CancellationToken cancellationToken)
+    {
+        var history = await _conversationHistory.GetMessagesAsync(state.SessionId, cancellationToken);
+        var contributionUnitsByAgent = CouncilContributionAgentIds.ToDictionary(
+            agentId => agentId,
+            _ => 0,
+            StringComparer.Ordinal);
+
+        foreach (var message in history.Where(m => m.Round == state.CurrentRound))
+        {
+            var baseAgentId = ResolveContributionAgentId(message.AgentId);
+            if (baseAgentId is null)
+            {
+                continue;
+            }
+
+            contributionUnitsByAgent[baseAgentId] += EstimateContributionUnits(message.Message);
+        }
+
+        var totalUnits = contributionUnitsByAgent.Values.Sum();
+        var (percentages, reasonCode) = totalUnits <= 0
+            ? (BuildLowSignalFallbackPercentages(), "LOW_SIGNAL_FALLBACK")
+            : (CalculateRoundedPercentages(contributionUnitsByAgent, totalUnits), "WORD_WEIGHTED");
+        var ordered = CouncilContributionAgentIds.Select(agentId =>
+            $"{agentId}: {percentages[agentId]}%");
+
+        _logger?.LogInformation(
+            "Council contribution breakdown computed for session {SessionId}. ReasonCode={ReasonCode}, gpt_agent={GptPercent}, gemini_agent={GeminiPercent}, claude_agent={ClaudePercent}, totalUnits={TotalUnits}",
+            state.SessionId,
+            reasonCode,
+            percentages[Domain.Agents.AgentId.GptAgent],
+            percentages[Domain.Agents.AgentId.GeminiAgent],
+            percentages[Domain.Agents.AgentId.ClaudeAgent],
+            totalUnits);
+
+        return "## Council Contributions\n"
+             + "_Percentages estimate each council member's share of contribution signals in this answer._\n"
+             + string.Join('\n', ordered.Select(line => $"- {line}"));
+    }
+
+    private static Dictionary<string, int> BuildLowSignalFallbackPercentages()
+    {
+        var fallback = CouncilContributionAgentIds.ToDictionary(
+            agentId => agentId,
+            _ => 33,
+            StringComparer.Ordinal);
+        fallback[CouncilContributionAgentIds[0]] = 34;
+        return fallback;
+    }
+
+    private static string? ResolveContributionAgentId(string agentId)
+    {
+        foreach (var councilAgentId in CouncilContributionAgentIds)
+        {
+            if (string.Equals(agentId, councilAgentId, StringComparison.Ordinal))
+            {
+                return councilAgentId;
+            }
+
+            if (string.Equals(agentId, councilAgentId + CritiqueAgentSuffix, StringComparison.Ordinal))
+            {
+                return councilAgentId;
+            }
+        }
+
+        return null;
+    }
+
+    private static int EstimateContributionUnits(string message)
+    {
+        if (string.IsNullOrWhiteSpace(message))
+        {
+            return 0;
+        }
+
+        return message
+            .Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)
+            .Length;
+    }
+
+    private static Dictionary<string, int> CalculateRoundedPercentages(
+        IReadOnlyDictionary<string, int> unitsByAgent,
+        int totalUnits)
+    {
+        var floorByAgent = new Dictionary<string, int>(StringComparer.Ordinal);
+        var fractionalByAgent = new List<(string AgentId, double FractionalPart)>();
+        var assigned = 0;
+
+        foreach (var agentId in CouncilContributionAgentIds)
+        {
+            var units = unitsByAgent.TryGetValue(agentId, out var value) ? value : 0;
+            var exactPercent = units * 100d / totalUnits;
+            var floored = (int)Math.Floor(exactPercent);
+            floorByAgent[agentId] = floored;
+            assigned += floored;
+            fractionalByAgent.Add((agentId, exactPercent - floored));
+        }
+
+        var remaining = 100 - assigned;
+        foreach (var entry in fractionalByAgent
+                     .OrderByDescending(x => x.FractionalPart)
+                     .ThenBy(x => x.AgentId, StringComparer.Ordinal)
+                     .Take(Math.Max(0, remaining)))
+        {
+            floorByAgent[entry.AgentId] += 1;
+        }
+
+        return floorByAgent;
     }
 
     /// <summary>

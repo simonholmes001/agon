@@ -1,5 +1,10 @@
 import type { Message, SessionResponse } from '../api/types.js';
 
+const postDeliveryResponseAgentIds = new Set([
+  'post_delivery_assistant',
+  'synthesizer'
+]);
+
 export function normalizePhase(phase: string): string {
   return phase.replace(/[\s_-]/g, '').toLowerCase();
 }
@@ -40,7 +45,7 @@ export function getLatestResponseMessage(phase: string, messages: Message[]): Me
   }
 
   if (isPostDeliveryPhase(phase)) {
-    return ordered.find(m => m.agentId === 'post_delivery_assistant');
+    return getLatestPostDeliveryResponseMessage(messages);
   }
 
   return ordered.find(m => {
@@ -68,8 +73,15 @@ export function getLatestPostDeliveryAssistantMessage(
   messages: Message[],
   afterCreatedAt?: string
 ): Message | undefined {
+  return getLatestPostDeliveryResponseMessage(messages, afterCreatedAt);
+}
+
+export function getLatestPostDeliveryResponseMessage(
+  messages: Message[],
+  afterCreatedAt?: string
+): Message | undefined {
   const ordered = [...messages]
-    .filter(m => m.agentId === 'post_delivery_assistant')
+    .filter(m => postDeliveryResponseAgentIds.has(m.agentId))
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
   if (!afterCreatedAt) {

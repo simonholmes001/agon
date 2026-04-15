@@ -26,7 +26,8 @@ describe('shell controller', () => {
       getMessages: vi.fn(),
       submitMessage: vi.fn(),
       getArtifact: vi.fn(),
-      uploadAttachment: vi.fn()
+      uploadAttachment: vi.fn(),
+      listAttachments: vi.fn()
     };
 
     sessionManager = {
@@ -245,6 +246,31 @@ describe('shell controller', () => {
 
     expect(apiClient.getSession).toHaveBeenCalledWith('session-123');
     expect(session.id).toBe('session-123');
+  });
+
+  it('lists attachments for active session', async () => {
+    sessionManager.getCurrentSessionId.mockResolvedValue('session-123');
+    apiClient.listAttachments.mockResolvedValue([
+      {
+        id: 'att-1',
+        sessionId: 'session-123',
+        fileName: 'brief.md',
+        contentType: 'text/markdown',
+        sizeBytes: 1234,
+        accessUrl: '/sessions/session-123/attachments/att-1/content',
+        uploadedAt: '2026-03-10T10:02:00Z',
+        hasExtractedText: false,
+        extractionStatus: 'extracting',
+        extractionProgressPercent: 35
+      }
+    ]);
+
+    const result = await controller.listAttachments();
+
+    expect(apiClient.listAttachments).toHaveBeenCalledWith('session-123');
+    expect(result.sessionId).toBe('session-123');
+    expect(result.attachments).toHaveLength(1);
+    expect(result.attachments[0]?.extractionStatus).toBe('extracting');
   });
 
   it('lists sessions from API and syncs cache', async () => {

@@ -24,4 +24,6 @@ public sealed record SessionAttachment(
     string? ExtractedText,
     DateTimeOffset UploadedAt,
     AttachmentExtractionStatus ExtractionStatus = AttachmentExtractionStatus.Uploaded,
-    string? ExtractionFailureReason = null);
+    string? ExtractionFailureReason = null,
+    int ExtractionProgressPercent = 0,
+    DateTimeOffset? ExtractionUpdatedAt = null);

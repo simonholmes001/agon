@@ -434,16 +434,27 @@ export default class Shell extends Command {
         if (outcome.hasExtractedText) {
           this.log(chalk.dim('Attachment content extracted and added to agent context.'));
         } else {
-          if (outcome.contentType.toLowerCase().startsWith('image/')) {
-            this.log(
-              chalk.yellow(
-                'Image uploaded, but backend vision extraction returned no content. '
-                + 'Check OPENAI_KEY and ATTACHMENTPROCESSING__OPENAIVISION__ENABLED on backend.'
-              )
-            );
-          } else {
-            this.log(chalk.dim('No text extraction available; file metadata/link still added to context.'));
-          }
+          this.log(chalk.dim('Extraction started in background. Run /attachments to monitor progress.'));
+        }
+        return;
+      }
+      case 'attachments': {
+        if (outcome.attachments.length === 0) {
+          this.log(chalk.dim(`No attachments found for session ${outcome.sessionId}.`));
+          return;
+        }
+
+        this.log(`Attachments for session ${outcome.sessionId}:`);
+        for (const [index, attachment] of outcome.attachments.entries()) {
+          const status = attachment.extractionStatus ?? (attachment.hasExtractedText ? 'ready' : 'unknown');
+          const progress = Number.isFinite(attachment.extractionProgressPercent)
+            ? ` ${Math.max(0, Math.min(100, attachment.extractionProgressPercent ?? 0))}%`
+            : '';
+          const error = attachment.extractionError ? ` | error=${attachment.extractionError}` : '';
+          this.log(
+            `  ${index + 1}. ${attachment.fileName} (${formatBytes(attachment.sizeBytes)}) `
+            + `status=${status}${progress}${error}`
+          );
         }
         return;
       }
@@ -1263,6 +1274,8 @@ function getSpinnerText(parsed: ReturnType<typeof parseShellInput>): string | nu
       return 'Resuming session...';
     case 'show-sessions':
       return 'Loading sessions...';
+    case 'attachments':
+      return 'Loading attachments...';
     case 'status':
       return 'Fetching status...';
     case 'show':

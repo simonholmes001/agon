@@ -662,7 +662,6 @@ public class SessionsController : ControllerBase
             !string.IsNullOrWhiteSpace(finalized.ExtractedText),
             finalized.ExtractionStatus);
         AttachmentMetrics.UploadSuccess.Add(1);
-
         return CreatedAtAction(
             nameof(ListAttachments),
             new { id },
@@ -928,7 +927,9 @@ public class SessionsController : ControllerBase
             !string.IsNullOrWhiteSpace(attachment.ExtractedText),
             preview,
             attachment.ExtractionStatus.ToString().ToLowerInvariant(),
-            attachment.ExtractionFailureReason);
+            attachment.ExtractionFailureReason,
+            attachment.ExtractionProgressPercent,
+            attachment.ExtractionUpdatedAt);
     }
 
     private int ResolveMaxAllowedBytes(AttachmentRoutingRoute route)
@@ -1177,4 +1178,6 @@ public record SessionAttachmentResponse(
     bool HasExtractedText,
     string? ExtractedTextPreview,
     string? ExtractionStatus = null,
-    string? ExtractionFailureReason = null);
+    string? ExtractionFailureReason = null,
+    int ExtractionProgressPercent = 0,
+    DateTimeOffset? ExtractionUpdatedAt = null);

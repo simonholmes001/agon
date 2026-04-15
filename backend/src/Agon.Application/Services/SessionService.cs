@@ -125,6 +125,21 @@ public sealed class SessionService : ISessionService
         return await _attachmentRepo.ListBySessionAsync(sessionId, cancellationToken);
     }
 
+    public async Task<IReadOnlyList<SessionAttachment>> ListPendingAttachmentExtractionsAsync(
+        int limit,
+        CancellationToken cancellationToken = default)
+    {
+        if (_attachmentRepo is null || limit <= 0)
+        {
+            return Array.Empty<SessionAttachment>();
+        }
+
+        return await _attachmentRepo.ListByExtractionStatusAsync(
+            AttachmentExtractionStatus.Uploaded,
+            limit,
+            cancellationToken: cancellationToken);
+    }
+
     public async Task<SessionAttachment> SaveAttachmentAsync(
         SessionAttachment attachment,
         CancellationToken cancellationToken = default)
@@ -292,4 +307,6 @@ public sealed class SessionService : ISessionService
         state.Attachments.Clear();
         state.Attachments.AddRange(attachments);
     }
+
 }
+

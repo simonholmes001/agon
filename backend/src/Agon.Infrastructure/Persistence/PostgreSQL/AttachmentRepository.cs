@@ -32,9 +32,11 @@ public sealed class AttachmentRepository : IAttachmentRepository
             BlobUri = attachment.BlobUri,
             AccessUrl = attachment.AccessUrl,
             ExtractedText = attachment.ExtractedText,
+            UploadedAt = attachment.UploadedAt.UtcDateTime,
             ExtractionStatus = ToStorageStatus(attachment.ExtractionStatus),
             ExtractionFailureReason = attachment.ExtractionFailureReason,
-            UploadedAt = attachment.UploadedAt.UtcDateTime
+            ExtractionProgressPercent = Math.Clamp(attachment.ExtractionProgressPercent, 0, 100),
+            ExtractionUpdatedAt = attachment.ExtractionUpdatedAt?.UtcDateTime
         };
 
         _dbContext.SessionAttachments.Add(entity);
@@ -66,6 +68,13 @@ public sealed class AttachmentRepository : IAttachmentRepository
         entity.ExtractionStatus = ToStorageStatus(extractionStatus);
         entity.ExtractedText = extractedText;
         entity.ExtractionFailureReason = extractionFailureReason;
+        entity.ExtractionProgressPercent = extractionStatus switch
+        {
+            AttachmentExtractionStatus.Extracting => Math.Clamp(entity.ExtractionProgressPercent, 1, 99),
+            AttachmentExtractionStatus.Ready => 100,
+            _ => 0
+        };
+        entity.ExtractionUpdatedAt = DateTime.UtcNow;
 
         await _dbContext.SaveChangesAsync(cancellationToken);
         return ToModel(entity);
@@ -104,6 +113,7 @@ public sealed class AttachmentRepository : IAttachmentRepository
             entity.ExtractionStatus = ToStorageStatus(nextStatus);
             entity.ExtractedText = extractedText;
             entity.ExtractionFailureReason = extractionFailureReason;
+            entity.ExtractionUpdatedAt = DateTime.UtcNow;
             await _dbContext.SaveChangesAsync(cancellationToken);
             return true;
         }
@@ -116,7 +126,8 @@ public sealed class AttachmentRepository : IAttachmentRepository
             .ExecuteUpdateAsync(setters => setters
                 .SetProperty(a => a.ExtractionStatus, nextStorageStatus)
                 .SetProperty(a => a.ExtractedText, extractedText)
-                .SetProperty(a => a.ExtractionFailureReason, extractionFailureReason),
+                .SetProperty(a => a.ExtractionFailureReason, extractionFailureReason)
+                .SetProperty(a => a.ExtractionUpdatedAt, DateTime.UtcNow),
                 cancellationToken);
 
         return affected == 1;
@@ -205,7 +216,11 @@ public sealed class AttachmentRepository : IAttachmentRepository
             entity.ExtractedText,
             DateTime.SpecifyKind(entity.UploadedAt, DateTimeKind.Utc),
             ParseStorageStatus(entity.ExtractionStatus),
-            entity.ExtractionFailureReason);
+            entity.ExtractionFailureReason,
+            Math.Clamp(entity.ExtractionProgressPercent, 0, 100),
+            entity.ExtractionUpdatedAt is null
+                ? null
+                : DateTime.SpecifyKind(entity.ExtractionUpdatedAt.Value, DateTimeKind.Utc));
 
     private static string ToStorageStatus(AttachmentExtractionStatus status) =>
         status.ToString().ToLowerInvariant();

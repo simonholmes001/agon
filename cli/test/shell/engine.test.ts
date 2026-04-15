@@ -42,6 +42,7 @@ describe('shell engine', () => {
       selectSession: vi.fn().mockResolvedValue(session),
       resumeSession: vi.fn().mockResolvedValue(session),
       listSessions: vi.fn().mockResolvedValue([session]),
+      listAttachments: vi.fn().mockResolvedValue([]),
       getStatus: vi.fn().mockResolvedValue(session),
       getArtifact: vi.fn().mockResolvedValue({
         sessionId: 'session-123',
@@ -51,6 +52,7 @@ describe('shell engine', () => {
       attachDocument: vi.fn().mockResolvedValue({
         sessionId: 'session-123',
         attachment: {
+          id: 'attachment-1',
           fileName: 'spec.md',
           contentType: 'text/markdown',
           sizeBytes: 1024,
@@ -157,6 +159,43 @@ describe('shell engine', () => {
     await engine.handleInput('/show-sessions');
     expect(controller.listSessions).toHaveBeenCalled();
     expect(print).toHaveBeenCalledWith('Sessions:');
+  });
+
+  it('executes /attachments via controller', async () => {
+    controller.listAttachments.mockResolvedValue({
+      sessionId: 'session-123',
+      attachments: [
+        {
+          id: 'att-1',
+          fileName: 'brief.md',
+          contentType: 'text/markdown',
+          sizeBytes: 100,
+          hasExtractedText: false,
+          extractionStatus: 'extracting',
+          extractionProgressPercent: 45
+        }
+      ]
+    });
+
+    const outcome = await engine.handleInput('/attachments');
+
+    expect(controller.listAttachments).toHaveBeenCalledWith();
+    expect(outcome).toEqual({
+      kind: 'attachments',
+      sessionId: 'session-123',
+      attachments: [
+        {
+          id: 'att-1',
+          fileName: 'brief.md',
+          contentType: 'text/markdown',
+          sizeBytes: 100,
+          hasExtractedText: false,
+          extractionStatus: 'extracting',
+          extractionProgressPercent: 45,
+          extractionError: undefined
+        }
+      ]
+    });
   });
 
   it('executes /resume with optional session id', async () => {
@@ -395,6 +434,7 @@ describe('shell engine', () => {
     controller.attachDocument.mockResolvedValueOnce({
       sessionId: 'session-123',
       attachment: {
+        id: 'attachment-image-1',
         fileName: 'image-one.jpeg',
         contentType: 'image/jpeg',
         sizeBytes: 2048,
@@ -404,6 +444,7 @@ describe('shell engine', () => {
     controller.attachDocument.mockResolvedValueOnce({
       sessionId: 'session-123',
       attachment: {
+        id: 'attachment-image-2',
         fileName: 'image-two.jpeg',
         contentType: 'image/jpeg',
         sizeBytes: 4096,

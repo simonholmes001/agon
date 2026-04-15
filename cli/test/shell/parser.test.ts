@@ -107,6 +107,18 @@ describe('shell parser', () => {
     });
   });
 
+  it('parses /attachments aliases', () => {
+    expect(parseShellInput('/attachments')).toEqual({
+      type: 'slash',
+      command: 'attachments'
+    });
+
+    expect(parseShellInput('/files')).toEqual({
+      type: 'slash',
+      command: 'attachments'
+    });
+  });
+
   it('parses /session <id>', () => {
     expect(parseShellInput('/session abc-123')).toEqual({
       type: 'slash',

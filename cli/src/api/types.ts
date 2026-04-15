@@ -87,6 +87,10 @@ export interface SessionAttachment {
   sizeBytes: number;
   accessUrl: string;
   uploadedAt: string;
+  extractionStatus: 'queued' | 'extracting' | 'ready' | 'failed';
+  extractionProgressPercent: number;
+  extractionError: string | null;
+  extractionUpdatedAt: string | null;
   hasExtractedText: boolean;
   extractedTextPreview?: string;
 }

@@ -46,6 +46,9 @@ export function parseShellInput(input: string): ParsedShellInput {
     case 'showsessions':
     case 'sessions':
       return { type: 'slash', command: 'show-sessions' };
+    case 'attachments':
+    case 'files':
+      return { type: 'slash', command: 'attachments' };
     case 'attach':
     case 'image':
       return parseAttach(rawCommandArgs);

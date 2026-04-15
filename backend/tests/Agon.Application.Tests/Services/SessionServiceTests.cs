@@ -566,6 +566,83 @@ public class SessionServiceTests
             Arg.Any<CancellationToken>());
     }
 
+    [Fact]
+    public async Task UpdateAttachmentExtractionStateAsync_Should_Delegate_To_Repository()
+    {
+        var attachmentRepo = Substitute.For<IAttachmentRepository>();
+        var returnedAttachment = BuildAttachment(AttachmentExtractionStatus.Ready);
+        attachmentRepo.UpdateExtractionStateAsync(
+                Arg.Any<Guid>(),
+                Arg.Any<AttachmentExtractionStatus>(),
+                Arg.Any<string?>(),
+                Arg.Any<string?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(returnedAttachment);
+        var svc = new SessionService(
+            StubSessionRepo(),
+            StubTruthMapRepo(),
+            StubSnapshotStore(),
+            attachmentRepo);
+        var attachmentId = Guid.NewGuid();
+
+        var result = await svc.UpdateAttachmentExtractionStateAsync(
+            attachmentId,
+            AttachmentExtractionStatus.Ready,
+            "extracted text",
+            null,
+            CancellationToken.None);
+
+        result.Should().Be(returnedAttachment);
+        await attachmentRepo.Received(1).UpdateExtractionStateAsync(
+            attachmentId,
+            AttachmentExtractionStatus.Ready,
+            "extracted text",
+            null,
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task ListPendingAttachmentExtractionsAsync_Should_Return_Uploaded_Attachments()
+    {
+        var uploaded = BuildAttachment(AttachmentExtractionStatus.Uploaded);
+        var attachmentRepo = Substitute.For<IAttachmentRepository>();
+        attachmentRepo.ListByExtractionStatusAsync(
+                AttachmentExtractionStatus.Uploaded,
+                25,
+                Arg.Any<DateTimeOffset?>(),
+                Arg.Any<CancellationToken>())
+            .Returns([uploaded]);
+        var svc = new SessionService(
+            StubSessionRepo(),
+            StubTruthMapRepo(),
+            StubSnapshotStore(),
+            attachmentRepo);
+
+        var result = await svc.ListPendingAttachmentExtractionsAsync(25, CancellationToken.None);
+
+        result.Should().HaveCount(1);
+        await attachmentRepo.Received(1).ListByExtractionStatusAsync(
+            AttachmentExtractionStatus.Uploaded,
+            25,
+            Arg.Any<DateTimeOffset?>(),
+            Arg.Any<CancellationToken>());
+    }
+
+    private static SessionAttachment BuildAttachment(AttachmentExtractionStatus extractionStatus) =>
+        new(
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            "doc.md",
+            "text/markdown",
+            128,
+            "blob",
+            "https://blob",
+            "/sessions/test/attachments/att/content",
+            null,
+            DateTimeOffset.UtcNow,
+            extractionStatus);
+
     // ── Helper for Orchestrator Injection ─────────────────────────────────────
 
     private static SessionService BuildServiceWithOrchestrator(
