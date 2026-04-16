@@ -5,6 +5,7 @@ using Agon.Domain.Engines;
 using Agon.Domain.Sessions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using System.Collections.Concurrent;
 using System.Text.RegularExpressions;
 
 namespace Agon.Application.Orchestration;
@@ -24,6 +25,13 @@ public sealed class Orchestrator : IOrchestrator
     private static readonly Regex ModeratorStatusRegex = new(
         @"^\s*(?:status|clarification_status)\s*[:=]\s*(DIRECT_ANSWER|READY|NEEDS_INFO)\b",
         RegexOptions.Multiline | RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    /// <summary>
+    /// In-process guard against duplicate background council jobs for the same session.
+    /// Scoped to the process lifetime — consistent with the fire-and-forget durability model.
+    /// Cleared on completion or failure so retries are unblocked after a genuine finish.
+    /// </summary>
+    private static readonly ConcurrentDictionary<Guid, bool> ActiveCouncilSessions = new();
 
     private readonly IAgentRunner _agentRunner;
     private readonly ISessionService _sessionService;
@@ -171,6 +179,18 @@ public sealed class Orchestrator : IOrchestrator
         if (PostDeliveryCouncilClassifier.Classify(state, userMessage) == PostDeliveryCouncilDecision.Invoke)
         {
             var sessionId = state.SessionId;
+
+            // Guard: reject duplicate invocations while a council is already running for this
+            // session in this process. The fast 202 response makes client retries more likely,
+            // so without this check concurrent requests could start competing council pipelines.
+            if (!ActiveCouncilSessions.TryAdd(sessionId, true))
+            {
+                _logger?.LogInformation(
+                    "Session {SessionId}: Post-delivery council already running — duplicate invocation ignored.",
+                    sessionId);
+                return;
+            }
+
             _ = Task.Run(async () =>
             {
                 try
@@ -199,6 +219,12 @@ public sealed class Orchestrator : IOrchestrator
                         ex,
                         "Session {SessionId}: Post-delivery council failed in background.",
                         sessionId);
+                }
+                finally
+                {
+                    // Always release the guard so the user can invoke council again after
+                    // completion or failure — including controlled retries.
+                    ActiveCouncilSessions.TryRemove(sessionId, out _);
                 }
             }, CancellationToken.None);
 
