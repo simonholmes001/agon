@@ -25,6 +25,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           OPENAI_KEY: ${{ secrets.OPENAI_KEY }}
-          CODEX_REVIEW_MODEL: gpt-5.2
+          CODEX_REVIEW_MODEL: gpt-5.4
           CODEX_REVIEW_DIFF_MAX: 120000
         run: node .github/scripts/codex-pr-review.mjs
