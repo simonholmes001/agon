@@ -1,8 +1,9 @@
 name: Release
 
 on:
-  push:
-    branches: [main]
+  # Disabled for automatic pushes to avoid duplicate Changesets release/publish
+  # with .github/workflows/publish-cli.yaml.
+  workflow_dispatch:
 
 concurrency: ${{ github.workflow }}-${{ github.ref }}
 
