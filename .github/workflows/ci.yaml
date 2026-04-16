@@ -56,23 +56,35 @@ jobs:
             exit 0
           fi
 
-          # Release/version-maintenance changes may legitimately update only
-          # generated CLI release files (and/or remove legacy cli/.changeset).
-          # Do not force an extra changeset in that case.
-          NON_RELEASE_CLI_CHANGES="$(
-            echo "${CHANGED_FILES}" \
-              | grep -E '^cli/' \
-              | grep -Ev '^cli/(CHANGELOG\.md|package\.json|package-lock\.json)$|^cli/\.changeset/' \
+          # Changeset enforcement is scoped to CLI paths only.
+          # If CLI changes are exclusively release-maintenance artifacts,
+          # allow commit/PR without a changeset.
+          CLI_CHANGED_FILES="$(echo "${CHANGED_FILES}" | grep -E '^cli/' || true)"
+          DISALLOWED_CLI_CHANGES="$(
+            echo "${CLI_CHANGED_FILES}" \
+              | grep -Ev '^(cli/(CHANGELOG\.md|package\.json|package-lock\.json)|cli/\.changeset/.*)$' \
               || true
           )"
-          if [ -z "${NON_RELEASE_CLI_CHANGES}" ]; then
-            echo "Only release-maintenance CLI files changed; skipping changeset requirement."
+          if [ -z "${DISALLOWED_CLI_CHANGES}" ]; then
+            echo "Only release-maintenance allowlisted files changed; skipping changeset requirement."
             exit 0
           fi
 
           echo "::error::CLI changes detected without a changeset file."
+          echo "::error::Disallowed CLI changed files without changeset:"
+          echo "${DISALLOWED_CLI_CHANGES}"
           echo "::error::Run 'npx --yes @changesets/cli add' and commit the generated file in .changeset/."
           exit 1
+
+      - name: Validate root changesets config (present and valid JSON)
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -f .changeset/config.json ]; then
+            echo "::error::Missing required .changeset/config.json at repo root."
+            exit 1
+          fi
+          node -e "JSON.parse(require('node:fs').readFileSync('.changeset/config.json', 'utf8'))"
 
   cli-tests:
     name: CLI Tests
