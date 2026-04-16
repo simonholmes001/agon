@@ -140,6 +140,9 @@
     "jwtInteractiveClientId": {
       "value": "04b07795-8ddb-461a-bbee-02f9e1bf7b46"
     },
+    "agonMinCliVersion": {
+      "value": "0.9.1"
+    },
     "trialAccessEnabled": {
       "value": true
     },

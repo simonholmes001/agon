@@ -50,14 +50,28 @@ jobs:
             exit 0
           fi
 
-          CHANGESET_FILES="$(echo "${CHANGED_FILES}" | grep -E '^cli/\.changeset/[^/]+\.md$' | grep -v '^cli/\.changeset/README\.md$' || true)"
+          CHANGESET_FILES="$(echo "${CHANGED_FILES}" | grep -E '^\.changeset/[^/]+\.md$' | grep -v '^\.changeset/README\.md$' || true)"
           if [ -n "${CHANGESET_FILES}" ]; then
             echo "Changeset file detected."
             exit 0
           fi
 
+          # Release/version-maintenance changes may legitimately update only
+          # generated CLI release files (and/or remove legacy cli/.changeset).
+          # Do not force an extra changeset in that case.
+          NON_RELEASE_CLI_CHANGES="$(
+            echo "${CHANGED_FILES}" \
+              | grep -E '^cli/' \
+              | grep -Ev '^cli/(CHANGELOG\.md|package\.json|package-lock\.json)$|^cli/\.changeset/' \
+              || true
+          )"
+          if [ -z "${NON_RELEASE_CLI_CHANGES}" ]; then
+            echo "Only release-maintenance CLI files changed; skipping changeset requirement."
+            exit 0
+          fi
+
           echo "::error::CLI changes detected without a changeset file."
-          echo "::error::Run 'npx --yes @changesets/cli add --cwd cli' and commit the generated file in cli/.changeset/."
+          echo "::error::Run 'npx --yes @changesets/cli add' and commit the generated file in .changeset/."
           exit 1
 
   cli-tests:

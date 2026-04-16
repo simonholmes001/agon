@@ -224,6 +224,9 @@ param jwtAudience string = ''
 @description('Optional public client ID used by CLI device-code login.')
 param jwtInteractiveClientId string = ''
 
+@description('Minimum supported Agon CLI version enforced by backend middleware.')
+param agonMinCliVersion string = '0.9.1'
+
 @description('Enable invite-only trial access controls in the backend.')
 param trialAccessEnabled bool = false
 
@@ -376,6 +379,7 @@ module appEdge './modules/app-edge-dev.bicep' = {
     jwtAuthority: jwtAuthority
     jwtAudience: jwtAudience
     jwtInteractiveClientId: jwtInteractiveClientId
+    agonMinCliVersion: agonMinCliVersion
     trialAccessEnabled: trialAccessEnabled
     trialAccessMode: trialAccessMode
     trialEnforceEntraGroupMembership: trialEnforceEntraGroupMembership

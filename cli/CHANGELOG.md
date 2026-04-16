@@ -1,5 +1,17 @@
 # @agon_agents/cli
 
+## 0.9.1
+
+### Patch Changes
+
+- Bump `ink` from `6.8.0` to `7.0.0`. Upgrades Node.js engine requirement to `>=22`.
+- Bump @oclif/core from 3.27.0 to 4.10.5
+- Bump `prettier` dev dependency from 3.8.1 to 3.8.2.
+- Improve large-document workflow UX by exposing async extraction lifecycle states and progress, adding `/attachments` status visibility, and improving post-delivery council invocation behavior and response attribution clarity.
+- Harden attachment extraction lifecycle contract handling by requiring extraction status/progress fields in the API type model and shell engine interfaces.
+- Prevent false failures for long-running `invoke council` follow-ups by increasing the message submission timeout and recovering from client-side timeouts by polling session/messages for the eventual response.
+- Harden long-running follow-up handling with structured timeout classification, configurable follow-up request timeout (`AGON_FOLLOWUP_TIMEOUT_MS`), and robust timeout-recovery state persistence.
+
 ## 0.9.0
 
 ### Minor Changes

@@ -72,6 +72,9 @@ param jwtAudience string = ''
 @description('Optional public client ID used by CLI device-code login.')
 param jwtInteractiveClientId string = ''
 
+@description('Minimum supported Agon CLI version enforced by backend middleware.')
+param agonMinCliVersion string = '0.9.1'
+
 @description('Enable invite-only trial access controls in the backend.')
 param trialAccessEnabled bool = false
 
@@ -730,6 +733,10 @@ resource appService 'Microsoft.Web/sites@2023-12-01' = {
         {
           name: 'Authentication__AzureAd__InteractiveClientId'
           value: jwtInteractiveClientId
+        }
+        {
+          name: 'Agon__MinCliVersion'
+          value: agonMinCliVersion
         }
         {
           name: 'TrialAccess__Enabled'
