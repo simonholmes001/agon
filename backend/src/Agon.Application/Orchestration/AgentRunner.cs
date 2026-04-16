@@ -524,6 +524,7 @@ public sealed class AgentRunner : IAgentRunner
         var response = await RunWithTimeoutAsync(assistant, context, cancellationToken);
         await AccumulateTokensAsync(state, [response], cancellationToken);
 
+        // CancellationToken.None: history write should complete even if the HTTP client disconnected.
         if (!response.TimedOut && !string.IsNullOrWhiteSpace(response.Message))
         {
             await _conversationHistory.StoreMessageAsync(
@@ -531,7 +532,7 @@ public sealed class AgentRunner : IAgentRunner
                 assistant.AgentId,
                 response.Message,
                 state.CurrentRound,
-                cancellationToken);
+                CancellationToken.None);
         }
 
         _logger?.LogInformation(
@@ -640,7 +641,8 @@ public sealed class AgentRunner : IAgentRunner
         await ApplyPatchesAsync(state, responses, cancellationToken);
         await AccumulateTokensAsync(state, responses, cancellationToken);
 
-        // Store all agent messages so the CLI can fetch them
+        // Store all agent messages so the CLI can fetch them.
+        // CancellationToken.None: history writes should complete even if the HTTP client disconnected.
         foreach (var response in responses.Where(r => !r.TimedOut && !string.IsNullOrWhiteSpace(r.Message)))
         {
             await _conversationHistory.StoreMessageAsync(
@@ -648,7 +650,7 @@ public sealed class AgentRunner : IAgentRunner
                 response.AgentId,
                 response.Message,
                 state.CurrentRound,
-                cancellationToken);
+                CancellationToken.None);
         }
 
         return responses;
@@ -687,7 +689,8 @@ public sealed class AgentRunner : IAgentRunner
         await ApplyPatchesAsync(state, responses, cancellationToken);
         await AccumulateTokensAsync(state, responses, cancellationToken);
 
-        // Store all critique agent messages so the CLI can fetch them
+        // Store all critique agent messages so the CLI can fetch them.
+        // CancellationToken.None: history writes should complete even if the HTTP client disconnected.
         foreach (var response in responses.Where(r => !r.TimedOut && !string.IsNullOrWhiteSpace(r.Message)))
         {
             await _conversationHistory.StoreMessageAsync(
@@ -695,7 +698,7 @@ public sealed class AgentRunner : IAgentRunner
                 response.AgentId + "_critique",
                 response.Message,
                 state.CurrentRound,
-                cancellationToken);
+                CancellationToken.None);
         }
 
         return responses;
@@ -742,7 +745,8 @@ public sealed class AgentRunner : IAgentRunner
             }
         }
 
-        // Store synthesizer message so the CLI can fetch it
+        // Store synthesizer message so the CLI can fetch it.
+        // CancellationToken.None: history write should complete even if the HTTP client disconnected.
         if (!response.TimedOut && !string.IsNullOrWhiteSpace(response.Message))
         {
             await _conversationHistory.StoreMessageAsync(
@@ -750,7 +754,7 @@ public sealed class AgentRunner : IAgentRunner
                 response.AgentId,
                 response.Message,
                 state.CurrentRound,
-                cancellationToken);
+                CancellationToken.None);
         }
 
         return response;
@@ -1444,9 +1448,11 @@ public sealed class AgentRunner : IAgentRunner
 
             try
             {
+                // CancellationToken.None: the DB write must survive HTTP client disconnect / proxy timeout.
                 state.TruthMap = await _truthMapRepository.ApplyPatchAsync(
-                    state.SessionId, patch, cancellationToken);
+                    state.SessionId, patch, CancellationToken.None);
 
+                // Request token for broadcast: delivery is best-effort; if the client is gone, skip it.
                 await _broadcaster.SendTruthMapPatchAsync(
                     state.SessionId, patch, state.TruthMap.Version, cancellationToken);
             }
@@ -1490,7 +1496,9 @@ public sealed class AgentRunner : IAgentRunner
             return;
         }
 
-        await _tokenUsageRepository.AddRangeAsync(usageRecords, cancellationToken);
+        // CancellationToken.None: billing records must be written even if the HTTP client disconnected or the
+        // gateway timed out. DB command timeouts (Npgsql CommandTimeout) still bound these writes independently.
+        await _tokenUsageRepository.AddRangeAsync(usageRecords, CancellationToken.None);
     }
 
     private TokenUsageRecord BuildUsageRecord(
