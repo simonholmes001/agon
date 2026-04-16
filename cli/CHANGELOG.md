@@ -1,11 +1,19 @@
 # @agon_agents/cli
 
+## 0.9.3
+
+### Patch Changes
+
+- b659a26: Harden startup update checks and release metadata verification.
+  - Make shell startup update checks best-effort so transient update-check failures do not block shell startup.
+  - Add explicit startup update flow tests for skip-version, no-update, install success, and install failure paths.
+  - Add post-publish npm latest verification in release automation with robust path resolution and actionable failure reporting.
+
 ## 0.9.2
 
 ### Patch Changes
 
 - b659a26: Harden startup update checks and release metadata verification.
-
   - Make shell startup update checks best-effort so transient update-check failures do not block shell startup.
   - Add explicit startup update flow tests for skip-version, no-update, install success, and install failure paths.
   - Add post-publish npm latest verification in release automation with robust path resolution and actionable failure reporting.
@@ -130,7 +138,6 @@
 - Add first-class Azure CLI login workflow for bearer token acquisition.
 
   Highlights:
-
   - Add `agon login --azure-cli --scope <scope> [--tenant <tenant-id>]`.
   - Add interactive method selection in `agon login` (Azure CLI recommended vs manual token paste).
   - Normalize Entra scope inputs (`<app-id>` / `api://<app-id>` / `api://<app-id>/.default`).
@@ -144,7 +151,6 @@
 - Add per-user runtime profile support for model routing and provider API keys.
 
   Highlights:
-
   - Add `agon command` management flow (`show`, `onboard`, `set-model`, `set-key`, `rotate-key`, `delete-key`, `recover-key`).
   - Scope secrets by user profile and support legacy key migration.
   - Wire runtime profile into session start/shell/follow-up calls with explicit missing-key guidance.
@@ -168,7 +174,6 @@
 ### Patch Changes
 
 - Enforce token-first startup for backend-interacting CLI commands:
-
   - `agon shell` and `agon start` now require a configured bearer token by default
   - when no token exists, CLI exits with explicit setup guidance (`agon login`, `agon login --status`)
   - local development bypass remains available with `AGON_ALLOW_ANONYMOUS=true`
@@ -188,7 +193,6 @@
 ### Patch Changes
 
 - Improve attachment experience and output rendering:
-
   - stop auto-highlighting plain slash-separated prose (for example CV/resume, CI/CD)
   - add follow-up scoping hint after implicit attachment so responses focus on the newly attached file/image
   - avoid submitting prompts when an implicit drag/paste file path cannot be resolved locally
@@ -204,20 +208,17 @@
 ### Patch Changes
 
 - Improve attachment UX and routing behavior:
-
   - show codex-style attachment references in shell output (`[Image #n]`, `[File #n]`) with distinct image/file coloring
   - improve attachment feedback readability by separating reference label and filename
   - keep simple image-description prompts in direct-answer mode instead of triggering full debate flow
 
 - Improve reliability for simple-query routing and image attachment handling:
-
   - prevent accidental message submission when implicit drag/paste attachment path cannot be resolved
   - expand image MIME/extension recognition for upload and extraction paths
   - improve extraction compatibility for additional OpenAI vision response shapes
   - keep simple requests (including image-description asks) on deterministic direct-answer path to avoid unnecessary full debate cycles
 
 - Improve shell UX and reliability in three areas:
-
   - Make `/update` restart guidance explicit so users know they must exit and relaunch to run the newly installed runtime.
   - Improve attachment feedback for image uploads when backend extraction returns no vision text.
   - Keep "attach anytime" flow behavior while clarifying extraction outcomes in shell output.
@@ -234,7 +235,6 @@
 - Add secure per-user LLM provider API key storage and lifecycle management
 
   **New features:**
-
   - `SecretStore`: AES-256-GCM encrypted file-based secret store. Generates a random 256-bit encryption key on first use, stored at `~/.agon/keystore.key` (mode `0400`, owner read-only). Encrypted secrets stored at `~/.agon/api-keys` (mode `0600`, owner read/write). Each entry uses an independent random IV. Exports `redactSecret()` utility that safely redacts secret values for user-facing output.
   - `ApiKeyManager`: lifecycle manager for named LLM provider API keys (`openai`, `anthropic`, `gemini`, `deepseek`, and custom providers). Wraps `SecretStore` with `set`, `get`, `rotate`, `delete`, `list`, `has`, and `preview` operations. Key material never appears in error messages or log output. `rotate()` is a single atomic write with no gap where the key is absent.
   - `agon keys` command: manage stored API keys from the CLI.
@@ -244,7 +244,6 @@
     - `agon keys delete <provider>` — remove a stored key
 
   **Security properties:**
-
   - Secrets are encrypted at rest; key file is owner-read-only (`0400`)
   - Decryption failures return `null` silently — no internal state is leaked
   - Key material is absent from all error messages, log calls, and `list()` output
@@ -267,7 +266,6 @@
 - Add first-time user authentication flow (`agon login`)
 
   **New features:**
-
   - New `agon login` command: guides users through saving a bearer token for authenticating against the Agon backend. Supports interactive entry, `--token` flag for non-interactive use, `--clear` to remove a stored token, and `--status` to check current authentication state.
   - `AuthManager`: stores bearer tokens in `~/.agon/credentials` with mode `0600` (owner read/write only) — separate from `.agonrc` so the main config file can be version-controlled safely.
   - `agon shell` now performs a pre-flight auth check on startup. When the backend requires authentication and no token is configured, the shell exits with a clear prompt directing users to run `agon login`.
@@ -276,7 +274,6 @@
   - New `getAuthStatus()` API client method calls the backend's anonymous `/auth/status` endpoint to discover whether authentication is required before making any authenticated calls.
 
   **Migration notes for existing users:**
-
   - Users with `AGON_AUTH_TOKEN` or `AGON_BEARER_TOKEN` environment variables set are unaffected — the env vars continue to take precedence.
   - Users connecting to backends with `Authentication:Enabled = false` (the default) see no change in behaviour.
   - Users connecting to auth-enabled backends who previously relied on the token being silently absent will now see a clear error and be directed to run `agon login`.
@@ -284,7 +281,6 @@
 ### Patch Changes
 
 - Improve CLI config ergonomics around backend endpoint management.
-
   - Add `apiUrl` ownership metadata (`default`/`user`/`admin`) and managed/custom mode reporting.
   - Migrate legacy default HTTP endpoint usage to managed resolution so stale local config does not pin users to old hosts.
   - Add `/unset <key>` and `agon config unset <key>` to remove overrides and return to managed defaults.
@@ -320,7 +316,6 @@
 - Style attached file references with a Codex-like accent color
 
   Introduces two new exports from `shell/renderer`:
-
   - `styleAttachmentToken(token)` — applies the canonical amber accent color
     (`chalk.bold.rgb(248, 197, 71)`) to a single file-name or Codex-style token.
   - `highlightAttachmentRefs(text)` — scans rendered text for file paths
@@ -329,7 +324,6 @@
     same accent color.
 
   Surface-level changes:
-
   - `renderMessagePanel` now post-processes rendered Markdown through
     `highlightAttachmentRefs`, so attachment references in assistant/moderator
     messages are visually highlighted.
@@ -366,7 +360,6 @@
 - Shell: Ctrl+C now exits Agon when the input zone is empty.
 
   Previously, pressing Ctrl+C at an empty prompt printed "Interrupted. Shell still active." and kept the shell running. Now:
-
   - **Empty input zone**: Ctrl+C exits the shell (prints "Exiting shell.").
   - **Non-empty input zone**: Ctrl+C interrupts and stays in the shell (existing behavior unchanged).
 
@@ -394,7 +387,6 @@
 ### Patch Changes
 
 - Fix `node bin/run.js shell` error and add prompt history navigation.
-
   - Remove `src/commands/index.ts` which caused oclif to treat the CLI as a single-command CLI (`SINGLE_COMMAND_CLI_SYMBOL`), making `node bin/run.js shell` fail with `Error: command Symbol(SINGLE_COMMAND_CLI):shell not found`.
   - Add `clean` script to `build` so stale `dist/commands/index.js` is removed on every rebuild.
   - Add Up/Down arrow prompt history navigation in the interactive shell: pressing `↑` on empty input loads the previous prompt; `↓` moves forward; at the newest entry `↓` returns to an empty input.
@@ -424,7 +416,6 @@
 ### Patch Changes
 
 - Remediate all 32 npm dependency vulnerabilities (27 high, 5 moderate).
-
   - Upgrade `@typescript-eslint/eslint-plugin` and `@typescript-eslint/parser` from `^6.13.0` to `^8.0.0` to fix three minimatch ReDoS advisories (GHSA-3ppc-4f35-3m26, GHSA-7r86-cg39-jmmj, GHSA-23c5-xmqv-rm74).
   - Upgrade `vitest` and `@vitest/coverage-v8` from `^1.0.0` to `^4.1.0` to fix the esbuild dev-server CORS bypass (GHSA-67mh-4wv8-2f99).
   - Add `overrides` for `fast-xml-parser: "^5.5.6"` to fix the numeric entity expansion bypass (GHSA-8gc5-j5rx-235r) in the `oclif` → `@aws-sdk/xml-builder` transitive dependency chain.
