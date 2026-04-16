@@ -259,8 +259,8 @@ public sealed class SessionService : ISessionService
             }
         }
 
-        // Persist the updated state AFTER orchestrator (to capture any state changes).
-        // Use CancellationToken.None: session state writes must survive HTTP client disconnect / proxy timeout.
+        // CancellationToken.None: session state must be persisted even if the HTTP client disconnected or the
+        // gateway timed out. DB command timeouts (Npgsql CommandTimeout) still bound this write independently.
         await _sessionRepo.UpdateAsync(state, CancellationToken.None);
     }
 
