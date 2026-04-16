@@ -995,7 +995,7 @@ Changeset validation is enforced by default in local pre-commit hook when `cli/`
 
 1. In any PR that changes `cli/`, create a changeset:
    ```bash
-   npx --yes @changesets/cli add --cwd cli
+   npx --yes @changesets/cli add
    # Choose patch, minor, or major
    ```
 2. Merge the feature PR to `main`
@@ -1004,7 +1004,7 @@ Changeset validation is enforced by default in local pre-commit hook when `cli/`
 ### Automated Steps (GitHub Actions)
 [Back to top](#top)
 
-1. PR CI fails if `cli/` changed without a `cli/.changeset/*.md` file
+1. PR CI fails if `cli/` changed without a `.changeset/*.md` file
 2. After merge to `main`, Changesets action:
    - Reads pending changesets
    - Creates/updates the release PR

@@ -46,13 +46,6 @@ jobs:
       - name: Install dependencies
         run: npm ci --workspaces=false
 
-      - name: Expose .changeset at repo root for action discovery
-        working-directory: .
-        run: |
-          if [ ! -e .changeset ]; then
-            ln -s cli/.changeset .changeset
-          fi
-
       - name: Version / Release with Changesets
         id: changesets
         uses: changesets/action@6a0a831ff30acef54f2c6aa1cbbc1096b066edaf # v1.7.0
