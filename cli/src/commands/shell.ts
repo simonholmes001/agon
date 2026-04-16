@@ -122,6 +122,73 @@ export function isAbortError(error: unknown): boolean {
   return error instanceof DOMException && error.name === 'AbortError';
 }
 
+interface UpdateSpinner {
+  succeed(message: string): void;
+  fail(message: string): void;
+}
+
+interface StartupUpdateFlowOptions {
+  packageName: string;
+  currentVersion: string;
+  checkForCliUpdateFn?: typeof checkForCliUpdate;
+  getSkippedVersionFn?: typeof getUpdateSkipVersion;
+  showUpdatePromptFn?: typeof showUpdatePrompt;
+  setSkippedVersionFn?: typeof setUpdateSkipVersion;
+  runInstallFn?: (packageName: string) => Promise<void>;
+  createSpinner?: (text: string) => UpdateSpinner;
+  logFn?: (line: string) => void;
+}
+
+export async function runStartupUpdateFlow(options: StartupUpdateFlowOptions): Promise<void> {
+  const checkForCliUpdateFn = options.checkForCliUpdateFn ?? checkForCliUpdate;
+  const getSkippedVersionFn = options.getSkippedVersionFn ?? getUpdateSkipVersion;
+  const showUpdatePromptFn = options.showUpdatePromptFn ?? showUpdatePrompt;
+  const setSkippedVersionFn = options.setSkippedVersionFn ?? setUpdateSkipVersion;
+  const runInstallFn = options.runInstallFn ?? runNpmGlobalInstall;
+  const createSpinner = options.createSpinner ?? ((text: string) => ora({ text, color: 'cyan' }).start());
+  const logFn = options.logFn ?? (() => undefined);
+
+  try {
+    const updateInfo = await checkForCliUpdateFn({
+      packageName: options.packageName,
+      currentVersion: options.currentVersion
+    });
+    if (!updateInfo) {
+      return;
+    }
+
+    const skipVersion = await getSkippedVersionFn();
+    if (skipVersion === updateInfo.latestVersion) {
+      return;
+    }
+
+    const choice = await showUpdatePromptFn(updateInfo);
+    if (choice === 'skip-version') {
+      await setSkippedVersionFn(updateInfo.latestVersion);
+      return;
+    }
+
+    if (choice !== 'update') {
+      return;
+    }
+
+    const updateSpinner = createSpinner(`Installing ${options.packageName}@latest...`);
+    try {
+      await runInstallFn(options.packageName);
+      updateSpinner.succeed(`Updated to v${updateInfo.latestVersion}.`);
+      logFn(chalk.yellow(getSelfUpdateRestartNotice(updateInfo.latestVersion)));
+    } catch (updateError) {
+      updateSpinner.fail('Update failed.');
+      const failure = describeSelfUpdateFailure(updateError);
+      logFn(chalk.red(failure.message));
+      logFn(chalk.dim(getSelfUpdateGuidance(failure.category, updateInfo.installCommand)));
+    }
+  } catch (updateCheckError) {
+    const message = updateCheckError instanceof Error ? updateCheckError.message : String(updateCheckError);
+    logFn(chalk.dim(`Update check skipped: ${message}`));
+  }
+}
+
 export default class Shell extends Command {
   static override readonly description = 'Open interactive codex-style Agon shell';
 
@@ -257,28 +324,11 @@ export default class Shell extends Command {
     renderStatusLine((line) => this.log(line));
     const packageName = this.config.pjson.name ?? '@agon_agents/cli';
     const currentVersion = this.config.pjson.version ?? '0.0.0';
-    const updateInfo = await checkForCliUpdate({ packageName, currentVersion });
-    if (updateInfo) {
-      const skipVersion = await getUpdateSkipVersion();
-      if (skipVersion !== updateInfo.latestVersion) {
-        const choice = await showUpdatePrompt(updateInfo);
-        if (choice === 'skip-version') {
-          await setUpdateSkipVersion(updateInfo.latestVersion);
-        } else if (choice === 'update') {
-          const updateSpinner = ora({ text: `Installing ${packageName}@latest...`, color: 'cyan' }).start();
-          try {
-            await runNpmGlobalInstall(packageName);
-            updateSpinner.succeed(`Updated to v${updateInfo.latestVersion}.`);
-            this.log(chalk.yellow(getSelfUpdateRestartNotice(updateInfo.latestVersion)));
-          } catch (updateError) {
-            updateSpinner.fail('Update failed.');
-            const failure = describeSelfUpdateFailure(updateError);
-            this.log(chalk.red(failure.message));
-            this.log(chalk.dim(getSelfUpdateGuidance(failure.category, updateInfo.installCommand)));
-          }
-        }
-      }
-    }
+    await runStartupUpdateFlow({
+      packageName,
+      currentVersion,
+      logFn: (line) => this.log(line)
+    });
     this.log('');
 
     try {

@@ -60,6 +60,13 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           NPM_CONFIG_PROVENANCE: "true"
 
+      - name: Verify npm latest metadata for released CLI version
+        if: steps.changesets.outputs.published == 'true'
+        working-directory: .
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: node .github/scripts/verify-cli-release-metadata.mjs
+
       - name: Exempt changeset release PR from required checks
         uses: actions/github-script@v9
         env:
