@@ -348,7 +348,8 @@ describe('shell engine', () => {
       phase: 'Clarification',
       response: {
         agentId: 'moderator',
-        message: 'Next question'
+        message: 'Next question',
+        createdAt: '2026-03-10T10:01:00Z'
       }
     });
   });
@@ -373,7 +374,8 @@ describe('shell engine', () => {
       phase: 'Clarification',
       response: {
         agentId: 'moderator',
-        message: 'Next question'
+        message: 'Next question',
+        createdAt: '2026-03-10T10:01:00Z'
       }
     });
   });
