@@ -47,7 +47,7 @@ interface ShellControllerLike {
   ): Promise<{ sessionId: string; content: string; raw: boolean }>;
   submitFollowUp(content: string): Promise<{
     session: SessionResponse;
-    responseMessage?: { agentId?: string; message: string };
+    responseMessage?: { agentId?: string; message: string; createdAt?: string };
   }>;
   attachDocument(path: string, explicitSessionId?: string): Promise<{
     sessionId: string;
@@ -111,7 +111,7 @@ export type ShellEngineOutcome =
       sessionId: string;
       status: string;
       phase: string;
-      response?: { agentId?: string; message: string };
+      response?: { agentId?: string; message: string; createdAt?: string };
     }
   | { kind: 'status'; status: string; phase: string; sessionId: string }
   | {
@@ -281,7 +281,8 @@ export class ShellEngine {
         response: followUp.responseMessage
           ? {
               agentId: followUp.responseMessage.agentId,
-              message: followUp.responseMessage.message
+              message: followUp.responseMessage.message,
+              createdAt: followUp.responseMessage.createdAt
             }
           : undefined
       };
@@ -509,7 +510,8 @@ export class ShellEngine {
           response: followUp.responseMessage
             ? {
                 agentId: followUp.responseMessage.agentId,
-                message: followUp.responseMessage.message
+                message: followUp.responseMessage.message,
+                createdAt: followUp.responseMessage.createdAt
               }
             : undefined
         };

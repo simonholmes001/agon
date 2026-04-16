@@ -452,15 +452,22 @@ export default class Shell extends Command {
         return;
       case 'follow-up':
         if (outcome.response?.message) {
-          const title = outcome.response.agentId === 'moderator' ? 'Moderator' : 'Assistant';
-          const color = title === 'Moderator' ? 'cyan' : 'green';
+          const isCouncilRunning = outcome.response.agentId === 'council_running';
+          const title = isCouncilRunning
+            ? 'Council Running'
+            : outcome.response.agentId === 'moderator' ? 'Moderator' : 'Assistant';
+          const color = outcome.response.agentId === 'moderator' ? 'cyan' : 'green';
           renderMessagePanel(title, outcome.response.message, color, (line) => this.log(line));
-          this.log('Next steps:');
-          this.log('  • Continue in this shell: type your next message');
-          this.log('  • Add a file: paste/drag a local file path into the input box');
-          this.log('  • Explicit follow-up: /follow-up "<follow-up request>"');
-          this.log('  • Start a new session: /new');
-          this.log('  • Exit shell: /exit');
+          if (isCouncilRunning) {
+            await this.watchCouncilProgress(outcome.sessionId, outcome.response.createdAt, signal);
+          } else {
+            this.log('Next steps:');
+            this.log('  • Continue in this shell: type your next message');
+            this.log('  • Add a file: paste/drag a local file path into the input box');
+            this.log('  • Explicit follow-up: /follow-up "<follow-up request>"');
+            this.log('  • Start a new session: /new');
+            this.log('  • Exit shell: /exit');
+          }
         } else if (this.isMidDebatePhase(outcome.phase)) {
           await this.watchDebateProgress(outcome.sessionId, signal);
         } else {
@@ -1184,6 +1191,154 @@ export default class Shell extends Command {
         if (pausedForOutput) {
           thinkingStartedAt = Date.now();
           progressSpinner.start();
+        }
+
+        await new Promise(resolve => setTimeout(resolve, 2500));
+      }
+    } finally {
+      clearInterval(shimmerInterval);
+      progressSpinner.stop();
+    }
+  }
+
+  private async watchCouncilProgress(
+    sessionId: string,
+    acknowledgedAt: string | undefined,
+    signal?: AbortSignal
+  ): Promise<void> {
+    if (!this.apiClient || !this.sessionManager) {
+      this.log(chalk.yellow('Council is running in the background. Type any follow-up to check for results.'));
+      return;
+    }
+
+    const seenMessageKeys = new Set<string>();
+    const watchStartedAt = Date.now();
+    let lastProgressAt = watchStartedAt;
+    let consecutiveFailures = 0;
+    const maxWatchDurationMs = getWatchDurationMsFromEnv('AGON_COUNCIL_WATCH_MAX_MINUTES', 15);
+    const maxIdleDurationMs = getWatchDurationMsFromEnv('AGON_WATCH_MAX_IDLE_MINUTES', 8);
+    const maxConsecutiveFailures = 5;
+    const acknowledgedAtMs = acknowledgedAt
+      ? new Date(acknowledgedAt).getTime()
+      : watchStartedAt;
+
+    let shimmerBase = 'Council is analyzing...';
+    let shimmerTick = 0;
+    let thinkingStartedAt = Date.now();
+    const hint = buildInterruptHint();
+    const progressSpinner = ora({
+      text: `${buildShimmerText(shimmerBase, shimmerTick)} ${formatElapsedTimer(thinkingStartedAt)}  ${hint}`,
+      color: 'cyan'
+    }).start();
+    const shimmerInterval = setInterval(() => {
+      shimmerTick += 1;
+      progressSpinner.text = `${buildShimmerText(shimmerBase, shimmerTick)} ${formatElapsedTimer(thinkingStartedAt)}  ${hint}`;
+    }, 90);
+    if (typeof shimmerInterval.unref === 'function') {
+      shimmerInterval.unref();
+    }
+
+    try {
+      while (true) {
+        if (signal?.aborted) {
+          progressSpinner.stop();
+          this.log(chalk.dim('Interrupted. Shell still active. Council is still running in background.'));
+          this.log(chalk.dim('Type any follow-up to check for results, or run /status.'));
+          return;
+        }
+
+        if (Date.now() - watchStartedAt > maxWatchDurationMs) {
+          progressSpinner.stop();
+          this.log(chalk.yellow('Council watch timed out. Council may still be running in the background.'));
+          this.log(chalk.dim('Type any follow-up to check for results, or run /status.'));
+          return;
+        }
+
+        let messages;
+        try {
+          messages = await this.apiClient.getMessages(sessionId);
+          consecutiveFailures = 0;
+        } catch (error) {
+          consecutiveFailures += 1;
+          if (consecutiveFailures >= maxConsecutiveFailures) {
+            progressSpinner.stop();
+            const message = error instanceof Error ? error.message : String(error);
+            this.log(chalk.red(`Council watch stopped after repeated fetch failures: ${message}`));
+            this.log(chalk.dim('Type any follow-up to check for results, or run /status.'));
+            return;
+          }
+
+          await new Promise(resolve => setTimeout(resolve, 1500 * consecutiveFailures));
+          continue;
+        }
+
+        // Only surface messages that were created after the council acknowledgement.
+        // Excludes system/user/acknowledgement agents so only substantive analysis shows.
+        const councilMessages = messages
+          .filter(m => {
+            const agent = m.agentId.toLowerCase();
+            const isSubstantive = agent !== 'moderator'
+              && agent !== 'user'
+              && agent !== 'council_running'
+              && agent !== 'post_delivery_assistant';
+            const isNew = new Date(m.createdAt).getTime() > acknowledgedAtMs;
+            return isSubstantive && isNew;
+          })
+          .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+
+        let pausedForOutput = false;
+        const stopSpinnerForOutput = (): void => {
+          if (!pausedForOutput) {
+            progressSpinner.stop();
+            pausedForOutput = true;
+          }
+        };
+
+        let foundSynthesizer = false;
+        for (const msg of councilMessages) {
+          const key = `${msg.agentId}:${msg.round}:${msg.createdAt}:${msg.message.length}`;
+          if (seenMessageKeys.has(key)) {
+            continue;
+          }
+
+          seenMessageKeys.add(key);
+          lastProgressAt = Date.now();
+          thinkingStartedAt = Date.now();
+
+          stopSpinnerForOutput();
+          this.log('━'.repeat(60));
+          this.log(chalk.bold(`${msg.agentId} (Round ${msg.round})`));
+          this.log('');
+          this.log(renderMarkdown(msg.message));
+          this.log('');
+
+          if (msg.agentId === 'synthesizer') {
+            foundSynthesizer = true;
+          }
+        }
+
+        if (foundSynthesizer) {
+          this.log(chalk.green('✓ Council analysis complete.'));
+          this.log('');
+          this.log('Next steps:');
+          this.log('  • Continue in this shell: type your next message');
+          this.log('  • Add a file: paste/drag a local file path into the input box');
+          this.log('  • Start a new session: /new');
+          this.log('  • Exit shell: /exit');
+          return;
+        }
+
+        if (Date.now() - lastProgressAt > maxIdleDurationMs) {
+          progressSpinner.stop();
+          this.log(chalk.yellow('No council progress detected for a while. Stopping live watch.'));
+          this.log(chalk.dim('Type any follow-up to check for results, or run /status.'));
+          return;
+        }
+
+        if (pausedForOutput) {
+          thinkingStartedAt = Date.now();
+          progressSpinner.start();
+          shimmerBase = 'Council is analyzing...';
         }
 
         await new Promise(resolve => setTimeout(resolve, 2500));
