@@ -259,8 +259,9 @@ public sealed class SessionService : ISessionService
             }
         }
 
-        // Persist the updated state AFTER orchestrator (to capture any state changes)
-        await _sessionRepo.UpdateAsync(state, cancellationToken);
+        // Persist the updated state AFTER orchestrator (to capture any state changes).
+        // Use CancellationToken.None: session state writes must survive HTTP client disconnect / proxy timeout.
+        await _sessionRepo.UpdateAsync(state, CancellationToken.None);
     }
 
     public async Task AdvancePhaseAsync(
