@@ -56,6 +56,20 @@ jobs:
             exit 0
           fi
 
+          # Release/version-maintenance changes may legitimately update only
+          # generated CLI release files (and/or remove legacy cli/.changeset).
+          # Do not force an extra changeset in that case.
+          NON_RELEASE_CLI_CHANGES="$(
+            echo "${CHANGED_FILES}" \
+              | grep -E '^cli/' \
+              | grep -Ev '^cli/(CHANGELOG\.md|package\.json|package-lock\.json)$|^cli/\.changeset/' \
+              || true
+          )"
+          if [ -z "${NON_RELEASE_CLI_CHANGES}" ]; then
+            echo "Only release-maintenance CLI files changed; skipping changeset requirement."
+            exit 0
+          fi
+
           echo "::error::CLI changes detected without a changeset file."
           echo "::error::Run 'npx --yes @changesets/cli add' and commit the generated file in .changeset/."
           exit 1
