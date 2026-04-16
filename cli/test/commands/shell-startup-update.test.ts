@@ -12,10 +12,11 @@ describe('runStartupUpdateFlow', () => {
     installCommand: 'npm install -g @agon_agents/cli@latest'
   };
 
-  it('shows update prompt when an update is available and no skip marker exists', async () => {
+  it('writes skip marker when user chooses skip-version', async () => {
     const checkForCliUpdateFn = vi.fn().mockResolvedValue(updateInfo);
     const getSkippedVersionFn = vi.fn().mockResolvedValue(null);
-    const showUpdatePromptFn = vi.fn().mockResolvedValue('skip');
+    const showUpdatePromptFn = vi.fn().mockResolvedValue('skip-version');
+    const setSkippedVersionFn = vi.fn();
 
     await runStartupUpdateFlow({
       packageName,
@@ -23,7 +24,7 @@ describe('runStartupUpdateFlow', () => {
       checkForCliUpdateFn,
       getSkippedVersionFn,
       showUpdatePromptFn,
-      setSkippedVersionFn: vi.fn(),
+      setSkippedVersionFn,
       runInstallFn: vi.fn(),
       createSpinner: () => ({ succeed: vi.fn(), fail: vi.fn() }),
       logFn: vi.fn()
@@ -31,6 +32,7 @@ describe('runStartupUpdateFlow', () => {
 
     expect(checkForCliUpdateFn).toHaveBeenCalledWith({ packageName, currentVersion });
     expect(showUpdatePromptFn).toHaveBeenCalledWith(updateInfo);
+    expect(setSkippedVersionFn).toHaveBeenCalledWith('0.9.1');
   });
 
   it('does not show update prompt when latest version is already skipped', async () => {
@@ -51,5 +53,87 @@ describe('runStartupUpdateFlow', () => {
     });
 
     expect(showUpdatePromptFn).not.toHaveBeenCalled();
+  });
+
+  it('is a no-op when no update is available', async () => {
+    const checkForCliUpdateFn = vi.fn().mockResolvedValue(null);
+    const showUpdatePromptFn = vi.fn();
+
+    await runStartupUpdateFlow({
+      packageName,
+      currentVersion,
+      checkForCliUpdateFn,
+      getSkippedVersionFn: vi.fn(),
+      showUpdatePromptFn,
+      setSkippedVersionFn: vi.fn(),
+      runInstallFn: vi.fn(),
+      createSpinner: () => ({ succeed: vi.fn(), fail: vi.fn() }),
+      logFn: vi.fn()
+    });
+
+    expect(showUpdatePromptFn).not.toHaveBeenCalled();
+  });
+
+  it('installs update and logs restart notice when user chooses update', async () => {
+    const runInstallFn = vi.fn().mockResolvedValue(undefined);
+    const spinner = { succeed: vi.fn(), fail: vi.fn() };
+    const logFn = vi.fn();
+
+    await runStartupUpdateFlow({
+      packageName,
+      currentVersion,
+      checkForCliUpdateFn: vi.fn().mockResolvedValue(updateInfo),
+      getSkippedVersionFn: vi.fn().mockResolvedValue(null),
+      showUpdatePromptFn: vi.fn().mockResolvedValue('update'),
+      setSkippedVersionFn: vi.fn(),
+      runInstallFn,
+      createSpinner: vi.fn().mockReturnValue(spinner),
+      logFn
+    });
+
+    expect(runInstallFn).toHaveBeenCalledWith(packageName);
+    expect(spinner.succeed).toHaveBeenCalledWith('Updated to v0.9.1.');
+    expect(logFn).toHaveBeenCalledWith(expect.stringContaining('restart Agon to use v0.9.1'));
+  });
+
+  it('logs failure guidance when update installation fails', async () => {
+    const spinner = { succeed: vi.fn(), fail: vi.fn() };
+    const logFn = vi.fn();
+
+    await runStartupUpdateFlow({
+      packageName,
+      currentVersion,
+      checkForCliUpdateFn: vi.fn().mockResolvedValue(updateInfo),
+      getSkippedVersionFn: vi.fn().mockResolvedValue(null),
+      showUpdatePromptFn: vi.fn().mockResolvedValue('update'),
+      setSkippedVersionFn: vi.fn(),
+      runInstallFn: vi.fn().mockRejectedValue(new Error('ETIMEDOUT network timeout')),
+      createSpinner: vi.fn().mockReturnValue(spinner),
+      logFn
+    });
+
+    expect(spinner.fail).toHaveBeenCalledWith('Update failed.');
+    expect(logFn).toHaveBeenCalledWith(expect.stringContaining('ETIMEDOUT network timeout'));
+    expect(logFn).toHaveBeenCalledWith(expect.stringContaining('Manual install: npm install -g @agon_agents/cli@latest'));
+  });
+
+  it('does not crash startup when update check throws', async () => {
+    const logFn = vi.fn();
+
+    await expect(
+      runStartupUpdateFlow({
+        packageName,
+        currentVersion,
+        checkForCliUpdateFn: vi.fn().mockRejectedValue(new Error('registry down')),
+        getSkippedVersionFn: vi.fn(),
+        showUpdatePromptFn: vi.fn(),
+        setSkippedVersionFn: vi.fn(),
+        runInstallFn: vi.fn(),
+        createSpinner: () => ({ succeed: vi.fn(), fail: vi.fn() }),
+        logFn
+      })
+    ).resolves.toBeUndefined();
+
+    expect(logFn).toHaveBeenCalledWith(expect.stringContaining('Update check skipped: registry down'));
   });
 });

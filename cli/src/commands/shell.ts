@@ -148,39 +148,44 @@ export async function runStartupUpdateFlow(options: StartupUpdateFlowOptions): P
   const createSpinner = options.createSpinner ?? ((text: string) => ora({ text, color: 'cyan' }).start());
   const logFn = options.logFn ?? (() => undefined);
 
-  const updateInfo = await checkForCliUpdateFn({
-    packageName: options.packageName,
-    currentVersion: options.currentVersion
-  });
-  if (!updateInfo) {
-    return;
-  }
-
-  const skipVersion = await getSkippedVersionFn();
-  if (skipVersion === updateInfo.latestVersion) {
-    return;
-  }
-
-  const choice = await showUpdatePromptFn(updateInfo);
-  if (choice === 'skip-version') {
-    await setSkippedVersionFn(updateInfo.latestVersion);
-    return;
-  }
-
-  if (choice !== 'update') {
-    return;
-  }
-
-  const updateSpinner = createSpinner(`Installing ${options.packageName}@latest...`);
   try {
-    await runInstallFn(options.packageName);
-    updateSpinner.succeed(`Updated to v${updateInfo.latestVersion}.`);
-    logFn(chalk.yellow(getSelfUpdateRestartNotice(updateInfo.latestVersion)));
-  } catch (updateError) {
-    updateSpinner.fail('Update failed.');
-    const failure = describeSelfUpdateFailure(updateError);
-    logFn(chalk.red(failure.message));
-    logFn(chalk.dim(getSelfUpdateGuidance(failure.category, updateInfo.installCommand)));
+    const updateInfo = await checkForCliUpdateFn({
+      packageName: options.packageName,
+      currentVersion: options.currentVersion
+    });
+    if (!updateInfo) {
+      return;
+    }
+
+    const skipVersion = await getSkippedVersionFn();
+    if (skipVersion === updateInfo.latestVersion) {
+      return;
+    }
+
+    const choice = await showUpdatePromptFn(updateInfo);
+    if (choice === 'skip-version') {
+      await setSkippedVersionFn(updateInfo.latestVersion);
+      return;
+    }
+
+    if (choice !== 'update') {
+      return;
+    }
+
+    const updateSpinner = createSpinner(`Installing ${options.packageName}@latest...`);
+    try {
+      await runInstallFn(options.packageName);
+      updateSpinner.succeed(`Updated to v${updateInfo.latestVersion}.`);
+      logFn(chalk.yellow(getSelfUpdateRestartNotice(updateInfo.latestVersion)));
+    } catch (updateError) {
+      updateSpinner.fail('Update failed.');
+      const failure = describeSelfUpdateFailure(updateError);
+      logFn(chalk.red(failure.message));
+      logFn(chalk.dim(getSelfUpdateGuidance(failure.category, updateInfo.installCommand)));
+    }
+  } catch (updateCheckError) {
+    const message = updateCheckError instanceof Error ? updateCheckError.message : String(updateCheckError);
+    logFn(chalk.dim(`Update check skipped: ${message}`));
   }
 }
 
