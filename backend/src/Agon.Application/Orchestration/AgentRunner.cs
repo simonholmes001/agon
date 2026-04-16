@@ -562,6 +562,18 @@ public sealed class AgentRunner : IAgentRunner
             state.SessionId,
             "COUNCIL_INVOKED_BY_USER");
 
+        // Store an immediate acknowledgement so the CLI's polling loop surfaces feedback
+        // to the user without waiting for the full ~5-7 minute council run to complete.
+        // The CLI detects agentId="council_running" and transitions to a live-watch loop.
+        // CancellationToken.None: acknowledgement must persist even if the HTTP client
+        // disconnected — consistent with the history-write convention throughout this class.
+        await _conversationHistory.StoreMessageAsync(
+            state.SessionId,
+            "council_running",
+            "Council invoked — full multi-agent analysis is running in the background (~5–7 minutes). Your results will appear here automatically when complete.",
+            state.CurrentRound,
+            CancellationToken.None);
+
         var analysisResponses = await RunAnalysisRoundAsync(state, cancellationToken);
         state.LastRoundMessages.Clear();
         foreach (var response in analysisResponses.Where(r => !r.TimedOut && !string.IsNullOrWhiteSpace(r.Message)))

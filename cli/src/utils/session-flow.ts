@@ -2,7 +2,8 @@ import type { Message, SessionResponse } from '../api/types.js';
 
 const postDeliveryResponseAgentIds = new Set([
   'post_delivery_assistant',
-  'synthesizer'
+  'synthesizer',
+  'council_running'
 ]);
 
 export function normalizePhase(phase: string): string {
