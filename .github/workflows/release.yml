@@ -3,6 +3,12 @@ name: Release
 on:
   push:
     branches: [main]
+    # CLI release/publish is owned by publish-cli.yaml to avoid duplicate
+    # publish races for @agon_agents/cli on changeset-release merges.
+    paths-ignore:
+      - 'cli/**'
+      - '.github/workflows/publish-cli.yaml'
+  workflow_dispatch:
 
 concurrency: ${{ github.workflow }}-${{ github.ref }}
 
