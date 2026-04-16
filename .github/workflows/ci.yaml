@@ -21,7 +21,7 @@ jobs:
           node-version: 20
 
       - name: Run Codex review script tests
-        run: node --test .github/scripts/codex-pr-review-core.test.mjs
+        run: node --test .github/scripts/*.test.mjs
 
   cli-changeset:
     name: CLI Changeset Check
