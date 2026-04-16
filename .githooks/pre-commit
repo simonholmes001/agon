@@ -6,24 +6,24 @@ CLI_STAGED="$(echo "$STAGED_FILES" | grep -E '^cli/' || true)"
 CHANGESET_STAGED="$(echo "$STAGED_FILES" | grep -E '^\.changeset/[^/]+\.md$' | grep -v '^\.changeset/README\.md$' || true)"
 
 if [ -n "$CLI_STAGED" ] && [ -z "$CHANGESET_STAGED" ]; then
-  DISALLOWED_STAGED="$(
-    echo "$STAGED_FILES" \
-      | grep -Ev '^(cli/(CHANGELOG\.md|package\.json|package-lock\.json)|cli/\.changeset/.*|\.changeset/README\.md|README\.md|\.github/workflows/(ci\.yaml|publish-cli\.yaml)|\.githooks/pre-commit)$' \
+  DISALLOWED_CLI_STAGED="$(
+    echo "$CLI_STAGED" \
+      | grep -Ev '^(cli/(CHANGELOG\.md|package\.json|package-lock\.json)|cli/\.changeset/.*)$' \
       || true
   )"
-  if [ -n "$DISALLOWED_STAGED" ]; then
+  if [ -n "$DISALLOWED_CLI_STAGED" ]; then
     echo ""
-    echo "❌ CLI changes detected, but no changeset file is staged."
-    echo "Disallowed staged paths without changeset:"
-    echo "$DISALLOWED_STAGED"
+    echo "❌ CLI source changes detected, but no root changeset file is staged."
+    echo "Disallowed CLI staged paths without changeset:"
+    echo "$DISALLOWED_CLI_STAGED"
     echo "👉 Before committing, run:"
     echo "   npx --yes @changesets/cli add"
     echo "   git add .changeset/*.md"
-    echo "❌ Blocking commit because no changeset file was detected for CLI changes."
+    echo "❌ Blocking commit because no root .changeset file was detected for CLI changes."
     exit 1
   fi
 
-  echo "ℹ️  Only release-maintenance allowlisted files staged without changeset; continuing."
+  echo "ℹ️  Only release-maintenance CLI files staged without changeset; continuing."
 fi
 
 if [ ! -f ".changeset/config.json" ]; then

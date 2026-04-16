@@ -56,28 +56,27 @@ jobs:
             exit 0
           fi
 
-          # Release/version-maintenance PRs may legitimately include only:
-          # - generated CLI release artifacts
-          # - legacy cli/.changeset cleanup
-          # - workflow/docs normalization required by release-path migration.
-          # Anything outside this strict allowlist must include a changeset.
-          DISALLOWED_CHANGES="$(
-            echo "${CHANGED_FILES}" \
-              | grep -Ev '^(cli/(CHANGELOG\.md|package\.json|package-lock\.json)|cli/\.changeset/.*|\.changeset/README\.md|README\.md|\.github/workflows/(ci\.yaml|publish-cli\.yaml))$' \
+          # Changeset enforcement is scoped to CLI paths only.
+          # If CLI changes are exclusively release-maintenance artifacts,
+          # allow commit/PR without a changeset.
+          CLI_CHANGED_FILES="$(echo "${CHANGED_FILES}" | grep -E '^cli/' || true)"
+          DISALLOWED_CLI_CHANGES="$(
+            echo "${CLI_CHANGED_FILES}" \
+              | grep -Ev '^(cli/(CHANGELOG\.md|package\.json|package-lock\.json)|cli/\.changeset/.*)$' \
               || true
           )"
-          if [ -z "${DISALLOWED_CHANGES}" ]; then
+          if [ -z "${DISALLOWED_CLI_CHANGES}" ]; then
             echo "Only release-maintenance allowlisted files changed; skipping changeset requirement."
             exit 0
           fi
 
           echo "::error::CLI changes detected without a changeset file."
-          echo "::error::Disallowed changed files without changeset:"
-          echo "${DISALLOWED_CHANGES}"
+          echo "::error::Disallowed CLI changed files without changeset:"
+          echo "${DISALLOWED_CLI_CHANGES}"
           echo "::error::Run 'npx --yes @changesets/cli add' and commit the generated file in .changeset/."
           exit 1
 
-      - name: Validate root changesets config
+      - name: Validate root changesets config (present and valid JSON)
         shell: bash
         run: |
           set -euo pipefail
