@@ -145,6 +145,9 @@ public sealed class Orchestrator : IOrchestrator
     /// <summary>
     /// Runs a single-agent post-delivery follow-up response.
     /// If the session is still in Deliver/DeliverWithGaps, it is transitioned to PostDelivery.
+    /// Council invocations are dispatched as background tasks (fire-and-forget) so the HTTP
+    /// request returns immediately — mirroring the pattern used by
+    /// <see cref="SignalClarificationCompleteAsync"/> for the full debate chain.
     /// </summary>
     public async Task RunPostDeliveryFollowUpAsync(
         SessionState state,
@@ -159,6 +162,48 @@ public sealed class Orchestrator : IOrchestrator
         _logger?.LogInformation(
             "Session {SessionId}: Running post-delivery follow-up assistant",
             state.SessionId);
+
+        // Council invocation runs analysis → critique → synthesis with a chunk loop for large
+        // documents. This can take several minutes, well beyond the ~2-minute gateway timeout,
+        // causing 504s when run synchronously inside the HTTP request.
+        // Fix: detect council intent here and dispatch as fire-and-forget into a new DI scope,
+        // exactly like SignalClarificationCompleteAsync does for the full debate chain.
+        if (PostDeliveryCouncilClassifier.Classify(state, userMessage) == PostDeliveryCouncilDecision.Invoke)
+        {
+            var sessionId = state.SessionId;
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await Task.Yield();
+                    using var scope = _scopeFactory.CreateScope();
+                    var scopedSessionService = scope.ServiceProvider.GetRequiredService<ISessionService>();
+                    var scopedAgentRunner = scope.ServiceProvider.GetRequiredService<IAgentRunner>();
+
+                    // GetAsync already hydrates attachments from the repository — no extra step needed.
+                    var scopedState = await scopedSessionService.GetAsync(sessionId, CancellationToken.None);
+                    if (scopedState is null)
+                    {
+                        _logger?.LogWarning(
+                            "Session {SessionId}: State not found for background post-delivery council.",
+                            sessionId);
+                        return;
+                    }
+
+                    await scopedAgentRunner.RunPostDeliveryFollowUpAsync(
+                        scopedState, userMessage, CancellationToken.None);
+                }
+                catch (Exception ex)
+                {
+                    _logger?.LogError(
+                        ex,
+                        "Session {SessionId}: Post-delivery council failed in background.",
+                        sessionId);
+                }
+            }, CancellationToken.None);
+
+            return;
+        }
 
         await _agentRunner.RunPostDeliveryFollowUpAsync(state, userMessage, cancellationToken);
     }
