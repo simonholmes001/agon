@@ -1281,7 +1281,7 @@ export default class Shell extends Command {
               && agent !== 'user'
               && agent !== 'council_running'
               && agent !== 'post_delivery_assistant';
-            const isNew = new Date(m.createdAt).getTime() > acknowledgedAtMs;
+            const isNew = new Date(m.createdAt).getTime() >= acknowledgedAtMs;
             return isSubstantive && isNew;
           })
           .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());

@@ -565,6 +565,8 @@ public sealed class AgentRunner : IAgentRunner
         // Store an immediate acknowledgement so the CLI's polling loop surfaces feedback
         // to the user without waiting for the full ~5-7 minute council run to complete.
         // The CLI detects agentId="council_running" and transitions to a live-watch loop.
+        // CancellationToken.None: acknowledgement must persist even if the HTTP client
+        // disconnected — consistent with the history-write convention throughout this class.
         await _conversationHistory.StoreMessageAsync(
             state.SessionId,
             "council_running",
