@@ -31,12 +31,20 @@ import {
   resolveDiscoveredTenantId,
 } from '../auth/auth-discovery.js';
 import {
-  acquireTokenFromEntraDeviceCode,
+  acquireTokenBundleFromEntraDeviceCode,
   EntraDeviceCodeTokenProviderError,
 } from '../auth/entra-device-code-token-provider.js';
 import { formatTerminalLink } from '../utils/terminal-links.js';
 
 type TokenSource = 'manual' | 'azure-cli' | 'device-code';
+type TokenSessionMetadata = {
+  scope?: string;
+  tenant?: string;
+  authority?: string;
+  clientId?: string;
+  refreshToken?: string;
+  expiresAt?: string;
+};
 
 const defaultInteractiveClientId = '04b07795-8ddb-461a-bbee-02f9e1bf7b46';
 
@@ -169,17 +177,24 @@ export default class Login extends Command {
 
     let token: string;
     let tokenSource: TokenSource = 'manual';
+    let tokenMetadata: TokenSessionMetadata = {};
 
     if (flags.deviceCode) {
-      token = await this.acquireEntraDeviceCodeToken({
+      const result = await this.acquireEntraDeviceCodeToken({
         scope: resolvedScope,
         tenant: resolvedTenant,
         authority: resolvedAuthority,
         clientId: resolvedClientId,
       });
+      token = result.token;
+      tokenMetadata = result.metadata;
       tokenSource = 'device-code';
     } else if (flags.azureCli) {
       token = await this.acquireAzureCliToken(resolvedScope, resolvedTenant);
+      tokenMetadata = {
+        scope: resolvedScope || undefined,
+        tenant: resolvedTenant || undefined,
+      };
       tokenSource = 'azure-cli';
     } else if (flags.token) {
       token = flags.token.trim();
@@ -193,12 +208,14 @@ export default class Login extends Command {
         this.log(chalk.dim(`Using tenant: ${resolvedTenant}`));
       }
       this.log('');
-      token = await this.acquireEntraDeviceCodeToken({
+      const result = await this.acquireEntraDeviceCodeToken({
         scope: resolvedScope,
         tenant: resolvedTenant,
         authority: resolvedAuthority,
         clientId: resolvedClientId,
       });
+      token = result.token;
+      tokenMetadata = result.metadata;
       tokenSource = 'device-code';
     } else {
       const prompted = await this.promptForToken({
@@ -209,6 +226,7 @@ export default class Login extends Command {
       });
       token = prompted.token;
       tokenSource = prompted.source;
+      tokenMetadata = prompted.metadata;
     }
 
     const spinner = ora({ text: 'Verifying token...', color: 'cyan' }).start();
@@ -233,7 +251,15 @@ export default class Login extends Command {
       this.exit(1);
     }
 
-    await authManager.saveToken(token);
+    await authManager.saveToken(token, {
+      source: tokenSource,
+      scope: tokenMetadata.scope,
+      tenant: tokenMetadata.tenant,
+      authority: tokenMetadata.authority,
+      clientId: tokenMetadata.clientId,
+      refreshToken: tokenMetadata.refreshToken,
+      expiresAt: tokenMetadata.expiresAt,
+    });
     this.log('');
     this.log(chalk.green('✓ Token saved to ~/.agon/credentials'));
     this.log(chalk.dim('  The token will be used automatically for all future agon commands.'));
@@ -311,7 +337,7 @@ export default class Login extends Command {
     tenant: string;
     authority: string;
     clientId: string;
-  }): Promise<{ token: string; source: TokenSource }> {
+  }): Promise<{ token: string; source: TokenSource; metadata: TokenSessionMetadata }> {
     if (!process.stdin.isTTY) {
       this.error('Non-interactive login requires --token, --device-code, or --azure-cli --scope.', { exit: 1 });
     }
@@ -380,13 +406,13 @@ export default class Login extends Command {
         },
       ]);
 
-      const token = await this.acquireEntraDeviceCodeToken({
+      const result = await this.acquireEntraDeviceCodeToken({
         scope: scopeInput,
         tenant: options.tenant,
         authority: authorityInput,
         clientId: clientIdInput,
       });
-      return { token, source: 'device-code' };
+      return { token: result.token, source: 'device-code', metadata: result.metadata };
     }
 
     if (method === 'azure-cli') {
@@ -408,7 +434,14 @@ export default class Login extends Command {
       ]);
 
       const token = await this.acquireAzureCliToken(scopeInput, options.tenant);
-      return { token, source: 'azure-cli' };
+      return {
+        token,
+        source: 'azure-cli',
+        metadata: {
+          scope: scopeInput.trim() || undefined,
+          tenant: options.tenant.trim() || undefined,
+        },
+      };
     }
 
     this.log('');
@@ -432,7 +465,7 @@ export default class Login extends Command {
       }
     ]);
 
-    return { token: inputToken.trim(), source: 'manual' };
+    return { token: inputToken.trim(), source: 'manual', metadata: {} };
   }
 
   private async acquireEntraDeviceCodeToken(options: {
@@ -440,7 +473,7 @@ export default class Login extends Command {
     tenant: string;
     authority: string;
     clientId: string;
-  }): Promise<string> {
+  }): Promise<{ token: string; metadata: TokenSessionMetadata }> {
     let normalizedScope: string;
     try {
       normalizedScope = normalizeAzureScope(options.scope);
@@ -451,7 +484,7 @@ export default class Login extends Command {
 
     const spinner = ora({ text: 'Starting Entra device-code sign-in...', color: 'cyan' }).start();
     try {
-      const token = await acquireTokenFromEntraDeviceCode({
+      const bundle = await acquireTokenBundleFromEntraDeviceCode({
         authority: options.authority,
         tenant: options.tenant || undefined,
         clientId: options.clientId,
@@ -473,7 +506,17 @@ export default class Login extends Command {
       });
 
       spinner.succeed('Token acquired from Entra device-code flow');
-      return token;
+      return {
+        token: bundle.accessToken,
+        metadata: {
+          scope: normalizedScope,
+          tenant: options.tenant.trim() || undefined,
+          authority: options.authority.trim() || undefined,
+          clientId: options.clientId.trim() || undefined,
+          refreshToken: bundle.refreshToken,
+          expiresAt: bundle.expiresAt,
+        },
+      };
     } catch (error) {
       spinner.fail('Entra device-code sign-in failed');
       if (error instanceof EntraDeviceCodeTokenProviderError) {

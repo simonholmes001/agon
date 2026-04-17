@@ -36,6 +36,7 @@ describe('AgonAPIClient', () => {
       post: vi.fn(),
       put: vi.fn(),
       delete: vi.fn(),
+      request: vi.fn(),
       defaults: {
         headers: {
           common: {},
@@ -474,6 +475,88 @@ describe('AgonAPIClient', () => {
           })
         })
       );
+    });
+  });
+
+  describe('silent auth retry', () => {
+    it('retries one 401 request after silent token refresh', async () => {
+      const onAuthenticationFailure = vi.fn().mockResolvedValue('renewed-token');
+      new AgonAPIClient(
+        'http://localhost:5000',
+        '@agon_agents/cli',
+        '0.1.3',
+        'expired-token',
+        undefined,
+        onAuthenticationFailure
+      );
+
+      const responseHandlers = (mockAxios.interceptors.response.use as any).mock.calls;
+      const responseErrorHandler = responseHandlers[responseHandlers.length - 1][1];
+      const retryConfig: any = { url: '/sessions', method: 'get', headers: {} };
+      const error: any = {
+        response: { status: 401, data: {} },
+        config: retryConfig
+      };
+
+      (mockAxios.request as any).mockResolvedValue({ data: [] });
+
+      await responseErrorHandler(error);
+
+      expect(onAuthenticationFailure).toHaveBeenCalledTimes(1);
+      expect(mockAxios.request).toHaveBeenCalledWith(
+        expect.objectContaining({
+          headers: expect.objectContaining({
+            Authorization: 'Bearer renewed-token'
+          }),
+          __agonAuthRetryAttempted: true,
+        })
+      );
+    });
+
+    it('does not attempt silent renewal on 403 responses', async () => {
+      const onAuthenticationFailure = vi.fn().mockResolvedValue('renewed-token');
+      new AgonAPIClient(
+        'http://localhost:5000',
+        '@agon_agents/cli',
+        '0.1.3',
+        'expired-token',
+        undefined,
+        onAuthenticationFailure
+      );
+
+      const responseHandlers = (mockAxios.interceptors.response.use as any).mock.calls;
+      const responseErrorHandler = responseHandlers[responseHandlers.length - 1][1];
+      const error: any = {
+        response: { status: 403, data: {} },
+        config: { url: '/sessions', method: 'get', headers: {} }
+      };
+
+      await expect(responseErrorHandler(error)).rejects.toThrow();
+      expect(onAuthenticationFailure).not.toHaveBeenCalled();
+      expect(mockAxios.request).not.toHaveBeenCalled();
+    });
+
+    it('falls back to mapped auth error when renewal callback throws', async () => {
+      const onAuthenticationFailure = vi.fn().mockRejectedValue(new Error('refresh failed'));
+      new AgonAPIClient(
+        'http://localhost:5000',
+        '@agon_agents/cli',
+        '0.1.3',
+        'expired-token',
+        undefined,
+        onAuthenticationFailure
+      );
+
+      const responseHandlers = (mockAxios.interceptors.response.use as any).mock.calls;
+      const responseErrorHandler = responseHandlers[responseHandlers.length - 1][1];
+      const error: any = {
+        response: { status: 401, data: {} },
+        config: { url: '/sessions', method: 'get', headers: {} }
+      };
+
+      await expect(responseErrorHandler(error)).rejects.toBeInstanceOf(AgonError);
+      expect(onAuthenticationFailure).toHaveBeenCalledTimes(1);
+      expect(mockAxios.request).not.toHaveBeenCalled();
     });
   });
 

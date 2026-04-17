@@ -95,7 +95,8 @@ export default class Answer extends Command {
         this.config.pjson.name ?? '@agon_agents/cli',
         this.config.pjson.version ?? '0.0.0',
         storedToken ?? undefined,
-        runtimeProfile.profile
+        runtimeProfile.profile,
+        () => this.authManager.trySilentRenewal()
       );
       const messagesBeforeSubmit = await apiClient.getMessages(sessionId);
       const previousAssistantMessage = getLatestPostDeliveryAssistantMessage(messagesBeforeSubmit);

@@ -53,7 +53,9 @@ export default class Status extends Command {
         config.apiUrl,
         this.config.pjson.name ?? '@agon_agents/cli',
         this.config.pjson.version ?? '0.0.0',
-        storedToken ?? undefined
+        storedToken ?? undefined,
+        undefined,
+        () => authManager.trySilentRenewal()
       );
 
       // Determine which session to show

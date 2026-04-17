@@ -42,6 +42,7 @@ export class AgonAPIClient {
   private readonly logger: Logger;
   private readonly packageName: string;
   private readonly cliVersion: string;
+  private readonly onAuthenticationFailure?: () => Promise<string | null>;
   private runtimeProfile?: RuntimeExecutionProfile;
 
   constructor(
@@ -49,12 +50,14 @@ export class AgonAPIClient {
     packageName: string = '@agon_agents/cli',
     cliVersion: string = '0.0.0',
     authToken?: string,
-    runtimeProfile?: RuntimeExecutionProfile
+    runtimeProfile?: RuntimeExecutionProfile,
+    onAuthenticationFailure?: () => Promise<string | null>
   ) {
     this.logger = new Logger('AgonAPIClient');
     this.packageName = packageName;
     this.cliVersion = cliVersion;
     this.runtimeProfile = runtimeProfile;
+    this.onAuthenticationFailure = onAuthenticationFailure;
     this.followUpTimeoutMs = resolveFollowUpTimeoutMs(process.env.AGON_FOLLOWUP_TIMEOUT_MS);
     // Resolve auth token: explicit parameter > AGON_AUTH_TOKEN env > AGON_BEARER_TOKEN env
     const resolvedAuthToken =
@@ -90,6 +93,10 @@ export class AgonAPIClient {
     this.client.interceptors.response.use(
       (response) => response,
       async (error: AxiosError) => {
+        if (await this.trySilentAuthRetry(error)) {
+          return this.client.request(error.config!);
+        }
+
         // Handle retries for network errors
         if (this.shouldRetry(error) && error.config) {
           const retryCount = (error.config as any).__retryCount || 0;
@@ -395,6 +402,59 @@ export class AgonAPIClient {
     if (!error.response) return true; // Network error
     const status = error.response.status;
     return status >= 500 && status < 600;
+  }
+
+  private async trySilentAuthRetry(error: AxiosError): Promise<boolean> {
+    if (!error.config || !error.response || !this.onAuthenticationFailure) {
+      return false;
+    }
+
+    if (error.response.status !== 401) {
+      return false;
+    }
+
+    const cfg = error.config as AxiosError['config'] & { __agonAuthRetryAttempted?: boolean };
+    if (cfg.__agonAuthRetryAttempted) {
+      return false;
+    }
+
+    cfg.__agonAuthRetryAttempted = true;
+    let refreshedToken: string | null = null;
+    try {
+      refreshedToken = await this.onAuthenticationFailure();
+    } catch (renewalError) {
+      this.logger.debug('Silent auth renewal callback failed', {
+        reason: renewalError instanceof Error ? renewalError.message : String(renewalError),
+      });
+      return false;
+    }
+
+    if (!refreshedToken?.trim()) {
+      this.logger.debug('Silent auth renewal returned no token');
+      return false;
+    }
+
+    this.setAuthToken(refreshedToken);
+    const existingHeaders = cfg.headers as unknown as { set?: (name: string, value: string) => void } | undefined;
+    if (existingHeaders?.set) {
+      existingHeaders.set('Authorization', `Bearer ${refreshedToken.trim()}`);
+    } else {
+      cfg.headers = {
+        ...(cfg.headers as Record<string, string> | undefined ?? {}),
+        Authorization: `Bearer ${refreshedToken.trim()}`
+      } as any;
+    }
+    return true;
+  }
+
+  setAuthToken(token: string): void {
+    const trimmed = token.trim();
+    if (!trimmed) {
+      delete (this.client.defaults.headers.common as Record<string, string>).Authorization;
+      return;
+    }
+
+    (this.client.defaults.headers.common as Record<string, string>).Authorization = `Bearer ${trimmed}`;
   }
 
   private mapError(error: AxiosError): Error {

@@ -37,7 +37,9 @@ export default class Usage extends Command {
       config.apiUrl,
       this.config.pjson.name ?? '@agon_agents/cli',
       this.config.pjson.version ?? '0.0.0',
-      token ?? undefined
+      token ?? undefined,
+      undefined,
+      () => authManager.trySilentRenewal()
     );
 
     const usage = await apiClient.getUsage(flags.from, flags.to);

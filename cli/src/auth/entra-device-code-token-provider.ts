@@ -5,6 +5,12 @@ export interface EntraDeviceCodePrompt {
   verificationUriComplete?: string;
 }
 
+export interface EntraAccessTokenBundle {
+  accessToken: string;
+  refreshToken?: string;
+  expiresAt?: string;
+}
+
 export interface EntraDeviceCodeTokenOptions {
   authority: string;
   tenant?: string;
@@ -33,6 +39,8 @@ interface DeviceCodeResponse {
 
 interface TokenResponse {
   access_token?: string;
+  refresh_token?: string;
+  expires_in?: number;
   error?: string;
   error_description?: string;
 }
@@ -141,6 +149,13 @@ function tokenErrorFromCode(errorCode: string, description?: string): EntraDevic
 }
 
 export async function acquireTokenFromEntraDeviceCode(options: EntraDeviceCodeTokenOptions): Promise<string> {
+  const bundle = await acquireTokenBundleFromEntraDeviceCode(options);
+  return bundle.accessToken;
+}
+
+export async function acquireTokenBundleFromEntraDeviceCode(
+  options: EntraDeviceCodeTokenOptions
+): Promise<EntraAccessTokenBundle> {
   const clientId = options.clientId.trim();
   const scope = options.scope.trim();
   if (!clientId) {
@@ -238,7 +253,11 @@ export async function acquireTokenFromEntraDeviceCode(options: EntraDeviceCodeTo
     }
 
     if (tokenResponse.access_token) {
-      return tokenResponse.access_token;
+      return {
+        accessToken: tokenResponse.access_token,
+        refreshToken: tokenResponse.refresh_token?.trim() || undefined,
+        expiresAt: resolveExpiresAt(tokenResponse.expires_in),
+      };
     }
 
     if (tokenResponse.error === 'authorization_pending') {
@@ -257,4 +276,73 @@ export async function acquireTokenFromEntraDeviceCode(options: EntraDeviceCodeTo
     'ENTRA_DEVICE_AUTH_EXPIRED',
     'Device-code sign-in timed out before token acquisition completed.',
   );
+}
+
+export interface EntraRefreshTokenOptions {
+  authority: string;
+  clientId: string;
+  refreshToken: string;
+  scope?: string;
+}
+
+export async function refreshEntraAccessToken(
+  options: EntraRefreshTokenOptions
+): Promise<EntraAccessTokenBundle> {
+  const authorityBase = normalizeEntraAuthority(options.authority);
+  const tokenEndpoint = `${authorityBase}/oauth2/v2.0/token`;
+  const clientId = options.clientId.trim();
+  const refreshToken = options.refreshToken.trim();
+
+  if (!clientId || !refreshToken) {
+    throw new EntraDeviceCodeTokenProviderError(
+      'ENTRA_DEVICE_TOKEN_FAILED',
+      'Unable to refresh Entra access token due to missing refresh token metadata.',
+    );
+  }
+
+  const payload = new URLSearchParams({
+    grant_type: 'refresh_token',
+    client_id: clientId,
+    refresh_token: refreshToken,
+  });
+
+  const normalizedScope = options.scope?.trim();
+  if (normalizedScope) {
+    payload.set('scope', normalizedScope);
+  }
+
+  let tokenResponse: TokenResponse;
+  try {
+    tokenResponse = await postForm(tokenEndpoint, payload) as TokenResponse;
+  } catch (error) {
+    if (error instanceof EntraDeviceCodeTokenProviderError) {
+      throw new EntraDeviceCodeTokenProviderError(
+        'ENTRA_DEVICE_TOKEN_FAILED',
+        'Failed to refresh Entra access token.',
+        error.causeDetail ?? error.message,
+      );
+    }
+    throw error;
+  }
+
+  if (!tokenResponse.access_token) {
+    throw new EntraDeviceCodeTokenProviderError(
+      'ENTRA_DEVICE_TOKEN_FAILED',
+      'Entra token refresh response did not include an access token.',
+    );
+  }
+
+  return {
+    accessToken: tokenResponse.access_token,
+    refreshToken: tokenResponse.refresh_token?.trim() || undefined,
+    expiresAt: resolveExpiresAt(tokenResponse.expires_in),
+  };
+}
+
+function resolveExpiresAt(expiresInSeconds: number | undefined): string | undefined {
+  if (typeof expiresInSeconds !== 'number' || !Number.isFinite(expiresInSeconds) || expiresInSeconds <= 0) {
+    return undefined;
+  }
+
+  return new Date(Date.now() + expiresInSeconds * 1000).toISOString();
 }
