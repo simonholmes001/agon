@@ -23,6 +23,12 @@ public sealed class SessionState
     public int FrictionLevel { get; init; }
     public bool ResearchToolsEnabled { get; init; }
     public bool ClarificationIncomplete { get; set; }
+    public string? CouncilRunPhase { get; set; }
+    public DateTimeOffset? CouncilRunStartedAt { get; set; }
+    public DateTimeOffset? CouncilRunFirstProgressAt { get; set; }
+    public DateTimeOffset? CouncilRunLastProgressAt { get; set; }
+    public DateTimeOffset? CouncilRunCompletedAt { get; set; }
+    public string? CouncilRunFailedReason { get; set; }
     public TruthMapModel TruthMap { get; set; } = default!;
     public DebateBrief? DebateBrief { get; set; }
     public DateTimeOffset CreatedAt { get; set; }

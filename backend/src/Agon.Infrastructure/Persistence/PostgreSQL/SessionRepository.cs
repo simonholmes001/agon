@@ -38,6 +38,12 @@ public sealed class SessionRepository : ISessionRepository
             TargetedLoopCount = sessionState.TargetedLoopCount,
             ClarificationIncomplete = sessionState.ClarificationIncomplete,
             ClarificationRoundCount = sessionState.ClarificationRoundCount,
+            CouncilRunPhase = sessionState.CouncilRunPhase,
+            CouncilRunStartedAt = sessionState.CouncilRunStartedAt?.UtcDateTime,
+            CouncilRunFirstProgressAt = sessionState.CouncilRunFirstProgressAt?.UtcDateTime,
+            CouncilRunLastProgressAt = sessionState.CouncilRunLastProgressAt?.UtcDateTime,
+            CouncilRunCompletedAt = sessionState.CouncilRunCompletedAt?.UtcDateTime,
+            CouncilRunFailedReason = sessionState.CouncilRunFailedReason,
             ForkedFrom = null, // TODO: Add to SessionState when fork support is added
             ForkSnapshotId = null, // TODO: Add to SessionState when fork support is added
             CreatedAt = sessionState.CreatedAt.UtcDateTime,
@@ -114,11 +120,50 @@ public sealed class SessionRepository : ISessionRepository
         entity.TargetedLoopCount = sessionState.TargetedLoopCount;
         entity.ClarificationIncomplete = sessionState.ClarificationIncomplete;
         entity.ClarificationRoundCount = sessionState.ClarificationRoundCount;
+        entity.CouncilRunPhase = sessionState.CouncilRunPhase;
+        entity.CouncilRunStartedAt = sessionState.CouncilRunStartedAt?.UtcDateTime;
+        entity.CouncilRunFirstProgressAt = sessionState.CouncilRunFirstProgressAt?.UtcDateTime;
+        entity.CouncilRunLastProgressAt = sessionState.CouncilRunLastProgressAt?.UtcDateTime;
+        entity.CouncilRunCompletedAt = sessionState.CouncilRunCompletedAt?.UtcDateTime;
+        entity.CouncilRunFailedReason = sessionState.CouncilRunFailedReason;
         entity.UpdatedAt = DateTime.UtcNow;
         sessionState.UpdatedAt = DateTime.SpecifyKind(entity.UpdatedAt, DateTimeKind.Utc);
 
         // Explicitly mark entity as modified to ensure EF Core tracks the changes
         _dbContext.Entry(entity).State = Microsoft.EntityFrameworkCore.EntityState.Modified;
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task UpdateCouncilRunMetadataAsync(
+        SessionState sessionState,
+        CancellationToken cancellationToken = default)
+    {
+        var entity = await _dbContext.Sessions
+            .FirstOrDefaultAsync(s => s.Id == sessionState.SessionId, cancellationToken);
+
+        if (entity == null)
+        {
+            throw new InvalidOperationException(
+                $"Cannot update council metadata for session {sessionState.SessionId}: session not found");
+        }
+
+        entity.CouncilRunPhase = sessionState.CouncilRunPhase;
+        entity.CouncilRunStartedAt = sessionState.CouncilRunStartedAt?.UtcDateTime;
+        entity.CouncilRunFirstProgressAt = sessionState.CouncilRunFirstProgressAt?.UtcDateTime;
+        entity.CouncilRunLastProgressAt = sessionState.CouncilRunLastProgressAt?.UtcDateTime;
+        entity.CouncilRunCompletedAt = sessionState.CouncilRunCompletedAt?.UtcDateTime;
+        entity.CouncilRunFailedReason = sessionState.CouncilRunFailedReason;
+        entity.UpdatedAt = DateTime.UtcNow;
+        sessionState.UpdatedAt = DateTime.SpecifyKind(entity.UpdatedAt, DateTimeKind.Utc);
+
+        _dbContext.Entry(entity).Property(e => e.CouncilRunPhase).IsModified = true;
+        _dbContext.Entry(entity).Property(e => e.CouncilRunStartedAt).IsModified = true;
+        _dbContext.Entry(entity).Property(e => e.CouncilRunFirstProgressAt).IsModified = true;
+        _dbContext.Entry(entity).Property(e => e.CouncilRunLastProgressAt).IsModified = true;
+        _dbContext.Entry(entity).Property(e => e.CouncilRunCompletedAt).IsModified = true;
+        _dbContext.Entry(entity).Property(e => e.CouncilRunFailedReason).IsModified = true;
+        _dbContext.Entry(entity).Property(e => e.UpdatedAt).IsModified = true;
 
         await _dbContext.SaveChangesAsync(cancellationToken);
     }
@@ -176,6 +221,20 @@ public sealed class SessionRepository : ISessionRepository
         sessionState.TargetedLoopCount = entity.TargetedLoopCount;
         sessionState.ClarificationRoundCount = entity.ClarificationRoundCount;
         sessionState.ClarificationIncomplete = entity.ClarificationIncomplete;
+        sessionState.CouncilRunPhase = entity.CouncilRunPhase;
+        sessionState.CouncilRunStartedAt = entity.CouncilRunStartedAt.HasValue
+            ? DateTime.SpecifyKind(entity.CouncilRunStartedAt.Value, DateTimeKind.Utc)
+            : null;
+        sessionState.CouncilRunFirstProgressAt = entity.CouncilRunFirstProgressAt.HasValue
+            ? DateTime.SpecifyKind(entity.CouncilRunFirstProgressAt.Value, DateTimeKind.Utc)
+            : null;
+        sessionState.CouncilRunLastProgressAt = entity.CouncilRunLastProgressAt.HasValue
+            ? DateTime.SpecifyKind(entity.CouncilRunLastProgressAt.Value, DateTimeKind.Utc)
+            : null;
+        sessionState.CouncilRunCompletedAt = entity.CouncilRunCompletedAt.HasValue
+            ? DateTime.SpecifyKind(entity.CouncilRunCompletedAt.Value, DateTimeKind.Utc)
+            : null;
+        sessionState.CouncilRunFailedReason = entity.CouncilRunFailedReason;
         sessionState.CreatedAt = DateTime.SpecifyKind(entity.CreatedAt, DateTimeKind.Utc);
         sessionState.UpdatedAt = DateTime.SpecifyKind(entity.UpdatedAt, DateTimeKind.Utc);
 

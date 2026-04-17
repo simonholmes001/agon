@@ -344,6 +344,30 @@ namespace Agon.Infrastructure.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("ClarificationRoundCount");
 
+                    b.Property<DateTime?>("CouncilRunCompletedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("council_run_completed_at");
+
+                    b.Property<string>("CouncilRunFailedReason")
+                        .HasColumnType("text")
+                        .HasColumnName("council_run_failed_reason");
+
+                    b.Property<DateTime?>("CouncilRunFirstProgressAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("council_run_first_progress_at");
+
+                    b.Property<DateTime?>("CouncilRunLastProgressAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("council_run_last_progress_at");
+
+                    b.Property<string>("CouncilRunPhase")
+                        .HasColumnType("text")
+                        .HasColumnName("council_run_phase");
+
+                    b.Property<DateTime?>("CouncilRunStartedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("council_run_started_at");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");

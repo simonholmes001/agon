@@ -73,6 +73,9 @@ public sealed class AgentRunner : IAgentRunner
         Domain.Agents.AgentId.ClaudeAgent
     ];
     private const string CritiqueAgentSuffix = "_critique";
+    private const string CouncilProgressAgentId = "council_progress";
+    private const string CouncilFailedAgentId = "council_failed";
+    private const string CouncilCompleteAgentId = "council_complete";
 
     private readonly IReadOnlyList<ICouncilAgent> _agents;
     private readonly Dictionary<string, string> _modelProviderByAgentId;
@@ -574,15 +577,49 @@ public sealed class AgentRunner : IAgentRunner
             state.CurrentRound,
             CancellationToken.None);
 
+        await PublishCouncilProgressAsync(
+            state.SessionId,
+            state.CurrentRound,
+            "Stage: analysis (starting)");
         var analysisResponses = await RunAnalysisRoundAsync(state, cancellationToken);
+        await PublishCouncilProgressAsync(
+            state.SessionId,
+            state.CurrentRound,
+            "Stage: analysis (completed)");
         state.LastRoundMessages.Clear();
         foreach (var response in analysisResponses.Where(r => !r.TimedOut && !string.IsNullOrWhiteSpace(r.Message)))
         {
             state.LastRoundMessages[response.AgentId] = response.Message;
         }
 
+        await PublishCouncilProgressAsync(
+            state.SessionId,
+            state.CurrentRound,
+            "Stage: critique (starting)");
         await RunCritiqueRoundAsync(state, cancellationToken);
+        await PublishCouncilProgressAsync(
+            state.SessionId,
+            state.CurrentRound,
+            "Stage: critique (completed)");
+        await PublishCouncilProgressAsync(
+            state.SessionId,
+            state.CurrentRound,
+            "Stage: synthesis (starting)");
         var synthesisResponse = await RunSynthesisAsync(state, cancellationToken);
+        await PublishCouncilProgressAsync(
+            state.SessionId,
+            state.CurrentRound,
+            "Stage: synthesis (completed)");
+        await PublishCouncilProgressAsync(
+            state.SessionId,
+            state.CurrentRound,
+            "Stage: completed");
+        await _conversationHistory.StoreMessageAsync(
+            state.SessionId,
+            CouncilCompleteAgentId,
+            "Council analysis completed successfully.",
+            state.CurrentRound,
+            CancellationToken.None);
 
         _logger?.LogInformation(
             "Post-delivery council invocation completed for session {SessionId}. User message length: {Length}, Tokens: {Tokens}",
@@ -922,11 +959,19 @@ public sealed class AgentRunner : IAgentRunner
     {
         var startedAt = Stopwatch.GetTimestamp();
         var notesByAgent = new Dictionary<string, List<string>>(StringComparer.Ordinal);
-        var totalPasses = chunkedAttachments.Max(plan => plan.Chunks.Count);
+        var totalPasses = Math.Min(
+            chunkedAttachments.Max(plan => plan.Chunks.Count),
+            _chunkLoopOptions.MaxPreludePasses);
         if (totalPasses <= 0)
         {
             return notesByAgent;
         }
+
+        await PublishCouncilProgressAsync(
+            state.SessionId,
+            state.CurrentRound,
+            $"Stage: chunking (starting) — {totalPasses} base passes");
+        var earlyExited = false;
 
         for (var passIndex = 0; passIndex < totalPasses; passIndex++)
         {
@@ -935,6 +980,11 @@ public sealed class AgentRunner : IAgentRunner
             {
                 continue;
             }
+
+            await PublishCouncilProgressAsync(
+                state.SessionId,
+                state.CurrentRound,
+                $"Stage: chunking base pass {passIndex + 1}/{totalPasses}");
 
             AttachmentChunkLoopMetrics.Passes.Add(1);
 
@@ -954,20 +1004,38 @@ public sealed class AgentRunner : IAgentRunner
             var responses = await DispatchParallelAsync(councilAgents, contexts, cancellationToken);
             await AccumulateTokensAsync(state, responses, cancellationToken);
             AppendChunkPreludeNotes(notesByAgent, responses);
+            if (ShouldEarlyExitChunkPrelude(notesByAgent, councilAgents.Count))
+            {
+                await PublishCouncilProgressAsync(
+                    state.SessionId,
+                    state.CurrentRound,
+                    "Stage: chunking early-exit (note threshold reached)");
+                earlyExited = true;
+                break;
+            }
         }
 
         var latestUserQuery = state.UserMessages.Count == 0
             ? string.Empty
             : state.UserMessages[^1].Content;
         var focusedPlans = BuildQueryFocusedChunkPlans(chunkedAttachments, latestUserQuery);
-        var focusedPasses = focusedPlans.Count == 0 ? 0 : focusedPlans.Max(plan => plan.Chunks.Count);
-        for (var focusedPassIndex = 0; focusedPassIndex < focusedPasses; focusedPassIndex++)
+        var focusedPasses = focusedPlans.Count == 0
+            ? 0
+            : Math.Min(
+                focusedPlans.Max(plan => plan.Chunks.Count),
+                Math.Max(0, _chunkLoopOptions.MaxPreludePasses - totalPasses));
+        for (var focusedPassIndex = 0; focusedPassIndex < focusedPasses && !earlyExited; focusedPassIndex++)
         {
             var passAttachments = BuildChunkPassAttachments(state.Attachments, focusedPlans, focusedPassIndex);
             if (passAttachments.Count == 0)
             {
                 continue;
             }
+
+            await PublishCouncilProgressAsync(
+                state.SessionId,
+                state.CurrentRound,
+                $"Stage: chunking focused pass {focusedPassIndex + 1}/{focusedPasses}");
 
             AttachmentChunkLoopMetrics.Passes.Add(1);
 
@@ -991,8 +1059,20 @@ public sealed class AgentRunner : IAgentRunner
             var responses = await DispatchParallelAsync(councilAgents, contexts, cancellationToken);
             await AccumulateTokensAsync(state, responses, cancellationToken);
             AppendChunkPreludeNotes(notesByAgent, responses);
+            if (ShouldEarlyExitChunkPrelude(notesByAgent, councilAgents.Count))
+            {
+                await PublishCouncilProgressAsync(
+                    state.SessionId,
+                    state.CurrentRound,
+                    "Stage: chunking early-exit (note threshold reached)");
+                break;
+            }
         }
 
+        await PublishCouncilProgressAsync(
+            state.SessionId,
+            state.CurrentRound,
+            "Stage: chunking (completed)");
         AttachmentChunkLoopMetrics.PreludeDurationMs.Record(Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds);
         return notesByAgent;
     }
@@ -1137,8 +1217,14 @@ public sealed class AgentRunner : IAgentRunner
         }
 
         var plans = new List<ChunkedAttachmentPlan>();
+        var remainingBudgetChars = _chunkLoopOptions.MaxChunkBudgetChars;
         foreach (var attachment in attachments)
         {
+            if (remainingBudgetChars <= 0)
+            {
+                break;
+            }
+
             if (string.IsNullOrWhiteSpace(attachment.ExtractedText))
             {
                 continue;
@@ -1156,7 +1242,39 @@ public sealed class AgentRunner : IAgentRunner
                 continue;
             }
 
+            if (remainingBudgetChars < extractedText.Length)
+            {
+                var budgetedChunks = new List<string>();
+                var consumed = 0;
+                foreach (var chunk in chunks)
+                {
+                    if (consumed >= remainingBudgetChars)
+                    {
+                        break;
+                    }
+
+                    var budgetLeft = remainingBudgetChars - consumed;
+                    if (chunk.Length <= budgetLeft)
+                    {
+                        budgetedChunks.Add(chunk);
+                        consumed += chunk.Length;
+                        continue;
+                    }
+
+                    budgetedChunks.Add(chunk[..budgetLeft]);
+                    consumed += budgetLeft;
+                }
+
+                chunks = budgetedChunks;
+            }
+
+            if (chunks.Count <= 1)
+            {
+                continue;
+            }
+
             plans.Add(new ChunkedAttachmentPlan(attachment, chunks));
+            remainingBudgetChars -= chunks.Sum(chunk => chunk.Length);
         }
 
         return plans;
@@ -1344,6 +1462,23 @@ public sealed class AgentRunner : IAgentRunner
         return normalized[..maxChars].TrimEnd() + "...";
     }
 
+    private bool ShouldEarlyExitChunkPrelude(
+        IReadOnlyDictionary<string, List<string>> notesByAgent,
+        int councilAgentCount)
+    {
+        if (_chunkLoopOptions.EarlyExitMinNotesPerAgent <= 0)
+        {
+            return false;
+        }
+
+        if (notesByAgent.Count < councilAgentCount)
+        {
+            return false;
+        }
+
+        return notesByAgent.Values.All(notes => notes.Count >= _chunkLoopOptions.EarlyExitMinNotesPerAgent);
+    }
+
     private static AttachmentChunkLoopOptions NormalizeChunkLoopOptions(AttachmentChunkLoopOptions? options)
     {
         var source = options ?? new AttachmentChunkLoopOptions();
@@ -1364,7 +1499,10 @@ public sealed class AgentRunner : IAgentRunner
             MinQueryKeywordLength = Math.Max(1, source.MinQueryKeywordLength),
             MaxChunksPerAttachment = Math.Max(1, source.MaxChunksPerAttachment),
             MaxChunkNoteChars = Math.Max(1, source.MaxChunkNoteChars),
-            MaxFinalNotesPerAgent = Math.Max(1, source.MaxFinalNotesPerAgent)
+            MaxFinalNotesPerAgent = Math.Max(1, source.MaxFinalNotesPerAgent),
+            MaxPreludePasses = Math.Max(1, source.MaxPreludePasses),
+            MaxChunkBudgetChars = Math.Max(1, source.MaxChunkBudgetChars),
+            EarlyExitMinNotesPerAgent = Math.Max(1, source.EarlyExitMinNotesPerAgent)
         };
     }
 
@@ -1430,6 +1568,27 @@ public sealed class AgentRunner : IAgentRunner
                 agent.AgentId, _agentTimeoutSeconds);
             return AgentResponse.CreateTimedOut(agent.AgentId);
         }
+        catch (Exception ex)
+        {
+            _logger?.LogError(
+                ex,
+                "Agent {AgentId} failed unexpectedly during execution. Returning degraded response so council run can continue.",
+                agent.AgentId);
+            return AgentResponse.CreateFailed(agent.AgentId, "AGENT_EXECUTION_EXCEPTION");
+        }
+    }
+
+    private async Task PublishCouncilProgressAsync(
+        Guid sessionId,
+        int round,
+        string message)
+    {
+        await _conversationHistory.StoreMessageAsync(
+            sessionId,
+            CouncilProgressAgentId,
+            message,
+            round,
+            CancellationToken.None);
     }
 
     /// <summary>

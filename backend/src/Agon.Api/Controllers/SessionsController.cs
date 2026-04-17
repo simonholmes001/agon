@@ -907,7 +907,13 @@ public class SessionsController : ControllerBase
             sessionState.CurrentRound,
             sessionState.TokensUsed,
             sessionState.CreatedAt,
-            sessionState.UpdatedAt);
+            sessionState.UpdatedAt,
+            sessionState.CouncilRunPhase,
+            sessionState.CouncilRunStartedAt,
+            sessionState.CouncilRunFirstProgressAt,
+            sessionState.CouncilRunLastProgressAt,
+            sessionState.CouncilRunCompletedAt,
+            sessionState.CouncilRunFailedReason);
     }
 
     private static SessionAttachmentResponse MapAttachmentResponse(SessionAttachment attachment)
@@ -1144,7 +1150,13 @@ public record SessionResponse(
     int CurrentRound,
     int TokensUsed,
     DateTimeOffset CreatedAt,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt,
+    string? CouncilRunPhase = null,
+    DateTimeOffset? CouncilRunStartedAt = null,
+    DateTimeOffset? CouncilRunFirstProgressAt = null,
+    DateTimeOffset? CouncilRunLastProgressAt = null,
+    DateTimeOffset? CouncilRunCompletedAt = null,
+    string? CouncilRunFailedReason = null);
 
 public record SnapshotResponse(
     Guid SnapshotId,

@@ -1,12 +1,14 @@
 using Agon.Application.Models;
 using Agon.Application.Orchestration;
 using Agon.Application.Services;
+using Agon.Application.Interfaces;
 using Agon.Domain.Agents;
 using Agon.Domain.Sessions;
 using Agon.Domain.TruthMap.Entities;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using NSubstitute;
+using System.Collections.Concurrent;
 using TruthMapModel = Agon.Domain.TruthMap.TruthMap;
 
 namespace Agon.Application.Tests.Orchestration;
@@ -157,6 +159,67 @@ public class OrchestratorTests
             state,
             "Refine the acceptance criteria",
             Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task RunPostDeliveryFollowUpAsync_InvokeCouncilBackgroundFailure_PersistsCouncilFailedMessage()
+    {
+        var state = BuildState(SessionPhase.PostDelivery);
+        state.CurrentRound = 4;
+        state.UserMessages.Add(new UserMessage("invoke council", DateTimeOffset.UtcNow, 4));
+
+        var capturedMessages = new ConcurrentBag<AgentMessageRecord>();
+        var messageRepo = Substitute.For<IAgentMessageRepository>();
+        messageRepo.GetBySessionIdAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<AgentMessageRecord>>([]));
+        messageRepo.AddAsync(Arg.Any<AgentMessageRecord>(), Arg.Any<CancellationToken>())
+            .Returns(call =>
+            {
+                capturedMessages.Add(call.ArgAt<AgentMessageRecord>(0));
+                return Task.CompletedTask;
+            });
+
+        var sessionService = Substitute.For<ISessionService>();
+        sessionService.AdvancePhaseAsync(Arg.Any<SessionState>(), Arg.Any<SessionPhase>(), Arg.Any<CancellationToken>())
+            .Returns(Task.CompletedTask);
+        sessionService.RecordRoundSnapshotAsync(Arg.Any<SessionState>(), Arg.Any<CancellationToken>())
+            .Returns(Task.CompletedTask);
+        sessionService.GetAsync(state.SessionId, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<SessionState?>(state));
+
+        var runner = Substitute.For<IAgentRunner>();
+        runner.RunPostDeliveryFollowUpAsync(Arg.Any<SessionState>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns<Task<AgentResponse>>(_ => throw new InvalidOperationException("boom"));
+
+        var scopedProvider = Substitute.For<IServiceProvider>();
+        scopedProvider.GetService(typeof(IAgentRunner)).Returns(runner);
+        scopedProvider.GetService(typeof(ISessionService)).Returns(sessionService);
+        scopedProvider.GetService(typeof(IAgentMessageRepository)).Returns(messageRepo);
+        scopedProvider.GetService(typeof(ConversationHistoryService))
+            .Returns(new ConversationHistoryService(messageRepo));
+
+        var scope = Substitute.For<IServiceScope>();
+        scope.ServiceProvider.Returns(scopedProvider);
+
+        var scopeFactory = Substitute.For<IServiceScopeFactory>();
+        scopeFactory.CreateScope().Returns(scope);
+
+        var orchestrator = new Orchestrator(
+            runner,
+            sessionService,
+            scopeFactory,
+            DefaultPolicy());
+
+        await orchestrator.RunPostDeliveryFollowUpAsync(state, "invoke council", CancellationToken.None);
+
+        var deadline = DateTimeOffset.UtcNow.AddSeconds(2);
+        while (DateTimeOffset.UtcNow < deadline
+               && !capturedMessages.Any(m => m.AgentId == "council_failed"))
+        {
+            await Task.Delay(25);
+        }
+
+        capturedMessages.Any(m => m.AgentId == "council_failed").Should().BeTrue();
     }
 
     // ── RunFullDebateChainAsync ──────────────────────────────────────────────

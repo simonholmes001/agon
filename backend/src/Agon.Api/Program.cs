@@ -215,7 +215,10 @@ builder.Services.AddSingleton(new AttachmentChunkLoopOptions
     MinQueryKeywordLength = attachmentProcessingConfig.ChunkLoop.MinQueryKeywordLength,
     MaxChunksPerAttachment = attachmentProcessingConfig.ChunkLoop.MaxChunksPerAttachment,
     MaxChunkNoteChars = attachmentProcessingConfig.ChunkLoop.MaxChunkNoteChars,
-    MaxFinalNotesPerAgent = attachmentProcessingConfig.ChunkLoop.MaxFinalNotesPerAgent
+    MaxFinalNotesPerAgent = attachmentProcessingConfig.ChunkLoop.MaxFinalNotesPerAgent,
+    MaxPreludePasses = attachmentProcessingConfig.ChunkLoop.MaxPreludePasses,
+    MaxChunkBudgetChars = attachmentProcessingConfig.ChunkLoop.MaxChunkBudgetChars,
+    EarlyExitMinNotesPerAgent = attachmentProcessingConfig.ChunkLoop.EarlyExitMinNotesPerAgent
 });
 builder.Services.AddSingleton(new AttachmentExtractionOptions
 {
