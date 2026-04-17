@@ -1,8 +1,10 @@
 using Agon.Application.Interfaces;
 using Agon.Application.Models;
 using Agon.Application.Services;
+using Agon.Domain.Sessions;
 using FluentAssertions;
 using NSubstitute;
+using TruthMapModel = Agon.Domain.TruthMap.TruthMap;
 
 namespace Agon.Application.Tests.Services;
 
@@ -99,5 +101,67 @@ public class ConversationHistoryServiceTests
         // Act & Assert
         await Assert.ThrowsAsync<ArgumentException>(async () =>
             await _service.StoreMessageAsync(sessionId, null!, "message", 1, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task StoreMessageAsync_CouncilProgress_PersistsRunMetadata()
+    {
+        // Arrange
+        var sessionId = Guid.NewGuid();
+        var sessionRepo = Substitute.For<ISessionRepository>();
+        var state = SessionState.Create(sessionId, Guid.NewGuid(), "idea", 50, false, TruthMapModel.Empty(sessionId));
+        sessionRepo.GetAsync(sessionId, Arg.Any<CancellationToken>())
+            .Returns(state);
+
+        var service = new ConversationHistoryService(_mockMessageRepo, sessionRepo);
+
+        // Act
+        await service.StoreMessageAsync(
+            sessionId,
+            "council_progress",
+            "Stage: analysis (running council agents)",
+            round: 2,
+            CancellationToken.None);
+
+        // Assert
+        await sessionRepo.Received(1).UpdateAsync(
+            Arg.Is<SessionState>(s =>
+                s.CouncilRunPhase == "analysis"
+                && s.CouncilRunStartedAt.HasValue
+                && s.CouncilRunFirstProgressAt.HasValue
+                && s.CouncilRunLastProgressAt.HasValue
+                && s.CouncilRunFailedReason == null),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task StoreMessageAsync_CouncilFailed_PersistsFailureReason()
+    {
+        // Arrange
+        var sessionId = Guid.NewGuid();
+        var sessionRepo = Substitute.For<ISessionRepository>();
+        var state = SessionState.Create(sessionId, Guid.NewGuid(), "idea", 50, false, TruthMapModel.Empty(sessionId));
+        state.Status = SessionStatus.Active;
+        sessionRepo.GetAsync(sessionId, Arg.Any<CancellationToken>())
+            .Returns(state);
+
+        var service = new ConversationHistoryService(_mockMessageRepo, sessionRepo);
+
+        // Act
+        await service.StoreMessageAsync(
+            sessionId,
+            "council_failed",
+            "Council failed. ReasonCode=COUNCIL_BACKGROUND_FAILURE",
+            round: 2,
+            CancellationToken.None);
+
+        // Assert
+        await sessionRepo.Received(1).UpdateAsync(
+            Arg.Is<SessionState>(s =>
+                s.Status == SessionStatus.CompleteWithGaps
+                && s.CouncilRunPhase == "failed"
+                && s.CouncilRunCompletedAt.HasValue
+                && s.CouncilRunFailedReason == "COUNCIL_BACKGROUND_FAILURE"),
+            Arg.Any<CancellationToken>());
     }
 }

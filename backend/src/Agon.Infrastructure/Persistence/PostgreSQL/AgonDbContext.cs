@@ -92,6 +92,12 @@ public class AgonDbContext : DbContext
             entity.Property(e => e.TargetedLoopCount).HasColumnName("targeted_loop_count");
             entity.Property(e => e.ClarificationIncomplete).HasColumnName("clarification_incomplete");
             entity.Property(e => e.ClarificationRoundCount).HasColumnName("ClarificationRoundCount");
+            entity.Property(e => e.CouncilRunPhase).HasColumnName("council_run_phase");
+            entity.Property(e => e.CouncilRunStartedAt).HasColumnName("council_run_started_at");
+            entity.Property(e => e.CouncilRunFirstProgressAt).HasColumnName("council_run_first_progress_at");
+            entity.Property(e => e.CouncilRunLastProgressAt).HasColumnName("council_run_last_progress_at");
+            entity.Property(e => e.CouncilRunCompletedAt).HasColumnName("council_run_completed_at");
+            entity.Property(e => e.CouncilRunFailedReason).HasColumnName("council_run_failed_reason");
             entity.Property(e => e.ForkedFrom).HasColumnName("forked_from");
             entity.Property(e => e.ForkSnapshotId).HasColumnName("fork_snapshot_id");
             entity.Property(e => e.CreatedAt).HasColumnName("created_at");
@@ -244,6 +250,12 @@ public class SessionEntity
     public int TargetedLoopCount { get; set; }
     public bool ClarificationIncomplete { get; set; }
     public int ClarificationRoundCount { get; set; }
+    public string? CouncilRunPhase { get; set; }
+    public DateTime? CouncilRunStartedAt { get; set; }
+    public DateTime? CouncilRunFirstProgressAt { get; set; }
+    public DateTime? CouncilRunLastProgressAt { get; set; }
+    public DateTime? CouncilRunCompletedAt { get; set; }
+    public string? CouncilRunFailedReason { get; set; }
     public Guid? ForkedFrom { get; set; }
     public Guid? ForkSnapshotId { get; set; }
     public DateTime CreatedAt { get; set; }

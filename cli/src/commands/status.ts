@@ -125,6 +125,27 @@ export default class Status extends Command {
     this.log(`Updated:     ${updatedDate.toLocaleString()}`);
     this.log('');
 
+    if (session.councilRunPhase) {
+      this.log('Council Run:');
+      this.log(`  Phase:            ${session.councilRunPhase}`);
+      if (session.councilRunStartedAt) {
+        this.log(`  Started:          ${new Date(session.councilRunStartedAt).toLocaleString()}`);
+      }
+      if (session.councilRunFirstProgressAt) {
+        this.log(`  First Progress:   ${new Date(session.councilRunFirstProgressAt).toLocaleString()}`);
+      }
+      if (session.councilRunLastProgressAt) {
+        this.log(`  Last Progress:    ${new Date(session.councilRunLastProgressAt).toLocaleString()}`);
+      }
+      if (session.councilRunCompletedAt) {
+        this.log(`  Completed:        ${new Date(session.councilRunCompletedAt).toLocaleString()}`);
+      }
+      if (session.councilRunFailedReason) {
+        this.log(`  Failed Reason:    ${session.councilRunFailedReason}`);
+      }
+      this.log('');
+    }
+
     // Round info (if in debate)
     if (session.currentRound !== undefined) {
       this.log(`Current Round: ${session.currentRound}`);

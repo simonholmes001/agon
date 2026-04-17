@@ -38,6 +38,12 @@ public sealed class SessionRepository : ISessionRepository
             TargetedLoopCount = sessionState.TargetedLoopCount,
             ClarificationIncomplete = sessionState.ClarificationIncomplete,
             ClarificationRoundCount = sessionState.ClarificationRoundCount,
+            CouncilRunPhase = sessionState.CouncilRunPhase,
+            CouncilRunStartedAt = sessionState.CouncilRunStartedAt?.UtcDateTime,
+            CouncilRunFirstProgressAt = sessionState.CouncilRunFirstProgressAt?.UtcDateTime,
+            CouncilRunLastProgressAt = sessionState.CouncilRunLastProgressAt?.UtcDateTime,
+            CouncilRunCompletedAt = sessionState.CouncilRunCompletedAt?.UtcDateTime,
+            CouncilRunFailedReason = sessionState.CouncilRunFailedReason,
             ForkedFrom = null, // TODO: Add to SessionState when fork support is added
             ForkSnapshotId = null, // TODO: Add to SessionState when fork support is added
             CreatedAt = sessionState.CreatedAt.UtcDateTime,
@@ -114,6 +120,12 @@ public sealed class SessionRepository : ISessionRepository
         entity.TargetedLoopCount = sessionState.TargetedLoopCount;
         entity.ClarificationIncomplete = sessionState.ClarificationIncomplete;
         entity.ClarificationRoundCount = sessionState.ClarificationRoundCount;
+        entity.CouncilRunPhase = sessionState.CouncilRunPhase;
+        entity.CouncilRunStartedAt = sessionState.CouncilRunStartedAt?.UtcDateTime;
+        entity.CouncilRunFirstProgressAt = sessionState.CouncilRunFirstProgressAt?.UtcDateTime;
+        entity.CouncilRunLastProgressAt = sessionState.CouncilRunLastProgressAt?.UtcDateTime;
+        entity.CouncilRunCompletedAt = sessionState.CouncilRunCompletedAt?.UtcDateTime;
+        entity.CouncilRunFailedReason = sessionState.CouncilRunFailedReason;
         entity.UpdatedAt = DateTime.UtcNow;
         sessionState.UpdatedAt = DateTime.SpecifyKind(entity.UpdatedAt, DateTimeKind.Utc);
 
@@ -176,6 +188,20 @@ public sealed class SessionRepository : ISessionRepository
         sessionState.TargetedLoopCount = entity.TargetedLoopCount;
         sessionState.ClarificationRoundCount = entity.ClarificationRoundCount;
         sessionState.ClarificationIncomplete = entity.ClarificationIncomplete;
+        sessionState.CouncilRunPhase = entity.CouncilRunPhase;
+        sessionState.CouncilRunStartedAt = entity.CouncilRunStartedAt.HasValue
+            ? DateTime.SpecifyKind(entity.CouncilRunStartedAt.Value, DateTimeKind.Utc)
+            : null;
+        sessionState.CouncilRunFirstProgressAt = entity.CouncilRunFirstProgressAt.HasValue
+            ? DateTime.SpecifyKind(entity.CouncilRunFirstProgressAt.Value, DateTimeKind.Utc)
+            : null;
+        sessionState.CouncilRunLastProgressAt = entity.CouncilRunLastProgressAt.HasValue
+            ? DateTime.SpecifyKind(entity.CouncilRunLastProgressAt.Value, DateTimeKind.Utc)
+            : null;
+        sessionState.CouncilRunCompletedAt = entity.CouncilRunCompletedAt.HasValue
+            ? DateTime.SpecifyKind(entity.CouncilRunCompletedAt.Value, DateTimeKind.Utc)
+            : null;
+        sessionState.CouncilRunFailedReason = entity.CouncilRunFailedReason;
         sessionState.CreatedAt = DateTime.SpecifyKind(entity.CreatedAt, DateTimeKind.Utc);
         sessionState.UpdatedAt = DateTime.SpecifyKind(entity.UpdatedAt, DateTimeKind.Utc);
 

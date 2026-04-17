@@ -152,6 +152,9 @@ public class ProgramIntegrationTests : IClassFixture<AgonWebApplicationFactory>
             builder.UseSetting("AttachmentProcessing:ChunkLoop:MaxChunksPerAttachment", "12");
             builder.UseSetting("AttachmentProcessing:ChunkLoop:MaxChunkNoteChars", "900");
             builder.UseSetting("AttachmentProcessing:ChunkLoop:MaxFinalNotesPerAgent", "6");
+            builder.UseSetting("AttachmentProcessing:ChunkLoop:MaxPreludePasses", "7");
+            builder.UseSetting("AttachmentProcessing:ChunkLoop:MaxChunkBudgetChars", "120000");
+            builder.UseSetting("AttachmentProcessing:ChunkLoop:EarlyExitMinNotesPerAgent", "5");
         });
 
         using var scope = factory.Services.CreateScope();
@@ -170,6 +173,9 @@ public class ProgramIntegrationTests : IClassFixture<AgonWebApplicationFactory>
         options.MaxChunksPerAttachment.Should().Be(12);
         options.MaxChunkNoteChars.Should().Be(900);
         options.MaxFinalNotesPerAgent.Should().Be(6);
+        options.MaxPreludePasses.Should().Be(7);
+        options.MaxChunkBudgetChars.Should().Be(120000);
+        options.EarlyExitMinNotesPerAgent.Should().Be(5);
     }
 
     [Fact]

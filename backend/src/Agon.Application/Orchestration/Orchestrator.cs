@@ -188,6 +188,14 @@ public sealed class Orchestrator : IOrchestrator
                 _logger?.LogInformation(
                     "Session {SessionId}: Post-delivery council already running — duplicate invocation ignored.",
                     sessionId);
+                using var duplicateScope = _scopeFactory.CreateScope();
+                var duplicateHistory = duplicateScope.ServiceProvider.GetRequiredService<ConversationHistoryService>();
+                await duplicateHistory.StoreMessageAsync(
+                    sessionId,
+                    "council_progress",
+                    "Stage: already running (duplicate invoke ignored)",
+                    state.CurrentRound,
+                    CancellationToken.None);
                 return;
             }
 
@@ -219,6 +227,27 @@ public sealed class Orchestrator : IOrchestrator
                         ex,
                         "Session {SessionId}: Post-delivery council failed in background.",
                         sessionId);
+                    try
+                    {
+                        using var failureScope = _scopeFactory.CreateScope();
+                        var history = failureScope.ServiceProvider.GetRequiredService<ConversationHistoryService>();
+                        var scopedSessionService = failureScope.ServiceProvider.GetRequiredService<ISessionService>();
+                        var scopedState = await scopedSessionService.GetAsync(sessionId, CancellationToken.None);
+                        var round = scopedState?.CurrentRound ?? state.CurrentRound;
+                        await history.StoreMessageAsync(
+                            sessionId,
+                            "council_failed",
+                            "Council run failed (ReasonCode=COUNCIL_BACKGROUND_FAILURE). You can retry by sending 'invoke council' again.",
+                            round,
+                            CancellationToken.None);
+                    }
+                    catch (Exception persistFailureEx)
+                    {
+                        _logger?.LogError(
+                            persistFailureEx,
+                            "Session {SessionId}: Failed to persist council failure message.",
+                            sessionId);
+                    }
                 }
                 finally
                 {

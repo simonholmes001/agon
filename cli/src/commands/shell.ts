@@ -1215,8 +1215,8 @@ export default class Shell extends Command {
     const watchStartedAt = Date.now();
     let lastProgressAt = watchStartedAt;
     let consecutiveFailures = 0;
-    const maxWatchDurationMs = getWatchDurationMsFromEnv('AGON_COUNCIL_WATCH_MAX_MINUTES', 15);
-    const maxIdleDurationMs = getWatchDurationMsFromEnv('AGON_WATCH_MAX_IDLE_MINUTES', 8);
+    let pollDelayMs = 1500;
+    const maxWatchDurationMs = getOptionalWatchDurationMsFromEnv('AGON_COUNCIL_WATCH_MAX_MINUTES');
     const maxConsecutiveFailures = 5;
     const acknowledgedAtMs = acknowledgedAt
       ? new Date(acknowledgedAt).getTime()
@@ -1247,16 +1247,22 @@ export default class Shell extends Command {
           return;
         }
 
-        if (Date.now() - watchStartedAt > maxWatchDurationMs) {
+        if (maxWatchDurationMs !== null && Date.now() - watchStartedAt > maxWatchDurationMs) {
           progressSpinner.stop();
           this.log(chalk.yellow('Council watch timed out. Council may still be running in the background.'));
           this.log(chalk.dim('Type any follow-up to check for results, or run /status.'));
           return;
         }
 
+        let session;
         let messages;
         try {
-          messages = await this.apiClient.getMessages(sessionId);
+          [session, messages] = await Promise.all([
+            this.apiClient.getSession(sessionId),
+            this.apiClient.getMessages(sessionId)
+          ]);
+          await this.sessionManager.saveSession(session);
+          shimmerBase = `Council is analyzing... (${this.formatPhaseForDisplay(session.phase)})`;
           consecutiveFailures = 0;
         } catch (error) {
           consecutiveFailures += 1;
@@ -1272,6 +1278,17 @@ export default class Shell extends Command {
           continue;
         }
 
+        const progressMessages = messages
+          .filter(m => {
+            const agent = m.agentId.toLowerCase();
+            const isProgress = agent === 'council_progress'
+              || agent === 'council_failed'
+              || agent === 'council_complete';
+            const isNew = new Date(m.createdAt).getTime() >= acknowledgedAtMs;
+            return isProgress && isNew;
+          })
+          .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+
         // Only surface messages that were created after the council acknowledgement.
         // Excludes system/user/acknowledgement agents so only substantive analysis shows.
         const councilMessages = messages
@@ -1280,6 +1297,9 @@ export default class Shell extends Command {
             const isSubstantive = agent !== 'moderator'
               && agent !== 'user'
               && agent !== 'council_running'
+              && agent !== 'council_progress'
+              && agent !== 'council_failed'
+              && agent !== 'council_complete'
               && agent !== 'post_delivery_assistant';
             const isNew = new Date(m.createdAt).getTime() >= acknowledgedAtMs;
             return isSubstantive && isNew;
@@ -1295,6 +1315,33 @@ export default class Shell extends Command {
         };
 
         let foundSynthesizer = false;
+        let foundTerminalFailure = false;
+        let sawNewProgress = false;
+        for (const msg of progressMessages) {
+          const key = `${msg.agentId}:${msg.round}:${msg.createdAt}:${msg.message.length}`;
+          if (seenMessageKeys.has(key)) {
+            continue;
+          }
+
+          seenMessageKeys.add(key);
+          lastProgressAt = Date.now();
+          thinkingStartedAt = Date.now();
+          sawNewProgress = true;
+
+          stopSpinnerForOutput();
+          if (msg.agentId === 'council_progress') {
+            this.log(chalk.dim(`⏱️  ${msg.message}`));
+            this.log('');
+          } else if (msg.agentId === 'council_failed') {
+            this.log(chalk.red(msg.message));
+            this.log('');
+            foundTerminalFailure = true;
+          } else if (msg.agentId === 'council_complete') {
+            this.log(chalk.green(msg.message));
+            this.log('');
+          }
+        }
+
         for (const msg of councilMessages) {
           const key = `${msg.agentId}:${msg.round}:${msg.createdAt}:${msg.message.length}`;
           if (seenMessageKeys.has(key)) {
@@ -1304,6 +1351,7 @@ export default class Shell extends Command {
           seenMessageKeys.add(key);
           lastProgressAt = Date.now();
           thinkingStartedAt = Date.now();
+          sawNewProgress = true;
 
           stopSpinnerForOutput();
           this.log('━'.repeat(60));
@@ -1328,10 +1376,9 @@ export default class Shell extends Command {
           return;
         }
 
-        if (Date.now() - lastProgressAt > maxIdleDurationMs) {
-          progressSpinner.stop();
-          this.log(chalk.yellow('No council progress detected for a while. Stopping live watch.'));
-          this.log(chalk.dim('Type any follow-up to check for results, or run /status.'));
+        if (foundTerminalFailure) {
+          this.log(chalk.yellow('Council stopped due to a terminal failure.'));
+          this.log(chalk.dim("Retry with 'invoke council' after correcting provider/runtime configuration if needed."));
           return;
         }
 
@@ -1341,7 +1388,12 @@ export default class Shell extends Command {
           shimmerBase = 'Council is analyzing...';
         }
 
-        await new Promise(resolve => setTimeout(resolve, 2500));
+        pollDelayMs = getAdaptiveCouncilPollDelayMs({
+          currentDelayMs: pollDelayMs,
+          sawNewProgress,
+          idleMs: Date.now() - lastProgressAt
+        });
+        await new Promise(resolve => setTimeout(resolve, pollDelayMs));
       }
     } finally {
       clearInterval(shimmerInterval);
@@ -1362,6 +1414,47 @@ function getWatchDurationMsFromEnv(envKey: string, fallbackMinutes: number): num
   }
 
   return parsed * 60_000;
+}
+
+function getOptionalWatchDurationMsFromEnv(envKey: string): number | null {
+  const raw = process.env[envKey];
+  if (!raw) {
+    return null;
+  }
+
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return null;
+  }
+
+  return parsed * 60_000;
+}
+
+function getAdaptiveCouncilPollDelayMs(params: {
+  currentDelayMs: number;
+  sawNewProgress: boolean;
+  idleMs: number;
+}): number {
+  const minDelayMs = 1200;
+  const maxDelayMs = 9000;
+
+  if (params.sawNewProgress) {
+    return minDelayMs;
+  }
+
+  if (params.idleMs >= 120_000) {
+    return Math.min(maxDelayMs, Math.max(params.currentDelayMs, 8000));
+  }
+
+  if (params.idleMs >= 60_000) {
+    return Math.min(maxDelayMs, Math.max(params.currentDelayMs, 6000));
+  }
+
+  if (params.idleMs >= 30_000) {
+    return Math.min(maxDelayMs, Math.max(params.currentDelayMs, 4000));
+  }
+
+  return Math.min(maxDelayMs, Math.max(minDelayMs, params.currentDelayMs + 500));
 }
 
 function isWordCharacter(char: string): boolean {

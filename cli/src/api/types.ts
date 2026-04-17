@@ -8,6 +8,12 @@ export interface SessionResponse {
   phase: SessionPhase;
   createdAt: string;
   updatedAt: string;
+  councilRunPhase?: string | null;
+  councilRunStartedAt?: string | null;
+  councilRunFirstProgressAt?: string | null;
+  councilRunLastProgressAt?: string | null;
+  councilRunCompletedAt?: string | null;
+  councilRunFailedReason?: string | null;
   convergence?: ConvergenceScore;
   currentRound?: number;
   tokensUsed?: number;

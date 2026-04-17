@@ -223,7 +223,8 @@ public class AgentRunnerTests
                 MinQueryKeywordLength = 4,
                 MaxChunksPerAttachment = 10,
                 MaxChunkNoteChars = 120,
-                MaxFinalNotesPerAgent = 10
+                MaxFinalNotesPerAgent = 10,
+                EarlyExitMinNotesPerAgent = 10
             });
 
         var state = BuildSessionState();
@@ -329,6 +330,31 @@ public class AgentRunnerTests
 
         responses.Single(r => r.AgentId == AgentId.GptAgent).TimedOut.Should().BeTrue();
         stopwatch.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(3));
+    }
+
+    [Fact]
+    public async Task RunAnalysisRoundAsync_AgentException_ReturnsFailedResponseAndContinues()
+    {
+        var healthy = StubAgent(AgentId.ClaudeAgent, SuccessResponse(AgentId.ClaudeAgent));
+        var throwingAgent = Substitute.For<ICouncilAgent>();
+        throwingAgent.AgentId.Returns(AgentId.GptAgent);
+        throwingAgent.ModelProvider.Returns("fake/model");
+        throwingAgent.RunAsync(Arg.Any<AgentContext>(), Arg.Any<CancellationToken>())
+            .Returns<Task<AgentResponse>>(_ => throw new InvalidOperationException("provider exploded"));
+
+        var runner = BuildRunner([healthy, throwingAgent], agentTimeoutSeconds: 1);
+        var state = BuildSessionState();
+
+        var responses = await runner.RunAnalysisRoundAsync(state, CancellationToken.None);
+
+        responses.Should().HaveCount(2);
+        var failed = responses.Single(r => r.AgentId == AgentId.GptAgent);
+        failed.Failed.Should().BeTrue();
+        failed.FailureReason.Should().Be("AGENT_EXECUTION_EXCEPTION");
+        failed.TimedOut.Should().BeFalse();
+        failed.Message.Should().BeEmpty();
+
+        responses.Single(r => r.AgentId == AgentId.ClaudeAgent).Failed.Should().BeFalse();
     }
 
     // ── Critique Round — cross-agent assignment ────────────────────────────────
