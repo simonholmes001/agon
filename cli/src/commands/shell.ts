@@ -221,7 +221,8 @@ export default class Shell extends Command {
       this.config.pjson.name ?? '@agon_agents/cli',
       this.config.pjson.version ?? '0.0.0',
       storedToken ?? undefined,
-      runtimeProfile.profile
+      runtimeProfile.profile,
+      () => authManager.trySilentRenewal()
     );
     this.apiClient = apiClient;
     this.sessionManager = sessionManager;

@@ -43,7 +43,9 @@ export default class Resume extends Command {
         config.apiUrl,
         this.config.pjson.name ?? '@agon_agents/cli',
         this.config.pjson.version ?? '0.0.0',
-        storedToken ?? undefined
+        storedToken ?? undefined,
+        undefined,
+        () => authManager.trySilentRenewal()
       );
 
       this.log('');

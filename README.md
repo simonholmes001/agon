@@ -260,7 +260,7 @@ Notes:
 - `agon --self-update` updates the global CLI install from terminal.
 - `/update` runs the same update flow from inside an active shell session.
 - By default, Agon CLI connects to the hosted backend endpoint (no manual `apiUrl` setup required for end users).
-- Endpoint override precedence is: `AGON_API_URL` (explicit runtime override), then `AGON_HOSTED_API_URL`, then `AGON_API_HOSTNAME` as `https://<hostname>`, then legacy fallback.
+- Endpoint override precedence is: `AGON_API_URL` (explicit runtime override), then `AGON_HOSTED_API_URL`, then `AGON_API_HOSTNAME` as `https://<hostname>`, then the managed HTTPS default (`https://api-dev.agon-agents.org`).
 - After successful in-shell update, exit the shell and start `agon` again to run the newly installed runtime.
 - On startup, Agon checks npm and alerts when a newer stable version is available.
 - `/attach` accepts only a file path. Upload first, then send your message as a separate prompt.
@@ -419,6 +419,11 @@ agon login --token "<access-token>"
 The token is stored in `~/.agon/credentials` with mode `0600` (owner read/write
 only). It is **never** stored in `.agonrc` so that the main config file can be
 safely committed to version control.
+
+Session UX behavior:
+- After first successful `agon login`, the CLI silently reuses and renews tokens where possible (no repeated interactive prompt on every `agon` launch).
+- Device-code sessions persist refresh metadata for non-interactive renewal.
+- Azure CLI sessions are renewed with non-interactive `az account get-access-token` when needed.
 
 Additional `agon login` flags:
 
