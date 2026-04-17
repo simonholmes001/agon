@@ -409,7 +409,7 @@ export class AgonAPIClient {
       return false;
     }
 
-    if (error.response.status !== 401 && error.response.status !== 403) {
+    if (error.response.status !== 401) {
       return false;
     }
 
@@ -419,8 +419,18 @@ export class AgonAPIClient {
     }
 
     cfg.__agonAuthRetryAttempted = true;
-    const refreshedToken = await this.onAuthenticationFailure();
+    let refreshedToken: string | null = null;
+    try {
+      refreshedToken = await this.onAuthenticationFailure();
+    } catch (renewalError) {
+      this.logger.debug('Silent auth renewal callback failed', {
+        reason: renewalError instanceof Error ? renewalError.message : String(renewalError),
+      });
+      return false;
+    }
+
     if (!refreshedToken?.trim()) {
+      this.logger.debug('Silent auth renewal returned no token');
       return false;
     }
 
