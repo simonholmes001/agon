@@ -1,7 +1,7 @@
 using Agon.Application.Interfaces;
 using Agon.Application.Models;
-using Agon.Domain.Sessions;
 using Agon.Application.Orchestration;
+using System.Collections.Concurrent;
 using System.Text.RegularExpressions;
 
 namespace Agon.Application.Services;
@@ -12,12 +12,15 @@ namespace Agon.Application.Services;
 /// </summary>
 public sealed class ConversationHistoryService
 {
+    private sealed record StageTiming(string Phase, DateTimeOffset StartedAt);
+
     private static readonly Regex StageRegex = new(
         @"\bstage\s*:\s*([a-z_]+)",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex ReasonCodeRegex = new(
         @"\bReasonCode=([A-Z0-9_]+)",
         RegexOptions.Compiled);
+    private static readonly ConcurrentDictionary<Guid, StageTiming> StageTimings = new();
 
     private readonly IAgentMessageRepository _messageRepo;
     private readonly ISessionRepository? _sessionRepo;
@@ -97,22 +100,17 @@ public sealed class ConversationHistoryService
         }
 
         var now = DateTimeOffset.UtcNow;
-        var previousPhase = state.CouncilRunPhase;
-        var previousLastProgress = state.CouncilRunLastProgressAt;
 
         if (normalizedAgentId == "council_running")
         {
-            if (state.CouncilRunStartedAt is null)
-            {
-                state.CouncilRunStartedAt = now;
-                CouncilRunMetrics.RunStarted.Add(1);
-            }
-
+            state.CouncilRunStartedAt = now;
             state.CouncilRunPhase = "queued";
             state.CouncilRunFirstProgressAt = null;
             state.CouncilRunLastProgressAt = now;
             state.CouncilRunCompletedAt = null;
             state.CouncilRunFailedReason = null;
+            StageTimings[sessionId] = new StageTiming("queued", now);
+            CouncilRunMetrics.RunStarted.Add(1);
         }
         else if (normalizedAgentId == "council_progress")
         {
@@ -133,8 +131,37 @@ public sealed class ConversationHistoryService
                 }
             }
 
-            state.CouncilRunPhase = ExtractStage(message);
+            var previousPhase = state.CouncilRunPhase;
+            var currentStage = ExtractStage(message);
+            var phaseChanged = !string.Equals(previousPhase, currentStage, StringComparison.OrdinalIgnoreCase);
+
+            if (phaseChanged
+                && StageTimings.TryGetValue(sessionId, out var priorTiming)
+                && !string.IsNullOrWhiteSpace(priorTiming.Phase))
+            {
+                RecordStageDuration(priorTiming.Phase, now - priorTiming.StartedAt);
+            }
+
+            if (phaseChanged
+                || IsStageStartingMessage(message)
+                || !StageTimings.TryGetValue(sessionId, out var activeTiming)
+                || !string.Equals(activeTiming.Phase, currentStage, StringComparison.OrdinalIgnoreCase))
+            {
+                StageTimings[sessionId] = new StageTiming(currentStage, now);
+            }
+
+            if (IsStageCompletedMessage(message)
+                && StageTimings.TryGetValue(sessionId, out var completedTiming)
+                && string.Equals(completedTiming.Phase, currentStage, StringComparison.OrdinalIgnoreCase))
+            {
+                RecordStageDuration(currentStage, now - completedTiming.StartedAt);
+                StageTimings.TryRemove(sessionId, out _);
+            }
+
+            state.CouncilRunPhase = currentStage;
             state.CouncilRunLastProgressAt = now;
+            state.CouncilRunCompletedAt = null;
+            state.CouncilRunFailedReason = null;
         }
         else if (normalizedAgentId == "council_complete")
         {
@@ -143,6 +170,12 @@ public sealed class ConversationHistoryService
                 state.CouncilRunStartedAt = now;
                 CouncilRunMetrics.RunStarted.Add(1);
             }
+
+            if (StageTimings.TryGetValue(sessionId, out var lastStageTiming))
+            {
+                RecordStageDuration(lastStageTiming.Phase, now - lastStageTiming.StartedAt);
+            }
+            StageTimings.TryRemove(sessionId, out _);
 
             state.CouncilRunPhase = "completed";
             state.CouncilRunLastProgressAt = now;
@@ -163,7 +196,12 @@ public sealed class ConversationHistoryService
                 CouncilRunMetrics.RunStarted.Add(1);
             }
 
-            state.Status = SessionStatus.CompleteWithGaps;
+            if (StageTimings.TryGetValue(sessionId, out var failedStageTiming))
+            {
+                RecordStageDuration(failedStageTiming.Phase, now - failedStageTiming.StartedAt);
+            }
+            StageTimings.TryRemove(sessionId, out _);
+
             state.CouncilRunPhase = "failed";
             state.CouncilRunLastProgressAt = now;
             state.CouncilRunCompletedAt = now;
@@ -178,16 +216,7 @@ public sealed class ConversationHistoryService
             }
         }
 
-        if (!string.Equals(previousPhase, state.CouncilRunPhase, StringComparison.OrdinalIgnoreCase)
-            && !string.IsNullOrWhiteSpace(previousPhase)
-            && previousLastProgress.HasValue)
-        {
-            CouncilRunMetrics.StageDurationMs.Record(
-                Math.Max(0, (now - previousLastProgress.Value).TotalMilliseconds),
-                new KeyValuePair<string, object?>("stage", previousPhase));
-        }
-
-        await _sessionRepo.UpdateAsync(state, cancellationToken);
+        await _sessionRepo.UpdateCouncilRunMetadataAsync(state, cancellationToken);
     }
 
     private static string ExtractStage(string message)
@@ -205,5 +234,23 @@ public sealed class ConversationHistoryService
     {
         var match = ReasonCodeRegex.Match(message);
         return match.Success ? match.Groups[1].Value.Trim().ToUpperInvariant() : null;
+    }
+
+    private static bool IsStageStartingMessage(string message) =>
+        message.Contains("(starting)", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsStageCompletedMessage(string message) =>
+        message.Contains("(completed)", StringComparison.OrdinalIgnoreCase);
+
+    private static void RecordStageDuration(string phase, TimeSpan duration)
+    {
+        if (string.IsNullOrWhiteSpace(phase))
+        {
+            return;
+        }
+
+        CouncilRunMetrics.StageDurationMs.Record(
+            Math.Max(0, duration.TotalMilliseconds),
+            new KeyValuePair<string, object?>("stage", phase));
     }
 }

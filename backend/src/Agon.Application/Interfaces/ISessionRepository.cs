@@ -27,6 +27,12 @@ public interface ISessionRepository
     Task UpdateAsync(SessionState sessionState, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Persists council-run metadata fields only (phase/timestamps/failure reason) without mutating
+    /// broader session lifecycle fields such as phase/status/round/token counters.
+    /// </summary>
+    Task UpdateCouncilRunMetadataAsync(SessionState sessionState, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Returns all sessions belonging to the given user.
     /// Results are ordered by <c>created_at</c> descending.
     /// </summary>

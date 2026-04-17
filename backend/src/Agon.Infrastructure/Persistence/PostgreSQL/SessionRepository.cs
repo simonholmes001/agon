@@ -135,6 +135,39 @@ public sealed class SessionRepository : ISessionRepository
         await _dbContext.SaveChangesAsync(cancellationToken);
     }
 
+    public async Task UpdateCouncilRunMetadataAsync(
+        SessionState sessionState,
+        CancellationToken cancellationToken = default)
+    {
+        var entity = await _dbContext.Sessions
+            .FirstOrDefaultAsync(s => s.Id == sessionState.SessionId, cancellationToken);
+
+        if (entity == null)
+        {
+            throw new InvalidOperationException(
+                $"Cannot update council metadata for session {sessionState.SessionId}: session not found");
+        }
+
+        entity.CouncilRunPhase = sessionState.CouncilRunPhase;
+        entity.CouncilRunStartedAt = sessionState.CouncilRunStartedAt?.UtcDateTime;
+        entity.CouncilRunFirstProgressAt = sessionState.CouncilRunFirstProgressAt?.UtcDateTime;
+        entity.CouncilRunLastProgressAt = sessionState.CouncilRunLastProgressAt?.UtcDateTime;
+        entity.CouncilRunCompletedAt = sessionState.CouncilRunCompletedAt?.UtcDateTime;
+        entity.CouncilRunFailedReason = sessionState.CouncilRunFailedReason;
+        entity.UpdatedAt = DateTime.UtcNow;
+        sessionState.UpdatedAt = DateTime.SpecifyKind(entity.UpdatedAt, DateTimeKind.Utc);
+
+        _dbContext.Entry(entity).Property(e => e.CouncilRunPhase).IsModified = true;
+        _dbContext.Entry(entity).Property(e => e.CouncilRunStartedAt).IsModified = true;
+        _dbContext.Entry(entity).Property(e => e.CouncilRunFirstProgressAt).IsModified = true;
+        _dbContext.Entry(entity).Property(e => e.CouncilRunLastProgressAt).IsModified = true;
+        _dbContext.Entry(entity).Property(e => e.CouncilRunCompletedAt).IsModified = true;
+        _dbContext.Entry(entity).Property(e => e.CouncilRunFailedReason).IsModified = true;
+        _dbContext.Entry(entity).Property(e => e.UpdatedAt).IsModified = true;
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
+    }
+
     public async Task<IReadOnlyList<SessionState>> ListByUserAsync(
         Guid userId,
         CancellationToken cancellationToken = default)

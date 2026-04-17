@@ -1316,6 +1316,7 @@ export default class Shell extends Command {
 
         let foundSynthesizer = false;
         let foundTerminalFailure = false;
+        let foundTerminalComplete = false;
         let sawNewProgress = false;
         for (const msg of progressMessages) {
           const key = `${msg.agentId}:${msg.round}:${msg.createdAt}:${msg.message.length}`;
@@ -1339,6 +1340,7 @@ export default class Shell extends Command {
           } else if (msg.agentId === 'council_complete') {
             this.log(chalk.green(msg.message));
             this.log('');
+            foundTerminalComplete = true;
           }
         }
 
@@ -1376,7 +1378,25 @@ export default class Shell extends Command {
           return;
         }
 
+        const councilRunPhase = (session.councilRunPhase ?? '').toLowerCase();
+        if (foundTerminalComplete || councilRunPhase === 'completed') {
+          this.log(chalk.green('✓ Council analysis complete.'));
+          this.log('');
+          this.log('Next steps:');
+          this.log('  • Continue in this shell: type your next message');
+          this.log('  • Add a file: paste/drag a local file path into the input box');
+          this.log('  • Start a new session: /new');
+          this.log('  • Exit shell: /exit');
+          return;
+        }
+
         if (foundTerminalFailure) {
+          this.log(chalk.yellow('Council stopped due to a terminal failure.'));
+          this.log(chalk.dim("Retry with 'invoke council' after correcting provider/runtime configuration if needed."));
+          return;
+        }
+
+        if (councilRunPhase === 'failed') {
           this.log(chalk.yellow('Council stopped due to a terminal failure.'));
           this.log(chalk.dim("Retry with 'invoke council' after correcting provider/runtime configuration if needed."));
           return;
