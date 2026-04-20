@@ -579,8 +579,22 @@ public sealed class TrialAccessService
             OccurredAt = DateTimeOffset.UtcNow
         };
 
-        await _dbContext.TrialAuditEvents.AddAsync(entity, cancellationToken);
-        await _dbContext.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await _dbContext.TrialAuditEvents.AddAsync(entity, cancellationToken);
+            await _dbContext.SaveChangesAsync(cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            // Audit logging is best-effort and must never block session creation or access checks.
+            _dbContext.Entry(entity).State = EntityState.Detached;
+
+            _logger.LogError(
+                ex,
+                "Trial audit persistence failed for action {Action} with reason code {ReasonCode}.",
+                action,
+                reasonCode);
+        }
     }
 
     private static HashSet<string> ResolveRequiredTesterGroupIds(

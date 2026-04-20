@@ -11,6 +11,7 @@ using FluentAssertions;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -76,6 +77,21 @@ public sealed class TrialAccessIntegrationTests : IClassFixture<AgonWebApplicati
             .ToList();
 
         allowAudit.Should().NotBeEmpty();
+    }
+
+    [Fact]
+    public async Task CreateSession_Should_Allow_Allowlisted_User_When_TrialAuditPersistence_Fails()
+    {
+        using var factory = CreateTrialEnabledFactory(simulateAuditPersistenceFailure: true);
+        var userClient = CreateUserClient(factory, Guid.NewGuid(), [RequiredTesterGroupId]);
+
+        var response = await userClient.PostAsJsonAsync("/sessions", new
+        {
+            idea = "Trial audit persistence failure should not block session creation.",
+            frictionLevel = 50
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
     }
 
     [Fact]
@@ -426,7 +442,8 @@ public sealed class TrialAccessIntegrationTests : IClassFixture<AgonWebApplicati
         IReadOnlyList<string>? requiredTesterGroupIds = null,
         string? requiredTesterGroupIdsCsv = null,
         IReadOnlyList<string>? adminBypassGroupIds = null,
-        string? adminBypassGroupIdsCsv = null)
+        string? adminBypassGroupIdsCsv = null,
+        bool simulateAuditPersistenceFailure = false)
     {
         var effectiveRequiredTesterGroupIds = requiredTesterGroupIds ?? [RequiredTesterGroupId];
         var effectiveAdminBypassGroupIds = adminBypassGroupIds ?? Array.Empty<string>();
@@ -507,6 +524,12 @@ public sealed class TrialAccessIntegrationTests : IClassFixture<AgonWebApplicati
                 });
                 services.RemoveAll<TrialRequestRateLimiter>();
                 services.AddSingleton<TrialRequestRateLimiter>();
+
+                if (simulateAuditPersistenceFailure)
+                {
+                    services.RemoveAll<AgonDbContext>();
+                    services.AddScoped<AgonDbContext, ThrowOnTrialAuditSaveAgonDbContext>();
+                }
 
                 services
                     .AddAuthentication(options =>
@@ -597,5 +620,23 @@ public sealed class TrialAccessIntegrationTests : IClassFixture<AgonWebApplicati
     {
         using var payload = JsonDocument.Parse(await createResponse.Content.ReadAsStringAsync());
         return payload.RootElement.GetProperty("id").GetGuid();
+    }
+}
+
+internal sealed class ThrowOnTrialAuditSaveAgonDbContext : AgonDbContext
+{
+    public ThrowOnTrialAuditSaveAgonDbContext(DbContextOptions<AgonDbContext> options)
+        : base(options)
+    {
+    }
+
+    public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+    {
+        if (ChangeTracker.Entries<TrialAuditEventEntity>().Any(entry => entry.State == EntityState.Added))
+        {
+            throw new DbUpdateException("Simulated failure while persisting trial audit events.");
+        }
+
+        return base.SaveChangesAsync(cancellationToken);
     }
 }
