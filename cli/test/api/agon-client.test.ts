@@ -404,6 +404,29 @@ describe('AgonAPIClient', () => {
     });
   });
 
+  describe('verifyAuthToken', () => {
+    it('calls auth verify endpoint and returns true when authenticated', async () => {
+      (mockAxios.get as any).mockResolvedValue({
+        data: { authenticated: true, userId: 'user-123' }
+      });
+
+      const result = await client.verifyAuthToken();
+
+      expect(mockAxios.get).toHaveBeenCalledWith('/auth/verify');
+      expect(result).toBe(true);
+    });
+
+    it('returns false when backend reports unauthenticated', async () => {
+      (mockAxios.get as any).mockResolvedValue({
+        data: { authenticated: false }
+      });
+
+      const result = await client.verifyAuthToken();
+
+      expect(result).toBe(false);
+    });
+  });
+
   describe('auth token constructor parameter', () => {
     it('uses explicit authToken parameter over env var', () => {
       process.env.AGON_AUTH_TOKEN = 'env-token';

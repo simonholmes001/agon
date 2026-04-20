@@ -35,6 +35,11 @@ export interface AuthStatusResponse {
   interactiveClientId?: string;
 }
 
+interface AuthVerifyResponse {
+  authenticated: boolean;
+  userId?: string;
+}
+
 export class AgonAPIClient {
   private readonly client: AxiosInstance;
   private readonly maxRetries = 2;
@@ -344,6 +349,14 @@ export class AgonAPIClient {
     } catch {
       return null;
     }
+  }
+
+  /**
+   * Verify that the supplied bearer token is accepted by the backend.
+   */
+  async verifyAuthToken(): Promise<boolean> {
+    const response = await this.client.get<AuthVerifyResponse>('/auth/verify');
+    return response.data?.authenticated === true;
   }
 
   // Helper methods

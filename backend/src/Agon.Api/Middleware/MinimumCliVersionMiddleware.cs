@@ -90,6 +90,11 @@ public sealed class MinimumCliVersionMiddleware
             return true;
         }
 
+        if (path.Equals("/auth/status", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
         if (path.StartsWith("/hubs", StringComparison.OrdinalIgnoreCase))
         {
             return true;
