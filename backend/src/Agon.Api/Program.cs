@@ -722,6 +722,19 @@ var authStatusPayload = AuthStatusResponseFactory.Create(
     tenantIdHint: authTenantId,
     interactiveClientId: authInteractiveClientId);
 app.MapGet("/auth/status", () => Results.Ok(authStatusPayload)).AllowAnonymous();
+app.MapGet("/auth/verify", (ClaimsPrincipal user) =>
+{
+    var claimValue =
+        user.FindFirstValue("oid")
+        ?? user.FindFirstValue(ClaimTypes.NameIdentifier)
+        ?? user.FindFirstValue("sub");
+
+    return Results.Ok(new
+    {
+        authenticated = user.Identity?.IsAuthenticated ?? false,
+        userId = claimValue
+    });
+});
 var controllers = app.MapControllers();
 if (authEnabled)
 {

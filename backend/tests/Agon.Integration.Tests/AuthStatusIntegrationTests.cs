@@ -1,6 +1,11 @@
 using System.Net;
 using System.Text.Json;
 using FluentAssertions;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Agon.Integration.Tests;
 
@@ -13,10 +18,13 @@ namespace Agon.Integration.Tests;
 /// </summary>
 public class AuthStatusIntegrationTests : IClassFixture<AgonWebApplicationFactory>
 {
+    private const string RequiredVersion = "999.0.0";
     private readonly HttpClient _client;
+    private readonly AgonWebApplicationFactory _factory;
 
     public AuthStatusIntegrationTests(AgonWebApplicationFactory factory)
     {
+        _factory = factory;
         _client = factory.CreateClient();
     }
 
@@ -93,6 +101,66 @@ public class AuthStatusIntegrationTests : IClassFixture<AgonWebApplicationFactor
         authorityProperty.ValueKind.Should().Be(JsonValueKind.Null);
         audienceProperty.ValueKind.Should().Be(JsonValueKind.Null);
         interactiveClientIdProperty.ValueKind.Should().Be(JsonValueKind.Null);
+    }
+
+    [Fact]
+    public async Task GET_Auth_Status_Bypasses_Minimum_Cli_Version_Enforcement()
+    {
+        using var factory = _factory.WithWebHostBuilder(builder =>
+        {
+            builder.UseEnvironment("Development");
+            builder.ConfigureAppConfiguration((_, config) =>
+            {
+                config.AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["Agon:MinCliVersion"] = RequiredVersion
+                });
+            });
+        });
+        using var client = factory.CreateClient();
+
+        var response = await client.GetAsync("/auth/status");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    [Fact]
+    public async Task GET_Auth_Verify_Returns_200_For_Authenticated_Request()
+    {
+        using var factory = CreateAuthenticatedFactory();
+        using var client = CreateUserClient(factory, Guid.NewGuid());
+
+        var response = await client.GetAsync("/auth/verify");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    private WebApplicationFactory<Program> CreateAuthenticatedFactory()
+    {
+        return _factory.WithWebHostBuilder(builder =>
+        {
+            builder.ConfigureAppConfiguration((_, config) =>
+            {
+                config.AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["Authentication:Enabled"] = "true"
+                });
+            });
+
+            builder.ConfigureServices(services =>
+            {
+                services.AddAuthentication(TestAuthHandler.SchemeName)
+                    .AddScheme<AuthenticationSchemeOptions, TestAuthHandler>(
+                        TestAuthHandler.SchemeName, _ => { });
+            });
+        });
+    }
+
+    private static HttpClient CreateUserClient(WebApplicationFactory<Program> factory, Guid userId)
+    {
+        var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Add(TestAuthHandler.UserIdHeader, userId.ToString());
+        return client;
     }
 
 }

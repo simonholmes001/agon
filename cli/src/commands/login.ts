@@ -238,7 +238,10 @@ export default class Login extends Command {
           this.config.pjson.version ?? '0.0.0',
           token
         );
-        await testClient.listSessions();
+        const isAuthenticated = await testClient.verifyAuthToken();
+        if (!isAuthenticated) {
+          throw new Error('Authentication required. Your request was rejected by the backend.');
+        }
       }
       spinner.succeed('Token accepted');
     } catch (error) {
