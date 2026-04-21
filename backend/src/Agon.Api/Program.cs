@@ -659,6 +659,7 @@ using (var scope = app.Services.CreateScope())
     {
         startupLogger.LogInformation("Applying PostgreSQL migrations...");
         dbContext.Database.Migrate();
+        EnsureSessionsCouncilRunColumns(dbContext, startupLogger);
         startupLogger.LogInformation("PostgreSQL migrations applied.");
     }
 }
@@ -761,6 +762,24 @@ static string ReplaceEnvVars(string value)
         var envVarName = match.Groups[1].Value;
         return Environment.GetEnvironmentVariable(envVarName) ?? match.Value;
     });
+}
+
+static void EnsureSessionsCouncilRunColumns(AgonDbContext dbContext, ILogger startupLogger)
+{
+    // Defensive startup guard: schema drift has previously caused runtime 500s when
+    // the code expects council_run_* columns but the sessions table is missing them.
+    const string ensureColumnsSql = """
+        ALTER TABLE IF EXISTS sessions
+            ADD COLUMN IF NOT EXISTS council_run_phase text,
+            ADD COLUMN IF NOT EXISTS council_run_started_at timestamp with time zone,
+            ADD COLUMN IF NOT EXISTS council_run_first_progress_at timestamp with time zone,
+            ADD COLUMN IF NOT EXISTS council_run_last_progress_at timestamp with time zone,
+            ADD COLUMN IF NOT EXISTS council_run_completed_at timestamp with time zone,
+            ADD COLUMN IF NOT EXISTS council_run_failed_reason text;
+        """;
+
+    dbContext.Database.ExecuteSqlRaw(ensureColumnsSql);
+    startupLogger.LogInformation("Ensured sessions.council_run_* columns exist.");
 }
 
 static bool IsConfiguredValue(string? value)
