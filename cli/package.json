@@ -57,7 +57,7 @@
     "cli-table3": "^0.6.3",
     "cosmiconfig": "^9.0.0",
     "eventsource": "^4.1.0",
-    "ink": "^7.0.0",
+    "ink": "^7.0.1",
     "inquirer": "^13.4.2",
     "marked": "^17.0.5",
     "ora": "^9.3.0",

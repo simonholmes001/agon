@@ -8,7 +8,7 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="9.0.15" />
-    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="9.0.14" />
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="9.0.15" />
     <PackageReference Include="Microsoft.Agents.AI" Version="1.1.0" />
     <PackageReference Include="Microsoft.Agents.AI.OpenAI" Version="1.1.0" />
     <PackageReference Include="Anthropic" Version="12.16.0" />
