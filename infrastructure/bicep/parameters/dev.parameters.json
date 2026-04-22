@@ -35,6 +35,9 @@
     "appGatewayResourceSuffix": {
       "value": ""
     },
+    "deployApplicationGateway": {
+      "value": true
+    },
     "appGatewaySkuName": {
       "value": "Standard_v2"
     },
@@ -45,7 +48,7 @@
       "value": 1
     },
     "appGatewayAutoscaleMinCapacity": {
-      "value": 1
+      "value": 0
     },
     "appGatewayAutoscaleMaxCapacity": {
       "value": 2

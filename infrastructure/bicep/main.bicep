@@ -80,6 +80,9 @@ param appGatewayV1SubnetPrefix string = '10.42.5.0/24'
 @maxLength(20)
 param appGatewayResourceSuffix string = ''
 
+@description('Deploy Application Gateway resources (gateway, public IP, diagnostics). Disable for low-cost private-only environments.')
+param deployApplicationGateway bool = true
+
 @description('Application Gateway SKU name. Use Basic/Standard_v2 for modern SKUs, or Standard_Small/Standard_Medium/Standard_Large for legacy v1.')
 @allowed([
   'Basic'
@@ -106,10 +109,10 @@ param appGatewayInstanceCount int = 1
 @description('Application Gateway autoscale minimum capacity for Standard_v2.')
 @minValue(0)
 @maxValue(125)
-param appGatewayAutoscaleMinCapacity int = 1
+param appGatewayAutoscaleMinCapacity int = 0
 
 @description('Application Gateway autoscale maximum capacity for Standard_v2.')
-@minValue(1)
+@minValue(2)
 @maxValue(125)
 param appGatewayAutoscaleMaxCapacity int = 2
 
@@ -369,6 +372,7 @@ module appEdge './modules/app-edge-dev.bicep' = {
     alertEmail: alertEmail
     documentPipelineAlertsEnabled: documentPipelineAlertsEnabled
     appGatewayResourceSuffix: appGatewayResourceSuffix
+    deployApplicationGateway: deployApplicationGateway
     appGatewaySkuName: appGatewaySkuName
     appGatewaySkuTier: appGatewaySkuTier
     appGatewayInstanceCount: appGatewayInstanceCount
