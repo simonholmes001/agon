@@ -121,6 +121,24 @@ param appGatewayAutoscaleMaxCapacity int = 2
 @maxValue(86400)
 param appGatewayRequestTimeoutSeconds int = 120
 
+@description('Enable Automation Account runbooks/schedules to start and stop Application Gateway automatically.')
+param appGatewayStartStopAutomationEnabled bool = true
+
+@description('Automation schedule timezone (IANA), for example Europe/Paris.')
+param appGatewayAutomationScheduleTimeZone string = 'Europe/Paris'
+
+@description('Business timezone for weekend checks in runbooks (Windows timezone ID).')
+param appGatewayAutomationBusinessTimeZoneId string = 'Romance Standard Time'
+
+@description('ISO 8601 start time for the daily App Gateway start schedule.')
+param appGatewayAutomationStartScheduleTime string = '2026-01-01T08:45:00+01:00'
+
+@description('ISO 8601 start time for the daily App Gateway stop schedule.')
+param appGatewayAutomationStopScheduleTime string = '2026-01-01T20:15:00+01:00'
+
+@description('Base URI for published runbook scripts (reachable by Azure Automation).')
+param appGatewayAutomationRunbookScriptsBaseUri string = 'https://raw.githubusercontent.com/simonholmes001/agon/main/infrastructure/automation/runbooks'
+
 @description('Document Intelligence model used for attachment extraction.')
 param documentIntelligenceModelId string = 'prebuilt-layout'
 
@@ -441,6 +459,22 @@ module appEdge './modules/app-edge-dev.bicep' = {
     documentIntelligenceEndpoint: data.outputs.documentIntelligenceEndpoint
     documentIntelligenceModelId: documentIntelligenceModelId
     attachmentStorageBlobEndpoint: data.outputs.attachmentStorageBlobEndpoint
+  }
+}
+
+module appGatewayAutomation './modules/app-gateway-automation-dev.bicep' = if (deployApplicationGateway) {
+  name: 'app-gateway-automation-dev'
+  scope: rgApp
+  params: {
+    location: location
+    namePrefix: namePrefix
+    appGatewayName: appEdge.outputs.appGatewayName
+    enableAppGatewayStartStopAutomation: appGatewayStartStopAutomationEnabled
+    scheduleTimeZone: appGatewayAutomationScheduleTimeZone
+    businessTimeZoneId: appGatewayAutomationBusinessTimeZoneId
+    startScheduleStartTime: appGatewayAutomationStartScheduleTime
+    stopScheduleStartTime: appGatewayAutomationStopScheduleTime
+    runbookScriptsBaseUri: appGatewayAutomationRunbookScriptsBaseUri
   }
 }
 
