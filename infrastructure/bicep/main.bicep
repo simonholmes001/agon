@@ -80,6 +80,9 @@ param appGatewayV1SubnetPrefix string = '10.42.5.0/24'
 @maxLength(20)
 param appGatewayResourceSuffix string = ''
 
+@description('Deploy Application Gateway resources (gateway, public IP, diagnostics). Disable for low-cost private-only environments.')
+param deployApplicationGateway bool = true
+
 @description('Application Gateway SKU name. Use Basic/Standard_v2 for modern SKUs, or Standard_Small/Standard_Medium/Standard_Large for legacy v1.')
 @allowed([
   'Basic'
@@ -106,10 +109,10 @@ param appGatewayInstanceCount int = 1
 @description('Application Gateway autoscale minimum capacity for Standard_v2.')
 @minValue(0)
 @maxValue(125)
-param appGatewayAutoscaleMinCapacity int = 1
+param appGatewayAutoscaleMinCapacity int = 0
 
 @description('Application Gateway autoscale maximum capacity for Standard_v2.')
-@minValue(1)
+@minValue(2)
 @maxValue(125)
 param appGatewayAutoscaleMaxCapacity int = 2
 
@@ -117,6 +120,24 @@ param appGatewayAutoscaleMaxCapacity int = 2
 @minValue(1)
 @maxValue(86400)
 param appGatewayRequestTimeoutSeconds int = 120
+
+@description('Enable Automation Account runbooks/schedules to start and stop Application Gateway automatically.')
+param appGatewayStartStopAutomationEnabled bool = true
+
+@description('Automation schedule timezone (IANA), for example Europe/Paris.')
+param appGatewayAutomationScheduleTimeZone string = 'Europe/Paris'
+
+@description('Business timezone for weekend checks in runbooks (Windows timezone ID).')
+param appGatewayAutomationBusinessTimeZoneId string = 'Romance Standard Time'
+
+@description('ISO 8601 start time for the daily App Gateway start schedule.')
+param appGatewayAutomationStartScheduleTime string = '2026-01-01T08:45:00+01:00'
+
+@description('ISO 8601 start time for the daily App Gateway stop schedule.')
+param appGatewayAutomationStopScheduleTime string = '2026-01-01T20:15:00+01:00'
+
+@description('Base URI for published runbook scripts (reachable by Azure Automation).')
+param appGatewayAutomationRunbookScriptsBaseUri string = 'https://raw.githubusercontent.com/simonholmes001/agon/main/infrastructure/automation/runbooks'
 
 @description('Document Intelligence model used for attachment extraction.')
 param documentIntelligenceModelId string = 'prebuilt-layout'
@@ -369,6 +390,7 @@ module appEdge './modules/app-edge-dev.bicep' = {
     alertEmail: alertEmail
     documentPipelineAlertsEnabled: documentPipelineAlertsEnabled
     appGatewayResourceSuffix: appGatewayResourceSuffix
+    deployApplicationGateway: deployApplicationGateway
     appGatewaySkuName: appGatewaySkuName
     appGatewaySkuTier: appGatewaySkuTier
     appGatewayInstanceCount: appGatewayInstanceCount
@@ -437,6 +459,22 @@ module appEdge './modules/app-edge-dev.bicep' = {
     documentIntelligenceEndpoint: data.outputs.documentIntelligenceEndpoint
     documentIntelligenceModelId: documentIntelligenceModelId
     attachmentStorageBlobEndpoint: data.outputs.attachmentStorageBlobEndpoint
+  }
+}
+
+module appGatewayAutomation './modules/app-gateway-automation-dev.bicep' = if (deployApplicationGateway) {
+  name: 'app-gateway-automation-dev'
+  scope: rgApp
+  params: {
+    location: location
+    namePrefix: namePrefix
+    appGatewayName: appEdge.outputs.appGatewayName
+    enableAppGatewayStartStopAutomation: appGatewayStartStopAutomationEnabled
+    scheduleTimeZone: appGatewayAutomationScheduleTimeZone
+    businessTimeZoneId: appGatewayAutomationBusinessTimeZoneId
+    startScheduleStartTime: appGatewayAutomationStartScheduleTime
+    stopScheduleStartTime: appGatewayAutomationStopScheduleTime
+    runbookScriptsBaseUri: appGatewayAutomationRunbookScriptsBaseUri
   }
 }
 

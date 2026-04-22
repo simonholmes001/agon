@@ -16,6 +16,9 @@ param namePrefix string
 @maxLength(20)
 param appGatewayResourceSuffix string = ''
 
+@description('Deploy Application Gateway resources (gateway, public IP, diagnostics). Disable for low-cost private-only environments.')
+param deployApplicationGateway bool = true
+
 @description('Alert email receiver for action groups.')
 param alertEmail string
 
@@ -48,10 +51,10 @@ param appGatewayInstanceCount int = 1
 @description('Application Gateway autoscale minimum capacity for Standard_v2.')
 @minValue(0)
 @maxValue(125)
-param appGatewayAutoscaleMinCapacity int = 1
+param appGatewayAutoscaleMinCapacity int = 0
 
 @description('Application Gateway autoscale maximum capacity for Standard_v2.')
-@minValue(1)
+@minValue(2)
 @maxValue(125)
 param appGatewayAutoscaleMaxCapacity int = 2
 
@@ -915,7 +918,7 @@ var appGatewaySslPolicyProperties = enableHttpsListener
   : {}
 var appGatewayProperties = union(appGatewayBaseProperties, appGatewayAutoscaleProperties, appGatewaySslPolicyProperties)
 
-resource appGatewayPublicIp 'Microsoft.Network/publicIPAddresses@2023-09-01' = {
+resource appGatewayPublicIp 'Microsoft.Network/publicIPAddresses@2023-09-01' = if (deployApplicationGateway) {
   name: appGatewayPublicIpName
   location: location
   tags: tags
@@ -928,14 +931,14 @@ resource appGatewayPublicIp 'Microsoft.Network/publicIPAddresses@2023-09-01' = {
   }
 }
 
-resource appGateway 'Microsoft.Network/applicationGateways@2023-09-01' = {
+resource appGateway 'Microsoft.Network/applicationGateways@2023-09-01' = if (deployApplicationGateway) {
   name: appGatewayName
   location: location
   tags: tags
   properties: appGatewayProperties
 }
 
-resource appGatewayDiagnosticSettings 'Microsoft.Insights/diagnosticSettings@2021-05-01-preview' = {
+resource appGatewayDiagnosticSettings 'Microsoft.Insights/diagnosticSettings@2021-05-01-preview' = if (deployApplicationGateway) {
   name: 'diag-${appGatewayName}'
   scope: appGateway
   properties: {
@@ -1098,8 +1101,10 @@ resource chunkLoopLatencyAlert 'Microsoft.Insights/scheduledQueryRules@2022-06-1
 output appServiceName string = appService.name
 output appServiceDefaultHostName string = appService.properties.defaultHostName
 output appPrincipalId string = appService.identity.principalId
-output appGatewayName string = appGateway.name
-output appGatewayPublicIpAddress string = appGatewayPublicIp.properties.ipAddress
-output appGatewayPreferredApiUrl string = enableHttpsListener && hasPublicHostName
-  ? 'https://${appGatewayPublicHostName}'
-  : 'http://${appGatewayPublicIp.properties.ipAddress}'
+output appGatewayName string = deployApplicationGateway ? appGateway.name : ''
+output appGatewayPublicIpAddress string = deployApplicationGateway ? appGatewayPublicIp!.properties.ipAddress : ''
+output appGatewayPreferredApiUrl string = deployApplicationGateway
+  ? (enableHttpsListener && hasPublicHostName
+      ? 'https://${appGatewayPublicHostName}'
+      : 'http://${appGatewayPublicIp!.properties.ipAddress}')
+  : ''

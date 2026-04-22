@@ -41,8 +41,16 @@ Naming follows Azure CAF guidance:
 - Alert email: `<your-alert-email>`
 - `appGatewaySubnetPrefix`: `10.42.4.0/24` (default in dev)
 - `appGatewayResourceSuffix`: `` (empty for primary gateway names)
-- `appGatewaySkuName`: `Basic` (default in this branch)
-- `appGatewaySkuTier`: `Basic` (default in this branch)
+- `deployApplicationGateway`: `true` (set `false` for private-only low-cost environments)
+- `appGatewaySkuName`: `Standard_v2` (default in this branch)
+- `appGatewaySkuTier`: `Standard_v2` (default in this branch)
+- `appGatewayAutoscaleMinCapacity`: `0` (cost-optimized baseline)
+- `appGatewayAutoscaleMaxCapacity`: `2` (lowest valid cap for this gateway SKU/API)
+- `appGatewayStartStopAutomationEnabled`: `true` (enables Automation Account + runbooks + schedules)
+- `appGatewayAutomationScheduleTimeZone`: `Europe/Paris`
+- `appGatewayAutomationBusinessTimeZoneId`: `Romance Standard Time`
+- `appGatewayAutomationStartScheduleTime`: `2026-01-01T08:45:00+01:00`
+- `appGatewayAutomationStopScheduleTime`: `2026-01-01T20:15:00+01:00`
 - `appGatewayPublicHostName`: optional but recommended (for HTTPS listener + host validation)
 - `appGatewaySslPolicyName`: `AppGwSslPolicy20220101S` (default)
 - `documentPipelineAlertsEnabled`: `true` (custom parser/chunk-loop alerts enabled)

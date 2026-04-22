@@ -35,6 +35,9 @@
     "appGatewayResourceSuffix": {
       "value": ""
     },
+    "deployApplicationGateway": {
+      "value": true
+    },
     "appGatewaySkuName": {
       "value": "Standard_v2"
     },
@@ -45,13 +48,31 @@
       "value": 1
     },
     "appGatewayAutoscaleMinCapacity": {
-      "value": 1
+      "value": 0
     },
     "appGatewayAutoscaleMaxCapacity": {
       "value": 2
     },
     "appGatewayRequestTimeoutSeconds": {
       "value": 120
+    },
+    "appGatewayStartStopAutomationEnabled": {
+      "value": true
+    },
+    "appGatewayAutomationScheduleTimeZone": {
+      "value": "Europe/Paris"
+    },
+    "appGatewayAutomationBusinessTimeZoneId": {
+      "value": "Romance Standard Time"
+    },
+    "appGatewayAutomationStartScheduleTime": {
+      "value": "2026-01-01T08:45:00+01:00"
+    },
+    "appGatewayAutomationStopScheduleTime": {
+      "value": "2026-01-01T20:15:00+01:00"
+    },
+    "appGatewayAutomationRunbookScriptsBaseUri": {
+      "value": "https://raw.githubusercontent.com/simonholmes001/agon/main/infrastructure/automation/runbooks"
     },
     "documentIntelligenceModelId": {
       "value": "prebuilt-layout"
