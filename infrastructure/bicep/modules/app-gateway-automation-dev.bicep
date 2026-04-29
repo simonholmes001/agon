@@ -43,11 +43,13 @@ resource appGateway 'Microsoft.Network/applicationGateways@2023-09-01' existing 
 resource automationAccount 'Microsoft.Automation/automationAccounts@2023-11-01' = if (enableAppGatewayStartStopAutomation) {
   name: automationAccountName
   location: location
-  sku: {
-    name: 'Basic'
-  }
   identity: {
     type: 'SystemAssigned'
+  }
+  properties: {
+    sku: {
+      name: 'Basic'
+    }
   }
 }
 
