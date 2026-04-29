@@ -12,6 +12,9 @@ param appGatewayName string
 @description('Enable Application Gateway start/stop automation resources.')
 param enableAppGatewayStartStopAutomation bool = true
 
+@description('Create or update Network Contributor role assignment for the automation identity on the Application Gateway scope.')
+param assignGatewayNetworkContributorRole bool = true
+
 @description('Automation schedule timezone (IANA), for example Europe/Paris.')
 param scheduleTimeZone string = 'Europe/Paris'
 
@@ -19,13 +22,16 @@ param scheduleTimeZone string = 'Europe/Paris'
 param businessTimeZoneId string = 'Romance Standard Time'
 
 @description('ISO 8601 start time for the daily start schedule.')
-param startScheduleStartTime string = '2026-01-01T08:45:00+01:00'
+param startScheduleStartTime string = ''
 
 @description('ISO 8601 start time for the daily stop schedule.')
-param stopScheduleStartTime string = '2026-01-01T20:15:00+01:00'
+param stopScheduleStartTime string = ''
 
 @description('Base URI that hosts runbook scripts (must be reachable by Azure Automation).')
 param runbookScriptsBaseUri string = 'https://raw.githubusercontent.com/simonholmes001/agon/main/infrastructure/automation/runbooks'
+
+@description('UTC deployment timestamp used to derive safe schedule start times when not explicitly provided.')
+param deploymentTimestampUtc string = utcNow('o')
 
 var automationAccountName = 'aa-${namePrefix}'
 var startRunbookName = 'Start-AppGateway'
@@ -35,6 +41,8 @@ var stopScheduleName = 'stop-weekday-evening'
 var networkContributorRoleDefinitionId = '4d97b98b-1d4f-4787-a291-c67834d212e7'
 var startRunbookJobScheduleGuid = guid(automationAccountName, startRunbookName, startScheduleName)
 var stopRunbookJobScheduleGuid = guid(automationAccountName, stopRunbookName, stopScheduleName)
+var computedStartScheduleStartTime = empty(startScheduleStartTime) ? dateTimeAdd(deploymentTimestampUtc, 'PT10M') : startScheduleStartTime
+var computedStopScheduleStartTime = empty(stopScheduleStartTime) ? dateTimeAdd(deploymentTimestampUtc, 'PT20M') : stopScheduleStartTime
 
 resource appGateway 'Microsoft.Network/applicationGateways@2023-09-01' existing = if (enableAppGatewayStartStopAutomation) {
   name: appGatewayName
@@ -90,7 +98,7 @@ resource startSchedule 'Microsoft.Automation/automationAccounts/schedules@2023-1
   name: startScheduleName
   properties: {
     description: 'Daily start trigger; runbook skips weekends'
-    startTime: startScheduleStartTime
+    startTime: computedStartScheduleStartTime
     expiryTime: '9999-12-31T23:59:59+00:00'
     interval: 1
     frequency: 'Day'
@@ -103,7 +111,7 @@ resource stopSchedule 'Microsoft.Automation/automationAccounts/schedules@2023-11
   name: stopScheduleName
   properties: {
     description: 'Daily stop trigger; runbook skips weekends'
-    startTime: stopScheduleStartTime
+    startTime: computedStopScheduleStartTime
     expiryTime: '9999-12-31T23:59:59+00:00'
     interval: 1
     frequency: 'Day'
@@ -149,7 +157,7 @@ resource stopJobSchedule 'Microsoft.Automation/automationAccounts/jobSchedules@2
   }
 }
 
-resource appGatewayNetworkContributorAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (enableAppGatewayStartStopAutomation) {
+resource appGatewayNetworkContributorAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (enableAppGatewayStartStopAutomation && assignGatewayNetworkContributorRole) {
   scope: appGateway
   name: guid(appGateway.id, automationAccount.id, networkContributorRoleDefinitionId)
   properties: {

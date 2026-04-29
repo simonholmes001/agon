@@ -124,6 +124,9 @@ param appGatewayRequestTimeoutSeconds int = 120
 @description('Enable Automation Account runbooks/schedules to start and stop Application Gateway automatically.')
 param appGatewayStartStopAutomationEnabled bool = true
 
+@description('Create/update Network Contributor role assignment for Automation managed identity on Application Gateway scope.')
+param appGatewayAutomationAssignNetworkContributorRole bool = true
+
 @description('Automation schedule timezone (IANA), for example Europe/Paris.')
 param appGatewayAutomationScheduleTimeZone string = 'Europe/Paris'
 
@@ -470,6 +473,7 @@ module appGatewayAutomation './modules/app-gateway-automation-dev.bicep' = if (d
     namePrefix: namePrefix
     appGatewayName: appEdge.outputs.appGatewayName
     enableAppGatewayStartStopAutomation: appGatewayStartStopAutomationEnabled
+    assignGatewayNetworkContributorRole: appGatewayAutomationAssignNetworkContributorRole
     scheduleTimeZone: appGatewayAutomationScheduleTimeZone
     businessTimeZoneId: appGatewayAutomationBusinessTimeZoneId
     startScheduleStartTime: appGatewayAutomationStartScheduleTime
