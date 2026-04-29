@@ -20,5 +20,7 @@ if ($gateway.OperationalState -eq 'Running') {
   return
 }
 
-Start-AzApplicationGateway -ApplicationGateway $gateway | Out-Null
+Invoke-AzRestMethod `
+  -Method POST `
+  -Path "/subscriptions/$SubscriptionId/resourceGroups/$ResourceGroup/providers/Microsoft.Network/applicationGateways/$GatewayName/start?api-version=2023-09-01" | Out-Null
 Write-Output "Start requested for Application Gateway '$GatewayName'."

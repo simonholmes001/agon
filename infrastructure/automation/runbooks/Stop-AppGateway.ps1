@@ -20,5 +20,7 @@ if ($gateway.OperationalState -eq 'Stopped') {
   return
 }
 
-Stop-AzApplicationGateway -ApplicationGateway $gateway | Out-Null
+Invoke-AzRestMethod `
+  -Method POST `
+  -Path "/subscriptions/$SubscriptionId/resourceGroups/$ResourceGroup/providers/Microsoft.Network/applicationGateways/$GatewayName/stop?api-version=2023-09-01" | Out-Null
 Write-Output "Stop requested for Application Gateway '$GatewayName'."
