@@ -1,5 +1,12 @@
 # @agon_agents/cli
 
+## 0.11.7
+
+### Patch Changes
+
+- f2e8d60: Update tsconfig.json for TypeScript 6.0 compatibility: add explicit `rootDir` and `types: ["node"]`.
+- cd3e65e: Fix TypeScript 6.0 compatibility in tsconfig.json: add explicit `rootDir` (required by TS6 when `outDir` is set) and `types: ["node"]` (TS6 no longer auto-includes `@types/node`).
+
 ## 0.11.6
 
 ### Patch Changes
