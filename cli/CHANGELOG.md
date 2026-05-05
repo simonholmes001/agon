@@ -1,5 +1,12 @@
 # @agon_agents/cli
 
+## 0.11.13
+
+### Patch Changes
+
+- aa77d81: Fix zod v4 compatibility: update ZodError.errors to ZodError.issues in config-manager.ts (zod v4 breaking change).
+- 2501926: Fix Zod v4 compatibility in config-manager.ts: replace `ZodError.errors` (removed in Zod v4) with `ZodError.issues`.
+
 ## 0.11.12
 
 ### Patch Changes
