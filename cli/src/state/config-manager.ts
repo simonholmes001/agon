@@ -103,7 +103,7 @@ export class ConfigManager {
       return ConfigSchema.parse(config);
     } catch (error) {
       if (error instanceof z.ZodError) {
-        const firstError = error.errors[0];
+        const firstError = error.issues[0];
         const field = firstError.path.join('.');
         throw new Error(
           `Invalid configuration: ${field} ${firstError.message.toLowerCase()}`
@@ -208,7 +208,7 @@ export class ConfigManager {
       return PersistedConfigSchema.parse(config);
     } catch (error) {
       if (error instanceof z.ZodError) {
-        const firstError = error.errors[0];
+        const firstError = error.issues[0];
         const field = firstError.path.join('.');
         throw new Error(
           `Invalid configuration: ${field} ${firstError.message.toLowerCase()}`
