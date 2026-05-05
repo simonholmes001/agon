@@ -4,13 +4,13 @@
 
 [![Next.js](https://img.shields.io/badge/Next.js-16-000000?style=flat-square&logo=next.js)](https://nextjs.org)
 [![React](https://img.shields.io/badge/React-19-61DAFB?style=flat-square&logo=react&logoColor=000)](https://react.dev)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?style=flat-square&logo=typescript&logoColor=fff)](https://www.typescriptlang.org)
+[![TypeScript](https://img.shields.io/badge/TypeScript-6-3178C6?style=flat-square&logo=typescript&logoColor=fff)](https://www.typescriptlang.org)
 [![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-v4-06B6D4?style=flat-square&logo=tailwindcss&logoColor=fff)](https://tailwindcss.com)
 [![.NET](https://img.shields.io/badge/.NET-9-512BD4?style=flat-square&logo=dotnet&logoColor=fff)](https://dotnet.microsoft.com)
 [![Vitest](https://img.shields.io/badge/Tested_with-Vitest-6E9F18?style=flat-square&logo=vitest&logoColor=fff)](https://vitest.dev)
 [![xUnit](https://img.shields.io/badge/Tested_with-xUnit-512BD4?style=flat-square&logo=dotnet&logoColor=fff)](https://xunit.net)
-[![Tests](https://img.shields.io/badge/Tests-1240_passing-brightgreen?style=flat-square)]()
-[![Coverage](https://img.shields.io/badge/Coverage-37%25_lines-red?style=flat-square)]()
+[![Tests](https://img.shields.io/badge/Tests-See_CI-blue?style=flat-square)]()
+[![Coverage](https://img.shields.io/badge/Coverage-See_CI-blue?style=flat-square)]()
 [![TDD](https://img.shields.io/badge/Methodology-TDD-red?style=flat-square)]()
 [![Licence](https://img.shields.io/badge/Licence-Private-lightgrey?style=flat-square)]()
 [![Deploy Infra Dev](https://github.com/simonholmes001/agon/actions/workflows/infrastructure-deploy-dev.yaml/badge.svg?branch=main)](https://github.com/simonholmes001/agon/actions/workflows/infrastructure-deploy-dev.yaml)
@@ -47,7 +47,7 @@
   - [Pre-Merge Validation Protocol](#pre-merge-validation-protocol)
 - [CLI Release Process](#cli-release-process)
 - [Architecture Documentation](#architecture-documentation)
-- [Current Status](#current-status-march-2026)
+- [Current Status](#current-status-may-2026)
 - [Contributing to Agon](#contributing)
   - [Reporting Issues and Feature Requests](#reporting-issues-and-feature-requests)
   - [Submitting Pull Requests](#submitting-pull-requests)
@@ -95,7 +95,7 @@ The Agon CLI is distributed as an npm package: `@agon_agents/cli`.
 #### Prerequisites
 [Back to top](#top)
 
-- **Node.js 20+** ([download](https://nodejs.org/))
+- **Node.js 22+** ([download](https://nodejs.org/))
 - **npm** (included with Node.js)
 
 #### Installation Methods (Global, npx, Local)
@@ -643,11 +643,10 @@ Agon/
 │
 ├── cli/                  # TypeScript oclif CLI + interactive shell
 │   ├── src/
-│   │   ├── commands/                 # oclif commands (start, show, status, etc.)
+│   │   ├── commands/                 # oclif commands (start, show, status, usage, login, keys, etc.)
 │   │   ├── shell/                    # Interactive shell engine
 │   │   ├── api/                      # Backend API client
 │   │   ├── state/                    # Local session/config management
-│   │   ├── ui/                       # Terminal UI components
 │   │   └── utils/                    # Logger, formatters, error handling
 │   ├── test/                         # Vitest unit tests
 │   └── package.json
@@ -673,7 +672,7 @@ For a full environment setup walkthrough, see the [Developer Setup Guide](infras
 [Back to top](#top)
 
 - **.NET 9.0 SDK** ([download](https://dotnet.microsoft.com/download))
-- **Node.js 20+** ([download](https://nodejs.org/))
+- **Node.js 22+** ([download](https://nodejs.org/))
 - **PostgreSQL 16+** (for production; tests use in-memory DB)
 - **Redis 7+** (for production; tests use mocked client)
 
@@ -689,11 +688,11 @@ The CLI is built with **oclif** (Open CLI Framework) and provides both command-d
 
 **Key components:**
 
-- **Commands** (`src/commands/`) - oclif command classes for `start`, `show`, `status`, `sessions`, `resume`, `config`, `answer`
+- **Commands** (`src/commands/`) - oclif command classes for `start`, `show`, `status`, `usage`, `sessions`, `resume`, `login`, `keys`, `config`, `answer`, `self-update`
 - **Interactive Shell** (`src/shell/`) - Full-featured REPL with slash commands, history, and streaming output
 - **API Client** (`src/api/`) - REST client wrapper for backend communication with retry logic and error handling
 - **State Management** (`src/state/`) - Local session cache and config management (`~/.agon/`)
-- **UI Components** (`src/ui/`) - Terminal renderers for Markdown, progress indicators, and formatted output
+- **Shell Rendering** (`src/shell/renderer.ts`) - Terminal rendering for Markdown, progress indicators, and formatted output
 - **Utilities** (`src/utils/`) - Logger, error formatter, session flow helpers
 
 ### Running Tests
@@ -1031,15 +1030,16 @@ Changeset validation is enforced by default in local pre-commit hook when `cli/`
 Full architecture, round policy, agent roster, and coding guidelines are in `.github/instructions/`:
 
 - `architecture.instructions.md` — System topology, runtime responsibilities, data model
-- `prd-agon-core.instructions.md` — Product requirements, features, UX flows
+- `cli-implementation.instructions.md` — CLI architecture and implementation rules
 - `round-policy.instructions.md` — Phase transitions, convergence rules, HITL policy
 - `copilot.instructions.md` — Coding rules, TDD requirements, output templates
 - `schemas.instructions.md` — JSON schemas for all data structures
 - `backend-implementation.instructions.md` — MAF integration, solution structure, layer rules
+- `prompt-engineering-config.instructions.md` — Prompt and model routing guidance
 
 ---
 
-## Current Status (March 2026)
+## Current Status (May 2026)
 [Back to top](#top)
 
 ### ✅ Completed
@@ -1089,7 +1089,7 @@ This project follows strict **Clean Architecture** and **TDD** principles. See `
 2. **Clean Architecture layers**: Domain has zero framework dependencies
 3. **No Docker required**: All tests use in-memory databases or mocked clients
 4. **Structured logging**: Use `ILogger<T>` (backend) or `lib/logger.ts` (frontend)
-5. **Error boundaries**: Every route must have `error.tsx` and root must have `global-error.tsx`
+5. **Error boundaries**: Frontend routes should include explicit error-boundary handling where applicable
 
 ### Reporting Issues and Feature Requests
 [Back to top](#top)
