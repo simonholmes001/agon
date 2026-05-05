@@ -1,6 +1,6 @@
 {
   "name": "@agon_agents/cli",
-  "version": "0.11.6",
+  "version": "0.11.7",
   "description": "CLI tool for Agon - AI-powered strategy debate platform",
   "author": "Simon Holmes",
   "license": "MIT",
@@ -73,12 +73,12 @@
     "@types/react": "^19.2.14",
     "@typescript-eslint/eslint-plugin": "^8.59.0",
     "@typescript-eslint/parser": "^8.59.1",
-    "@vitest/coverage-v8": "^4.1.2",
+    "@vitest/coverage-v8": "^4.1.5",
     "eslint": "^10.2.1",
     "oclif": "^4.23.0",
     "prettier": "^3.8.2",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.4"
+    "vitest": "^4.1.5"
   },
   "engines": {
     "node": ">=22.0.0"
