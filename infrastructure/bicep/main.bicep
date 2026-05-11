@@ -76,12 +76,63 @@ param appGatewaySubnetPrefix string = '10.42.4.0/24'
 @description('Application Gateway dedicated subnet prefix for Basic/legacy (v1 family) SKUs.')
 param appGatewayV1SubnetPrefix string = '10.42.5.0/24'
 
+@description('API Management dedicated subnet prefix.')
+param apiManagementSubnetPrefix string = '10.42.6.0/24'
+
 @description('Optional suffix for Application Gateway resources to support parallel replacement cutovers (for example: v1).')
 @maxLength(20)
 param appGatewayResourceSuffix string = ''
 
 @description('Deploy Application Gateway resources (gateway, public IP, diagnostics). Disable for low-cost private-only environments.')
-param deployApplicationGateway bool = true
+param deployApplicationGateway bool = false
+
+@description('Deploy Azure API Management as the primary API ingress.')
+param deployApiManagement bool = true
+
+@description('API Management service SKU.')
+@allowed([
+  'Consumption'
+  'Developer'
+  'Basic'
+  'Standard'
+  'Premium'
+  'BasicV2'
+  'StandardV2'
+])
+param apiManagementSkuName string = 'Developer'
+
+@description('API Management capacity units (ignored by Consumption SKU).')
+@minValue(0)
+param apiManagementSkuCapacity int = 1
+
+@description('Publisher display name for API Management.')
+param apiManagementPublisherName string = 'Agon Platform'
+
+@description('Public hostname for APIM-backed API endpoint (for example: api-dev.example.com).')
+param apiManagementGatewayHostName string = ''
+
+@description('API Management virtual network mode.')
+@allowed([
+  'External'
+  'Internal'
+  'None'
+])
+param apiManagementVirtualNetworkType string = 'External'
+
+@description('APIM per-minute rate limit by caller IP.')
+@minValue(1)
+param apiManagementRateLimitCallsPerMinute int = 120
+
+@description('APIM per-hour quota by caller IP.')
+@minValue(1)
+param apiManagementQuotaCallsPerHour int = 2000
+
+@description('Maximum request payload size (bytes) validated by APIM policy.')
+@minValue(1024)
+param apiManagementMaxRequestSizeBytes int = 4194304
+
+@description('Optional APIM inbound CIDR allowlist. Empty means open ingress to APIM gateway.')
+param apiManagementAllowedCidrs array = []
 
 @description('Application Gateway SKU name. Use Basic/Standard_v2 for modern SKUs, or Standard_Small/Standard_Medium/Standard_Large for legacy v1.')
 @allowed([
@@ -237,7 +288,7 @@ param attachmentProcessingChunkLoopMaxChunkNoteChars int = 1200
 param attachmentProcessingChunkLoopMaxFinalNotesPerAgent int = 8
 
 @description('Enable JWT bearer authentication in the backend API.')
-param authEnabled bool = false
+param authEnabled bool = true
 
 @description('JWT authority URL for Microsoft Entra validation.')
 param jwtAuthority string = ''
@@ -352,6 +403,7 @@ module network './modules/network-dev.bicep' = {
     postgresSubnetPrefix: postgresSubnetPrefix
     appGatewaySubnetPrefix: appGatewaySubnetPrefix
     appGatewayV1SubnetPrefix: appGatewayV1SubnetPrefix
+    apiManagementSubnetPrefix: apiManagementSubnetPrefix
   }
 }
 
@@ -394,6 +446,17 @@ module appEdge './modules/app-edge-dev.bicep' = {
     documentPipelineAlertsEnabled: documentPipelineAlertsEnabled
     appGatewayResourceSuffix: appGatewayResourceSuffix
     deployApplicationGateway: deployApplicationGateway
+    deployApiManagement: deployApiManagement
+    apiManagementSkuName: apiManagementSkuName
+    apiManagementSkuCapacity: apiManagementSkuCapacity
+    apiManagementPublisherName: apiManagementPublisherName
+    apiManagementPublisherEmail: alertEmail
+    apiManagementGatewayHostName: apiManagementGatewayHostName
+    apiManagementVirtualNetworkType: apiManagementVirtualNetworkType
+    apiManagementRateLimitCallsPerMinute: apiManagementRateLimitCallsPerMinute
+    apiManagementQuotaCallsPerHour: apiManagementQuotaCallsPerHour
+    apiManagementMaxRequestSizeBytes: apiManagementMaxRequestSizeBytes
+    apiManagementAllowedCidrs: apiManagementAllowedCidrs
     appGatewaySkuName: appGatewaySkuName
     appGatewaySkuTier: appGatewaySkuTier
     appGatewayInstanceCount: appGatewayInstanceCount
@@ -426,6 +489,7 @@ module appEdge './modules/app-edge-dev.bicep' = {
       : (isModernAppGatewayTier ? network.outputs.appGatewaySubnetId : network.outputs.appGatewayV1SubnetId)
     privateEndpointSubnetId: network.outputs.privateEndpointSubnetId
     appServicePrivateDnsZoneId: network.outputs.appServicePrivateDnsZoneId
+    apiManagementSubnetId: network.outputs.apiManagementSubnetId
     postgresServerName: data.outputs.postgresqlServerName
     redisHostName: data.outputs.redisHostName
     openAiSecretUri: data.outputs.openAiSecretUri
@@ -539,6 +603,8 @@ output appServiceName string = appEdge.outputs.appServiceName
 output appServiceDefaultHostName string = appEdge.outputs.appServiceDefaultHostName
 output appGatewayPublicIpAddress string = appEdge.outputs.appGatewayPublicIpAddress
 output appGatewayPreferredApiUrl string = appEdge.outputs.appGatewayPreferredApiUrl
+output apiManagementName string = appEdge.outputs.apiManagementName
+output apiManagementGatewayUrl string = appEdge.outputs.apiManagementGatewayUrl
 output keyVaultName string = data.outputs.keyVaultName
 output postgresqlServerName string = data.outputs.postgresqlServerName
 output redisCacheName string = data.outputs.redisCacheName
