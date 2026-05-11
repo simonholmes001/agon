@@ -19,6 +19,42 @@ param appGatewayResourceSuffix string = ''
 @description('Deploy Application Gateway resources (gateway, public IP, diagnostics). Disable for low-cost private-only environments.')
 param deployApplicationGateway bool = true
 
+@description('Deploy Azure API Management as the primary API ingress.')
+param deployApiManagement bool = true
+
+@description('API Management service SKU.')
+@allowed([
+  'Consumption'
+  'Developer'
+  'Basic'
+  'Standard'
+  'Premium'
+  'BasicV2'
+  'StandardV2'
+])
+param apiManagementSkuName string = 'Developer'
+
+@description('API Management capacity units (ignored by Consumption SKU).')
+@minValue(0)
+param apiManagementSkuCapacity int = 1
+
+@description('Publisher display name for API Management.')
+param apiManagementPublisherName string = 'Agon Platform'
+
+@description('Publisher contact email for API Management.')
+param apiManagementPublisherEmail string
+
+@description('Public hostname for APIM-backed API endpoint (for example: api-dev.example.com).')
+param apiManagementGatewayHostName string = ''
+
+@description('API Management virtual network mode.')
+@allowed([
+  'External'
+  'Internal'
+  'None'
+])
+param apiManagementVirtualNetworkType string = 'External'
+
 @description('Alert email receiver for action groups.')
 param alertEmail string
 
@@ -64,7 +100,22 @@ param appGatewayAutoscaleMaxCapacity int = 2
 param appGatewayRequestTimeoutSeconds int = 120
 
 @description('Enable JWT bearer authentication in backend API runtime settings.')
-param authEnabled bool = false
+param authEnabled bool = true
+
+@description('APIM per-minute rate limit by caller IP.')
+@minValue(1)
+param apiManagementRateLimitCallsPerMinute int = 120
+
+@description('APIM per-hour quota by caller IP.')
+@minValue(1)
+param apiManagementQuotaCallsPerHour int = 2000
+
+@description('Maximum request payload size (bytes) validated by APIM policy.')
+@minValue(1024)
+param apiManagementMaxRequestSizeBytes int = 4194304
+
+@description('Optional APIM inbound CIDR allowlist. Empty means open ingress to APIM gateway.')
+param apiManagementAllowedCidrs array = []
 
 @description('JWT authority URL for token validation.')
 param jwtAuthority string = ''
@@ -144,6 +195,9 @@ param privateEndpointSubnetId string
 
 @description('Private DNS zone resource ID for App Service private endpoint resolution.')
 param appServicePrivateDnsZoneId string
+
+@description('API Management dedicated subnet resource ID.')
+param apiManagementSubnetId string
 
 @description('PostgreSQL server name (without DNS suffix).')
 param postgresServerName string
@@ -283,6 +337,8 @@ var uniqueSuffix = take(uniqueString(subscription().id, resourceGroup().id, name
 
 var appServicePlanName = 'asp-${namePrefix}'
 var appServiceName = 'app-${namePrefix}-${uniqueSuffix}'
+var apiManagementName = take('apim-${namePrefix}-${uniqueSuffix}', 50)
+var apiManagementApiName = 'agon-api'
 var appInsightsName = 'appi-${namePrefix}'
 var logAnalyticsName = 'log-${namePrefix}'
 var actionGroupName = 'ag-${namePrefix}-ops'
@@ -327,6 +383,35 @@ var appGatewaySku = isLegacyV1Sku
     }
 var appGatewayPublicIpSkuName = isModernAppGatewaySku ? 'Standard' : 'Basic'
 var appGatewayPublicIpAllocationMethod = isModernAppGatewaySku ? 'Static' : 'Dynamic'
+var apiManagementSku = apiManagementSkuName == 'Consumption'
+  ? {
+      name: apiManagementSkuName
+    }
+  : {
+      name: apiManagementSkuName
+      capacity: apiManagementSkuCapacity
+    }
+var hasApiManagementGatewayHostName = !empty(apiManagementGatewayHostName)
+var appServicePublicNetworkAccess = 'Disabled'
+var validatedApiManagementAllowedCidrs = deployApiManagement
+  ? (!empty(apiManagementAllowedCidrs)
+      ? apiManagementAllowedCidrs
+      : fail('apiManagementAllowedCidrs must contain at least one CIDR when deployApiManagement=true.'))
+  : []
+var apimAllowedCidrsEntries = [for cidr in validatedApiManagementAllowedCidrs: '<address>${string(cidr)}</address>']
+var apimAllowedCidrsPolicyXml = '<ip-filter action="allow">${join(apimAllowedCidrsEntries, '')}</ip-filter>'
+var apimValidateJwtPolicyXml = authEnabled && !empty(jwtAuthority) && !empty(jwtAudience)
+  ? '<validate-jwt header-name="Authorization" require-scheme="Bearer" require-expiration-time="true" require-signed-tokens="true"><openid-config url="${jwtAuthority}/.well-known/openid-configuration" /><audiences><audience>${jwtAudience}</audience></audiences></validate-jwt>'
+  : ''
+var apiManagementApiPolicyXml = '<policies><inbound><base />${apimAllowedCidrsPolicyXml}${apimValidateJwtPolicyXml}<choose><when condition="@(context.Request.Headers.ContainsKey(&quot;Content-Length&quot;) && long.Parse(context.Request.Headers.GetValueOrDefault(&quot;Content-Length&quot;,&quot;0&quot;)) &gt; ${string(apiManagementMaxRequestSizeBytes)})"><return-response><set-status code="413" reason="Payload Too Large" /></return-response></when></choose><rate-limit-by-key calls="${string(apiManagementRateLimitCallsPerMinute)}" renewal-period="60" counter-key="@(context.Request.IpAddress)" /><quota-by-key calls="${string(apiManagementQuotaCallsPerHour)}" renewal-period="3600" counter-key="@(context.Request.IpAddress)" /><choose><when condition="@(context.Request.Method != &quot;GET&quot; &amp;&amp; context.Request.Method != &quot;POST&quot; &amp;&amp; context.Request.Method != &quot;PUT&quot; &amp;&amp; context.Request.Method != &quot;PATCH&quot; &amp;&amp; context.Request.Method != &quot;DELETE&quot; &amp;&amp; context.Request.Method != &quot;OPTIONS&quot;)"><return-response><set-status code="405" reason="Method Not Allowed" /></return-response></when></choose></inbound><backend><base /></backend><outbound><base /></outbound><on-error><base /></on-error></policies>'
+var apimCatchAllMethods = [
+  'GET'
+  'POST'
+  'PUT'
+  'PATCH'
+  'DELETE'
+  'OPTIONS'
+]
 var frontendPorts = enableHttpsListener
   ? [
       {
@@ -526,7 +611,7 @@ resource appService 'Microsoft.Web/sites@2023-12-01' = {
   properties: {
     serverFarmId: appServicePlan.id
     httpsOnly: true
-    publicNetworkAccess: 'Disabled'
+    publicNetworkAccess: appServicePublicNetworkAccess
     virtualNetworkSubnetId: appSubnetId
     siteConfig: {
       ftpsState: 'Disabled'
@@ -787,6 +872,86 @@ resource appService 'Microsoft.Web/sites@2023-12-01' = {
         }
       ]
     }
+  }
+}
+
+resource apiManagement 'Microsoft.ApiManagement/service@2023-09-01-preview' = if (deployApiManagement) {
+  name: apiManagementName
+  location: location
+  tags: tags
+  sku: apiManagementSku
+  identity: {
+    type: 'SystemAssigned'
+  }
+  properties: {
+    publisherEmail: apiManagementPublisherEmail
+    publisherName: apiManagementPublisherName
+    publicNetworkAccess: 'Enabled'
+    virtualNetworkType: apiManagementVirtualNetworkType
+    virtualNetworkConfiguration: apiManagementVirtualNetworkType == 'None'
+      ? null
+      : {
+          subnetResourceId: apiManagementSubnetId
+        }
+  }
+}
+
+resource apiManagementApi 'Microsoft.ApiManagement/service/apis@2023-09-01-preview' = if (deployApiManagement) {
+  name: apiManagementApiName
+  parent: apiManagement
+  properties: {
+    displayName: 'Agon API'
+    path: 'api'
+    protocols: [
+      'https'
+    ]
+    serviceUrl: 'https://${appService.properties.defaultHostName}'
+    subscriptionRequired: false
+  }
+}
+
+resource apiManagementApiCatchAllOperations 'Microsoft.ApiManagement/service/apis/operations@2023-09-01-preview' = [for method in apimCatchAllMethods: if (deployApiManagement) {
+  name: toLower(method)
+  parent: apiManagementApi
+  properties: {
+    displayName: '${method} Catch-all'
+    method: method
+    urlTemplate: '/*'
+    responses: [
+      {
+        statusCode: 200
+        description: 'Proxied'
+      }
+    ]
+  }
+}]
+
+resource apiManagementApiPolicy 'Microsoft.ApiManagement/service/apis/policies@2023-09-01-preview' = if (deployApiManagement) {
+  name: 'policy'
+  parent: apiManagementApi
+  properties: {
+    format: 'rawxml'
+    value: apiManagementApiPolicyXml
+  }
+}
+
+resource apiManagementDiagnosticSettings 'Microsoft.Insights/diagnosticSettings@2021-05-01-preview' = if (deployApiManagement) {
+  name: 'diag-${apiManagementName}'
+  scope: apiManagement
+  properties: {
+    workspaceId: logAnalytics.id
+    logs: [
+      {
+        categoryGroup: 'allLogs'
+        enabled: true
+      }
+    ]
+    metrics: [
+      {
+        category: 'AllMetrics'
+        enabled: true
+      }
+    ]
   }
 }
 
@@ -1101,10 +1266,20 @@ resource chunkLoopLatencyAlert 'Microsoft.Insights/scheduledQueryRules@2022-06-1
 output appServiceName string = appService.name
 output appServiceDefaultHostName string = appService.properties.defaultHostName
 output appPrincipalId string = appService.identity.principalId
+output apiManagementName string = deployApiManagement ? apiManagement.name : ''
+output apiManagementGatewayUrl string = deployApiManagement
+  ? (hasApiManagementGatewayHostName
+      ? 'https://${apiManagementGatewayHostName}'
+      : 'https://${apiManagement!.properties.gatewayUrl}')
+  : ''
 output appGatewayName string = deployApplicationGateway ? appGateway.name : ''
 output appGatewayPublicIpAddress string = deployApplicationGateway ? appGatewayPublicIp!.properties.ipAddress : ''
-output appGatewayPreferredApiUrl string = deployApplicationGateway
+output appGatewayPreferredApiUrl string = deployApiManagement
+  ? (hasApiManagementGatewayHostName
+      ? 'https://${apiManagementGatewayHostName}'
+      : 'https://${apiManagement!.properties.gatewayUrl}')
+  : (deployApplicationGateway
   ? (enableHttpsListener && hasPublicHostName
       ? 'https://${appGatewayPublicHostName}'
       : 'http://${appGatewayPublicIp!.properties.ipAddress}')
-  : ''
+  : '')

@@ -32,11 +32,46 @@
     "appGatewayV1SubnetPrefix": {
       "value": "10.42.5.0/24"
     },
+    "apiManagementSubnetPrefix": {
+      "value": "10.42.6.0/24"
+    },
     "appGatewayResourceSuffix": {
       "value": ""
     },
     "deployApplicationGateway": {
+      "value": false
+    },
+    "deployApiManagement": {
       "value": true
+    },
+    "apiManagementSkuName": {
+      "value": "Developer"
+    },
+    "apiManagementSkuCapacity": {
+      "value": 1
+    },
+    "apiManagementPublisherName": {
+      "value": "Agon Platform"
+    },
+    "apiManagementGatewayHostName": {
+      "value": "api-dev.agon-agents.org"
+    },
+    "apiManagementVirtualNetworkType": {
+      "value": "External"
+    },
+    "apiManagementRateLimitCallsPerMinute": {
+      "value": 120
+    },
+    "apiManagementQuotaCallsPerHour": {
+      "value": 2000
+    },
+    "apiManagementMaxRequestSizeBytes": {
+      "value": 4194304
+    },
+    "apiManagementAllowedCidrs": {
+      "value": [
+        "0.0.0.0/0"
+      ]
     },
     "appGatewaySkuName": {
       "value": "Standard_v2"

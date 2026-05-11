@@ -312,7 +312,7 @@ jobs:
               --resource-group "${{ steps.app.outputs.app_resource_group }}" \
               --name "${{ steps.app.outputs.app_name }}"
 
-      - name: Verify health through Application Gateway
+      - name: Verify health through APIM edge
         if: steps.guard.outputs.deploy == 'true'
         uses: azure/cli@9f7ce6f37c31b777ec6c6b6d1dfe7db79f497956 # v2.2.0
         env:
@@ -321,58 +321,41 @@ jobs:
           inlineScript: |
             set -euo pipefail
             APP_RG="${{ steps.app.outputs.app_resource_group }}"
-            HEALTH_URL=""
-            if [ -n "${AGON_API_HOSTNAME:-}" ]; then
-              HEALTH_URL="https://${AGON_API_HOSTNAME}/health"
-              echo "Checking health over HTTPS host endpoint: ${HEALTH_URL}"
-            else
-              echo "::warning::AGON_API_HOSTNAME secret not set. Falling back to legacy HTTP IP health check."
-              AGW_NAME=$(az network application-gateway list \
+            APIM_NAME=$(az apim list \
+              --resource-group "${APP_RG}" \
+              --query "[?tags.environment=='dev' && tags.workload=='agon'].name | [0]" \
+              --output tsv)
+
+            if [ -z "${APIM_NAME}" ] || [ "${APIM_NAME}" = "null" ]; then
+              APIM_NAME=$(az apim list \
                 --resource-group "${APP_RG}" \
-                --query "[?tags.environment=='dev' && tags.workload=='agon'].name | [0]" \
+                --query "[?starts_with(name, 'apim-agon-dev-')].name | [0]" \
                 --output tsv)
-
-              if [ -z "${AGW_NAME}" ] || [ "${AGW_NAME}" = "null" ]; then
-                AGW_NAME=$(az network application-gateway list \
-                  --resource-group "${APP_RG}" \
-                  --query "[?starts_with(name, 'agw-agon-dev-')].name | [0]" \
-                  --output tsv)
-              fi
-
-              if [ -z "${AGW_NAME}" ] || [ "${AGW_NAME}" = "null" ]; then
-                echo "Failed to resolve Application Gateway in ${APP_RG}."
-                exit 1
-              fi
-
-              AGW_PIP_ID=$(az network application-gateway show \
-                --resource-group "${APP_RG}" \
-                --name "${AGW_NAME}" \
-                --query "frontendIPConfigurations[0].publicIPAddress.id" \
-                --output tsv)
-
-              if [ -z "${AGW_PIP_ID}" ] || [ "${AGW_PIP_ID}" = "null" ]; then
-                echo "Failed to resolve Application Gateway public IP reference."
-                exit 1
-              fi
-
-              AGW_IP=$(az network public-ip show \
-                --ids "${AGW_PIP_ID}" \
-                --query ipAddress \
-                --output tsv)
-
-              if [ -z "${AGW_IP}" ] || [ "${AGW_IP}" = "null" ]; then
-                echo "Failed to resolve Application Gateway public IP."
-                exit 1
-              fi
-
-              HEALTH_URL="http://${AGW_IP}/health"
-              echo "Checking health at ${HEALTH_URL}"
             fi
+
+            if [ -z "${APIM_NAME}" ] || [ "${APIM_NAME}" = "null" ]; then
+              echo "::error::Unable to resolve APIM service in ${APP_RG}."
+              exit 1
+            fi
+
+            APIM_GATEWAY_URL=$(az apim show \
+              --resource-group "${APP_RG}" \
+              --name "${APIM_NAME}" \
+              --query "gatewayUrl" \
+              --output tsv)
+
+            if [ -z "${APIM_GATEWAY_URL}" ] || [ "${APIM_GATEWAY_URL}" = "null" ]; then
+              echo "::error::APIM gatewayUrl is unavailable for ${APIM_NAME}."
+              exit 1
+            fi
+
+            HEALTH_URL="${APIM_GATEWAY_URL%/}/api/health"
+            echo "Checking APIM health endpoint: ${HEALTH_URL}"
 
             for i in {1..30}; do
               STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${HEALTH_URL}" || true)
               if [ "${STATUS}" = "200" ]; then
-                echo "Backend is healthy via Application Gateway."
+                echo "Backend is healthy via configured edge endpoint."
                 break
               fi
               echo "Attempt ${i}/30: status=${STATUS}, waiting..."
@@ -380,37 +363,6 @@ jobs:
             done
 
             if [ "${STATUS}" != "200" ]; then
-              echo "Backend failed health check through Application Gateway."
+              echo "Backend failed health check through configured edge endpoint."
               exit 1
-            fi
-
-            if [ -n "${AGON_API_HOSTNAME:-}" ]; then
-              HTTP_HEALTH_URL="http://${AGON_API_HOSTNAME}/health"
-              EXPECTED_REDIRECT_PREFIX="https://${AGON_API_HOSTNAME}/"
-              echo "Validating HTTP to HTTPS redirect behavior at ${HTTP_HEALTH_URL}"
-
-              REDIRECT_OK="false"
-              for i in {1..15}; do
-                RESPONSE=$(curl -s -o /dev/null -w "%{http_code} %{redirect_url}" "${HTTP_HEALTH_URL}" || true)
-                REDIRECT_STATUS="${RESPONSE%% *}"
-                if [ "${RESPONSE}" = "${REDIRECT_STATUS}" ]; then
-                  REDIRECT_URL=""
-                else
-                  REDIRECT_URL="${RESPONSE#* }"
-                fi
-
-                if [[ "${REDIRECT_STATUS}" =~ ^30[1278]$ ]] && [[ "${REDIRECT_URL}" == ${EXPECTED_REDIRECT_PREFIX}* ]]; then
-                  REDIRECT_OK="true"
-                  echo "HTTP redirect verified: ${REDIRECT_STATUS} -> ${REDIRECT_URL}"
-                  break
-                fi
-
-                echo "Redirect attempt ${i}/15: status=${REDIRECT_STATUS}, location=${REDIRECT_URL}"
-                sleep 10
-              done
-
-              if [ "${REDIRECT_OK}" != "true" ]; then
-                echo "HTTP to HTTPS redirect validation failed for ${HTTP_HEALTH_URL}."
-                exit 1
-              fi
             fi

@@ -30,6 +30,9 @@ param appGatewaySubnetPrefix string
 @description('Application Gateway dedicated subnet prefix for Basic/legacy (v1 family) SKUs.')
 param appGatewayV1SubnetPrefix string
 
+@description('API Management dedicated subnet prefix.')
+param apiManagementSubnetPrefix string
+
 var tags = {
   environment: environment
   workload: workloadName
@@ -42,6 +45,7 @@ var privateEndpointSubnetName = 'snet-${namePrefix}-pep'
 var postgresSubnetName = 'snet-${namePrefix}-psql'
 var appGatewaySubnetName = 'snet-${namePrefix}-agw'
 var appGatewayV1SubnetName = 'snet-${namePrefix}-agw-v1'
+var apiManagementSubnetName = 'snet-${namePrefix}-apim'
 
 var keyVaultPrivateDnsZoneName = 'privatelink.vaultcore.azure.net'
 var redisPrivateDnsZoneName = 'privatelink.redis.cache.windows.net'
@@ -108,6 +112,12 @@ resource vnet 'Microsoft.Network/virtualNetworks@2023-11-01' = {
           addressPrefix: appGatewayV1SubnetPrefix
         }
       }
+      {
+        name: apiManagementSubnetName
+        properties: {
+          addressPrefix: apiManagementSubnetPrefix
+        }
+      }
     ]
   }
 }
@@ -135,6 +145,11 @@ resource appGatewaySubnet 'Microsoft.Network/virtualNetworks/subnets@2023-11-01'
 resource appGatewayV1Subnet 'Microsoft.Network/virtualNetworks/subnets@2023-11-01' existing = {
   parent: vnet
   name: appGatewayV1SubnetName
+}
+
+resource apiManagementSubnet 'Microsoft.Network/virtualNetworks/subnets@2023-11-01' existing = {
+  parent: vnet
+  name: apiManagementSubnetName
 }
 
 resource keyVaultPrivateDnsZone 'Microsoft.Network/privateDnsZones@2020-06-01' = {
@@ -251,6 +266,7 @@ output privateEndpointSubnetId string = privateEndpointSubnet.id
 output postgresSubnetId string = postgresSubnet.id
 output appGatewaySubnetId string = appGatewaySubnet.id
 output appGatewayV1SubnetId string = appGatewayV1Subnet.id
+output apiManagementSubnetId string = apiManagementSubnet.id
 output keyVaultPrivateDnsZoneId string = keyVaultPrivateDnsZone.id
 output redisPrivateDnsZoneId string = redisPrivateDnsZone.id
 output postgresPrivateDnsZoneId string = postgresPrivateDnsZone.id
