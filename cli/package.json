@@ -58,7 +58,7 @@
     "cosmiconfig": "^9.0.0",
     "eventsource": "^4.1.0",
     "ink": "^7.0.1",
-    "inquirer": "^13.4.2",
+    "inquirer": "^13.4.3",
     "marked": "^18.0.3",
     "ora": "^9.4.0",
     "react": "^19.2.4",
